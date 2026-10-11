@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.46.1](https://github.com/mrrCarter/create-sentinelayer/compare/v0.46.0...v0.46.1) (2026-10-11)
+
+
+### Bug Fixes
+
+* **agents:** keep agent ids to one path entry under their directory ([f5710b9](https://github.com/mrrCarter/create-sentinelayer/commit/f5710b984a39fd7c0f9376d8ade79b2a3adc2ce1))
+* **gh:** validate repository, ref and sha values in gh api paths ([1edcc85](https://github.com/mrrCarter/create-sentinelayer/commit/1edcc85025eef89846b30405afb30517bb6eedbb))
+* **net:** encode ids inside the URL builders; check ids before the breaker ([994a535](https://github.com/mrrCarter/create-sentinelayer/commit/994a5354dfb34192f8f4853880baead347abf849))
+* **net:** validate id path segments in API URLs ([8f891c2](https://github.com/mrrCarter/create-sentinelayer/commit/8f891c20b7eb8d9fbdf016b1ae2cf13e0066a712))
+* **session:** keep session ids to one path segment under the sessions root ([6b8986f](https://github.com/mrrCarter/create-sentinelayer/commit/6b8986f38e4b081c10173f2b611d1321e235bee3))
+
 ## [0.46.0](https://github.com/mrrCarter/create-sentinelayer/compare/v0.45.0...v0.46.0) (2026-10-10)
 
 
