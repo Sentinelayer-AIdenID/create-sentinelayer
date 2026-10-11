@@ -5515,11 +5515,29 @@ export function registerSessionCommand(program) {
           );
         }
         if (existingListener.running && options.force) {
-          const stopMatchesResult = await stopMatchingListenerProcesses(normalizedSessionId, agentId);
+          // --force never stops a process this command runs under, and never on a guess:
+          // it refuses, and stops and starts nothing, unless the takeover scan confirms
+          // what it stops.
+          const refuseTakeover = ({ pid, reason }) =>
+            new Error(
+              reason === "ancestor_listener"
+                ? `A session listener is already running for session ${normalizedSessionId} as ${agentId} (pid ${pid}), and this command runs under it, so --force will not stop it. No listener was stopped or started. Stop that listener first, or use --allow-duplicate if you intentionally need more than one.`
+                : `Could not confirm that pid ${pid} is a session listener --force can replace for session ${normalizedSessionId} as ${agentId} (${reason}). No listener was stopped or started. Run the command again, or use --allow-duplicate to start without this check (it can then run alongside an existing listener).`,
+            );
+          if (existingListener.ancestor) {
+            throw refuseTakeover({ pid: existingListener.pid, reason: "ancestor_listener" });
+          }
+          const stopMatchesResult = await stopMatchingListenerProcesses(normalizedSessionId, agentId, {
+            listener: existingListener,
+          });
+          if (stopMatchesResult.ok && stopMatchesResult.refused) {
+            throw refuseTakeover(stopMatchesResult.refused);
+          }
           if (!stopMatchesResult.ok) {
-            // The listener being replaced is known (a verified pid record or a scan moments
-            // ago), so stopping it and starting this one never adds a listener. Only the
-            // cleanup of extra copies is skipped, and that is said rather than assumed.
+            // The listener being replaced is known (a pid record or a listener, confirmed on a
+            // full scan moments ago), so stopping it and starting this one never adds a
+            // listener. Only the cleanup of extra copies is skipped, and that is said rather
+            // than assumed.
             console.error(
               pc.yellow(
                 `The local process check did not complete (${stopMatchesResult.reason}); replacing listener pid ${existingListener.pid} only. Other copies of this listener, if any, were not checked.`,
@@ -5527,13 +5545,11 @@ export function registerSessionCommand(program) {
             );
           }
           const scannedStops = stopMatchesResult.ok ? stopMatchesResult.results : [];
-          const stoppedPids = new Set(
-            scannedStops
-              .filter((result) => result.stopped)
-              .map((result) => Number(result.pid)),
-          );
           let explicitStopResult = null;
-          if (existingListener.pid && !stoppedPids.has(Number(existingListener.pid))) {
+          // Only when the takeover scan could not be read: a scan that was read has judged this
+          // pid itself. The status check confirmed it on a full scan moments ago as outside this
+          // command's parent chain, and a running process cannot join that chain later.
+          if (!stopMatchesResult.ok && existingListener.pid) {
             explicitStopResult = await requestListenerProcessStop(existingListener.pid);
           }
           const failedStops = [

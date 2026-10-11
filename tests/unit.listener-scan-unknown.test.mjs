@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import os from "node:os";
 import path from "node:path";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 
 import { Command } from "commander";
 
@@ -17,11 +17,10 @@ import {
   listMatchingListenerProcesses,
   listenerAncestorPids,
   listenerCommandLineMatches,
+  listenerProcessKind,
+  pidRecordHolder,
   readGlobalListenerPidRecord,
   readListenerPidRecord,
-  readProcessStartTime,
-  resolveGlobalListenerPidPath,
-  resolveListenerPidPath,
   setListenerProcessProbesForTests,
   stopMatchingListenerProcesses,
   summarizeLocalListenerProcesses,
@@ -326,7 +325,12 @@ test("Listener scan unknown: --force replaces a verified tracked listener one-fo
   const sessionId = "scan-unknown-force-tracked";
   const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
   const exited = once(child, "exit", { signal: AbortSignal.timeout(30_000) });
-  const scan = scriptedScan([scanTimeoutError()]);
+  // The status check's scan confirms the record (its process started before the record was
+  // written); the takeover's scan then fails.
+  const confirming = [
+    { pid: child.pid, ppid: OUTSIDE_PID, startedAtMs: Date.now() - 60_000, commandLine: listenerCommandLine({ sessionId }) },
+  ];
+  const scan = scriptedScan([confirming, scanTimeoutError()]);
   const probes = {
     listProcesses: scan.listProcesses,
     readCommandLine: async () => listenerCommandLine({ sessionId }),
@@ -341,8 +345,8 @@ test("Listener scan unknown: --force replaces a verified tracked listener one-fo
 
       const { stderr } = await runSessionCommand(listenArgs(sessionId, tempRoot, ["--force"]));
 
-      // The verified record answered the status check; only the takeover scan ran, and failed.
-      assert.deepEqual(scan.timeouts, [LISTENER_PROCESS_SCAN_TIMEOUT_MS]);
+      // One scan confirmed the record for the status check; the takeover scan failed.
+      assert.deepEqual(scan.timeouts, [LISTENER_PROCESS_SCAN_TIMEOUT_MS, LISTENER_PROCESS_SCAN_TIMEOUT_MS]);
       assert.match(
         stderr,
         new RegExp(`did not complete \\(process_scan_timeout\\); replacing listener pid ${child.pid} only`),
@@ -403,23 +407,33 @@ test("Listener scan unknown: status is unknown, never not-running, when the scan
     assert.equal(staleRecord.running, null);
     assert.equal(staleRecord.record.listenerId, "listener-codex-dead");
 
-    // A live record whose command line matches is certain, so no scan is needed.
+    // A live record whose command line matches counts once one scan confirms its process
+    // started before the record was written. Without that scan it is unknown too.
     await writeListenerPidRecord(sessionId, "Codex", {
       targetPath: tempRoot,
       homeDir: tempRoot,
       pid: process.pid,
       listenerId: "listener-codex-live",
     });
-    const unusedScan = scriptedScan([scanTimeoutError()]);
+    const confirmingScan = scriptedScan([[{ pid: process.pid, startedAtMs: Date.now() - 60_000 }]]);
     const tracked = await getListenerProcessStatus(sessionId, "Codex", {
       targetPath: tempRoot,
       homeDir: tempRoot,
       _readProcessCommandLine: async () => listenerCommandLine({ sessionId }),
-      _listProcesses: unusedScan.listProcesses,
+      _listProcesses: confirmingScan.listProcesses,
     });
     assert.equal(tracked.state, "running");
     assert.equal(tracked.pid, process.pid);
-    assert.deepEqual(unusedScan.timeouts, []);
+    assert.deepEqual(confirmingScan.timeouts, [LISTENER_PROCESS_SCAN_TIMEOUT_MS]);
+    const trackedUnread = await getListenerProcessStatus(sessionId, "Codex", {
+      targetPath: tempRoot,
+      homeDir: tempRoot,
+      _readProcessCommandLine: async () => listenerCommandLine({ sessionId }),
+      _listProcesses: scriptedScan([scanTimeoutError()]).listProcesses,
+    });
+    assert.equal(trackedUnread.state, "unknown");
+    assert.equal(trackedUnread.reason, "process_scan_timeout");
+    assert.equal(trackedUnread.record.listenerId, "listener-codex-live");
 
     // A live record that cannot be verified falls back to the scan, and so is unknown too.
     const unverified = await getListenerProcessStatus(sessionId, "Codex", {
@@ -505,12 +519,24 @@ test("Listener scan unknown: session listeners reports local processes as unknow
   });
 });
 
-// --- The checking process's own launchers ---------------------------------------------------
+
+// --- The checking process's own ancestors -------------------------------------------------
 
 // The listen command a launcher carries in full: `bash -c "<it>"`, `nohup <it>`, and so on.
 // A flag follows the agent, as in a real launch, so its value does not take in a closing quote.
 function fullListenCommand(sessionId, agentId = "Codex") {
   return `node /opt/tools/sl/bin/sl.js session listen --session ${sessionId} --agent ${agentId} --interval 60`;
+}
+
+// node started on the CLI's entry script, as a real listener's command line reads.
+function nodeListenerCommandLine(sessionId, agentId = "Codex") {
+  return `"${process.execPath}" /opt/tools/sl/bin/sl.js session listen --session ${sessionId} --agent ${agentId} --interval 60`;
+}
+
+// A command line whose first word names no executable, so it cannot tell a launcher from a
+// listener (listenerProcessKind "unknown") on any platform.
+function unnamedExecutableCommandLine(sessionId, agentId = "Codex") {
+  return `/opt/tools/ /opt/tools/sl/bin/sl.js session listen --session ${sessionId} --agent ${agentId} --interval 60`;
 }
 
 // A pid no row in these tables has, standing for a parent outside the table.
@@ -537,7 +563,7 @@ function isRunning(idle) {
 }
 
 // This process as a launch chain leaves it: started by `parent`, which `grandparent` started,
-// both carrying the full listen command, each created before its child.
+// both launchers carrying the full listen command, each created before its child.
 function launchedCheckerRows({ sessionId, parent, grandparent, now }) {
   const listen = fullListenCommand(sessionId);
   return [
@@ -554,14 +580,53 @@ function launchedCheckerRows({ sessionId, parent, grandparent, now }) {
 
 test("Listener ancestors: the launchers in the table are the shapes the pattern matches", () => {
   const rows = launchedCheckerRows({ sessionId: "s-1", parent: 11, grandparent: 12, now: 1 });
-  for (const row of rows) {
+  const shapes = [
+    ...rows.map((row) => row.commandLine),
+    nodeListenerCommandLine("s-1"),
+    unnamedExecutableCommandLine("s-1"),
+  ];
+  for (const commandLine of shapes) {
     for (const platform of ["win32", "linux", "darwin"]) {
       assert.equal(
-        listenerCommandLineMatches(row.commandLine, { sessionId: "s-1", agentId: "Codex", platform }),
+        listenerCommandLineMatches(commandLine, { sessionId: "s-1", agentId: "Codex", platform }),
         true,
-        `${platform}: ${row.commandLine}`,
+        `${platform}: ${commandLine}`,
       );
     }
+  }
+});
+
+test("Listener ancestors: a launcher is told from a listener by its executable and node's script", () => {
+  const listen = "session listen --session s-1 --agent codex --interval 60";
+  const kind = (commandLine, platform, name = "") => listenerProcessKind({ commandLine, name }, { platform });
+  // Launchers: the listen command is text in their arguments.
+  for (const platform of ["win32", "linux", "darwin"]) {
+    assert.equal(kind(`/usr/bin/bash -c "node /opt/sl/bin/sl.js ${listen}"`, platform), "wrapper", platform);
+    assert.equal(kind(`sh -c "node /opt/sl/bin/sl.js ${listen}"`, platform), "wrapper", platform);
+    assert.equal(kind(`nohup node /opt/sl/bin/sl.js ${listen}`, platform), "wrapper", platform);
+    assert.equal(kind(`timeout 600 node /opt/sl/bin/sl.js ${listen}`, platform), "wrapper", platform);
+    assert.equal(kind(`node -e "require('child_process')" /opt/sl/bin/sl.js ${listen}`, platform), "wrapper", platform);
+  }
+  // Windows rows come from Win32_Process: Name is the executable, and double quotes group.
+  const win = (commandLine, name) => kind(commandLine, "win32", name);
+  assert.equal(win(String.raw`"C:\Program Files\Git\usr\bin\bash.exe" -c "node C:/sl/bin/sl.js ${listen}"`, "bash.exe"), "wrapper");
+  assert.equal(win(String.raw`C:\Windows\system32\cmd.exe /d /s /c "node C:\sl\bin\sl.js ${listen}"`, "cmd.exe"), "wrapper");
+  assert.equal(win(String.raw`powershell.exe -NoProfile -Command "node C:\sl\bin\sl.js ${listen}"`, "powershell.exe"), "wrapper");
+  assert.equal(win(String.raw`"C:\Program Files\nodejs\node.exe" C:\tools\wrapper.js C:\sl\bin\sl.js ${listen}`, "node.exe"), "wrapper");
+  assert.equal(win(String.raw`"C:\Program Files\nodejs\node.exe" "C:\Program Files\nodejs\node_modules\sentinelayer-cli\bin\sl.js" ${listen}`, "node.exe"), "listener");
+  assert.equal(win(String.raw`"C:\Program Files\nodejs\node.exe" --import ./setup.mjs H:/create-sentinelayer/bin/create-sentinelayer.js ${listen}`, "node.exe"), "listener");
+  // The executable is the one Windows ran, whatever the command line's first word says.
+  assert.equal(win(String.raw`node C:\sl\bin\sl.js ${listen}`, "bash.exe"), "wrapper");
+  // POSIX rows come from ps: the first argument is the executable, and nothing is quoted.
+  assert.equal(kind(`/usr/local/bin/node /usr/local/lib/node_modules/sentinelayer-cli/bin/sl.js ${listen}`, "linux"), "listener");
+  assert.equal(kind(`node /usr/local/bin/sl ${listen}`, "darwin"), "listener");
+  assert.equal(kind(`node --require /opt/hook.js /opt/sl/bin/sl.js ${listen}`, "linux"), "listener");
+  // A script path with a space reads as two arguments there, so node's script cannot be told.
+  assert.equal(kind(`node /home/dev/my fork/bin/sl.js ${listen}`, "linux"), "unknown");
+  assert.equal(kind(`node /opt/tools/wrapper.js /opt/sl/bin/sl.js ${listen}`, "darwin"), "unknown");
+  // No executable named at all.
+  for (const platform of ["win32", "linux", "darwin"]) {
+    assert.equal(kind(unnamedExecutableCommandLine("s-1"), platform), "unknown", platform);
   }
 });
 
@@ -596,6 +661,40 @@ for (const force of [false, true]) {
       assert.deepEqual(summary.agents[0].pids, []);
     } finally {
       await stopIdles(idles);
+    }
+  });
+}
+
+for (const force of [false, true]) {
+  test(`Listener ancestors: a launcher above a parent that is not this CLI is still found and not counted${force ? ", and --force does not stop it" : ""}`, LISTEN_TEST, async () => {
+    const sessionId = `ancestors-native-parent-${force ? "force" : "plain"}`;
+    const grandparent = await spawnIdle();
+    const nativeParentPid = process.pid + 300_000;
+    try {
+      const now = Date.now();
+      const rows = [
+        { pid: process.pid, ppid: nativeParentPid, startedAtMs: now, commandLine: listenerCommandLine({ sessionId }) },
+        // As the Windows scan gives a process that names no CLI entry: no command line.
+        { pid: nativeParentPid, ppid: grandparent.pid, startedAtMs: now - 1_000, name: "cmd.exe", commandLine: null },
+        {
+          pid: grandparent.pid,
+          ppid: OUTSIDE_PID,
+          startedAtMs: now - 2_000,
+          commandLine: `/usr/bin/bash -c "${fullListenCommand(sessionId)}"`,
+        },
+      ];
+      const matches = await listMatchingListenerProcesses(sessionId, "Codex", { _listProcesses: async () => rows });
+      assert.deepEqual(matches.matches, []);
+
+      const scan = scriptedScan([rows]);
+      await withListenHarness({ probes: { listProcesses: scan.listProcesses } }, async ({ tempRoot, api }) => {
+        await runSessionCommand(listenArgs(sessionId, tempRoot, force ? ["--force"] : []));
+        assert.deepEqual(scan.timeouts, [LISTENER_PROCESS_SCAN_TIMEOUT_MS]);
+        assert.equal(api.calls.filter((call) => call.method === "GET").length, 1);
+      });
+      assert.equal(isRunning(grandparent), true, "the grandparent was stopped");
+    } finally {
+      await stopIdles([grandparent]);
     }
   });
 }
@@ -648,7 +747,78 @@ for (const force of [false, true]) {
   });
 }
 
-test("Listener ancestors: a recorded parent created after its child holds a reused pid and is still a duplicate", LISTEN_TEST, async () => {
+for (const force of [false, true]) {
+  test(`Listener ancestors: a listener this process runs under is a duplicate, so it refuses${force ? ", and --force refuses rather than stop it" : ""}`, LISTEN_TEST, async () => {
+    const sessionId = `ancestors-listener-above-${force ? "force" : "plain"}`;
+    const idles = [await spawnIdle(), await spawnIdle()];
+    const [shell, listenerAbove] = idles;
+    try {
+      const now = Date.now();
+      const rows = [
+        { pid: process.pid, ppid: shell.pid, startedAtMs: now, commandLine: listenerCommandLine({ sessionId }) },
+        // A shell carrying the command: a launcher.
+        { pid: shell.pid, ppid: listenerAbove.pid, startedAtMs: now - 1_000, commandLine: `/usr/bin/bash -c "${fullListenCommand(sessionId)}"` },
+        // node started on the CLI's entry script with this listen command: a listener.
+        { pid: listenerAbove.pid, ppid: OUTSIDE_PID, startedAtMs: now - 2_000, commandLine: nodeListenerCommandLine(sessionId) },
+      ];
+      const matches = await listMatchingListenerProcesses(sessionId, "Codex", { _listProcesses: async () => rows });
+      assert.deepEqual(matches.matches.map((match) => [match.pid, match.ancestor]), [[listenerAbove.pid, true]]);
+
+      // With --force the takeover's own scan fails, so only the status check stands between
+      // --force and the ancestor.
+      const scan = scriptedScan(force ? [rows, scanTimeoutError()] : [rows]);
+      await withListenHarness({ probes: { listProcesses: scan.listProcesses } }, async ({ tempRoot, api }) => {
+        await assert.rejects(
+          runSessionCommand(listenArgs(sessionId, tempRoot, force ? ["--force"] : [])),
+          force
+            ? new RegExp(`\\(pid ${listenerAbove.pid}\\), and this command runs under it, so --force will not stop it\\. No listener was stopped or started\\.`)
+            : new RegExp(`already running for session ${sessionId} as codex \\(pid ${listenerAbove.pid}\\)`),
+        );
+        assert.deepEqual(scan.timeouts, [LISTENER_PROCESS_SCAN_TIMEOUT_MS]);
+        assert.deepEqual(api.calls, []);
+        await assertNoPidRecords(sessionId, tempRoot);
+      });
+      assert.equal(isRunning(listenerAbove), true, "the listener above was stopped");
+      assert.equal(isRunning(shell), true, "the shell was stopped");
+    } finally {
+      await stopIdles(idles);
+    }
+  });
+}
+
+for (const force of [false, true]) {
+  test(`Listener ancestors: an ancestor that cannot be told from a listener makes the answer unknown, so it refuses${force ? ", and --force stops nothing" : ""}`, LISTEN_TEST, async () => {
+    const sessionId = `ancestors-unknown-kind-${force ? "force" : "plain"}`;
+    const above = await spawnIdle();
+    try {
+      const now = Date.now();
+      const rows = [
+        { pid: process.pid, ppid: above.pid, startedAtMs: now, commandLine: listenerCommandLine({ sessionId }) },
+        { pid: above.pid, ppid: OUTSIDE_PID, startedAtMs: now - 1_000, commandLine: unnamedExecutableCommandLine(sessionId) },
+      ];
+      const scan = scriptedScan([rows]);
+      await withListenHarness({ probes: { listProcesses: scan.listProcesses } }, async ({ tempRoot, api }) => {
+        await assert.rejects(
+          runSessionCommand(listenArgs(sessionId, tempRoot, force ? ["--force"] : [])),
+          (error) => {
+            assert.match(error.message, /^Could not confirm whether a session listener is already running/);
+            assert.ok(error.message.includes("(ancestor_unconfirmed)"), error.message);
+            assert.match(error.message, /No listener was started\./);
+            return true;
+          },
+        );
+        assert.deepEqual(scan.timeouts, [LISTENER_PROCESS_SCAN_TIMEOUT_MS, LISTENER_PROCESS_SCAN_RETRY_TIMEOUT_MS]);
+        assert.deepEqual(api.calls, []);
+        await assertNoPidRecords(sessionId, tempRoot);
+      });
+      assert.equal(isRunning(above), true, "the ancestor was stopped");
+    } finally {
+      await stopIdles([above]);
+    }
+  });
+}
+
+test("Listener ancestors: a recorded parent created after its child holds a reused pid and is not an ancestor", LISTEN_TEST, async () => {
   const sessionId = "ancestors-reused-parent-pid";
   // Stands for a real listener that took the pid of this process's exited parent. Never
   // stopped: only the refusing path runs.
@@ -656,19 +826,18 @@ test("Listener ancestors: a recorded parent created after its child holds a reus
   const now = Date.now();
   const rowsWithParentStart = (startedAtMs) => [
     { pid: process.pid, ppid: reusedPid, startedAtMs: now, commandLine: listenerCommandLine({ sessionId }) },
-    { pid: reusedPid, ppid: OUTSIDE_PID, startedAtMs, commandLine: listenerCommandLine({ sessionId }) },
+    { pid: reusedPid, ppid: OUTSIDE_PID, startedAtMs, commandLine: nodeListenerCommandLine(sessionId) },
   ];
   const later = rowsWithParentStart(now + 5_000);
-
   const matches = await listMatchingListenerProcesses(sessionId, "Codex", { _listProcesses: async () => later });
-  assert.deepEqual(matches.matches.map((match) => match.pid), [reusedPid]);
+  assert.deepEqual(matches.matches.map((match) => [match.pid, Boolean(match.ancestor)]), [[reusedPid, false]]);
   const summary = await summarizeLocalListenerProcesses(sessionId, ["Codex"], { _listProcesses: async () => later });
   assert.deepEqual(summary.agents[0].pids, [reusedPid]);
 
-  // The same row created before this process is its parent, and so not counted.
+  // The same row created before this process is its parent.
   const earlier = rowsWithParentStart(now - 5_000);
   const parentMatches = await listMatchingListenerProcesses(sessionId, "Codex", { _listProcesses: async () => earlier });
-  assert.deepEqual(parentMatches.matches, []);
+  assert.deepEqual(parentMatches.matches.map((match) => [match.pid, Boolean(match.ancestor)]), [[reusedPid, true]]);
 
   const scan = scriptedScan([later]);
   await withListenHarness({ probes: { listProcesses: scan.listProcesses } }, async ({ tempRoot, api }) => {
@@ -694,6 +863,8 @@ test("Listener ancestors: the walk ends at a cycle, a missing parent and the dep
   assert.deepEqual(walk([row(self, OUTSIDE_PID)]), []);
   assert.deepEqual(walk([row(self, 1), { pid: 1, commandLine: "bash" }]), [1]);
   assert.deepEqual(walk([]), []);
+  // A row without a command line is still a link in the chain.
+  assert.deepEqual(walk([row(self, 1), { pid: 1, ppid: 2 }, row(2, OUTSIDE_PID)]), [1, 2]);
   // The parent given for the checker is used when its row records none.
   assert.deepEqual([...listenerAncestorPids([row(1, null)], { pid: self, parentPid: 1, platform: "linux" })], [1]);
   // A chain longer than any launch is cut at the cap.
@@ -704,43 +875,183 @@ test("Listener ancestors: the walk ends at a cycle, a missing parent and the dep
   assert.deepEqual(walk([row(self, 1), row(1, 2)], "win32"), []);
   assert.deepEqual(walk([row(self, 1, 300), row(1, 2, 200), row(2, 3, 100)], "win32"), [1, 2]);
   assert.deepEqual(walk([row(self, 1, 300), row(1, 2, 200), row(2, 3)], "win32"), [1]);
-  assert.deepEqual(walk([row(self, 1, 300), row(1, 2, 200), row(2, 3, 250)], "win32"), [1]);
-  // On POSIX too, a "parent" known to be newer than its child is not followed.
-  assert.deepEqual(walk([row(self, 1, 300), row(1, 2, 400)]), []);
+  assert.deepEqual(walk([row(self, 1, 300), row(1, 2, 200), row(2, 3, 201)], "win32"), [1]);
+  // On POSIX too, a "parent" that started well after its child is not followed.
+  assert.deepEqual(walk([row(self, 1, 300), row(1, 2, 5_300)]), []);
 });
 
-test("Listener ancestors: a stale pid record now held by this process's own parent is not a running listener", LISTEN_TEST, async () => {
-  const sessionId = "ancestors-record-held-by-parent";
+test("Listener ancestors: a pid record counts only for the process that wrote it, to each platform's precision", () => {
+  const writtenAtMs = Date.parse("2026-10-11T08:00:00.000Z");
+  const record = { pid: 500, startedAt: new Date(writtenAtMs).toISOString() };
+  const holder = (startedAtMs, options) => pidRecordHolder(record, { pid: 500, startedAtMs }, options);
+  for (const platform of ["win32", "linux", "darwin"]) {
+    // Started before the record was written: the listener that wrote it.
+    assert.equal(holder(writtenAtMs - 5_000, { platform }), "confirmed", platform);
+    // Unknown on either side proves nothing, so it is never confirmed.
+    assert.equal(holder(null, { platform }), "unconfirmed", platform);
+    assert.equal(pidRecordHolder({ pid: 500 }, { pid: 500, startedAtMs: writtenAtMs - 5_000 }, { platform }), "unconfirmed");
+    // One of the checker's ancestors, or no process at all.
+    assert.equal(holder(writtenAtMs - 5_000, { platform, ancestors: new Set([500]) }), "ancestor", platform);
+    assert.equal(pidRecordHolder(record, null, { platform }), "gone", platform);
+  }
+  // Windows creation times are exact: a process started even 1 ms after the record is another.
+  assert.equal(holder(writtenAtMs + 1, { platform: "win32" }), "reused");
+  assert.equal(holder(writtenAtMs + 1_000, { platform: "win32" }), "reused");
+  // A POSIX start time can read about a second late, so that much is allowed there.
+  assert.equal(holder(writtenAtMs + 1_000, { platform: "linux" }), "confirmed");
+  assert.equal(holder(writtenAtMs + 5_000, { platform: "linux" }), "reused");
+});
+
+for (const withinSlack of [false, true]) {
+  test(`Listener ancestors: a pid record held by one of this process's launchers${withinSlack ? ", started a second after the record," : ""} is not running, and --force stops nothing`, LISTEN_TEST, async () => {
+    const sessionId = `ancestors-record-held-by-launcher-${withinSlack ? "slack" : "older"}`;
+    const idles = [await spawnIdle(), await spawnIdle()];
+    const [parent, grandparent] = idles;
+    const launcher = `/usr/bin/bash -c "${fullListenCommand(sessionId)}"`;
+    const probes = { readCommandLine: async (pid) => (Number(pid) === parent.pid ? launcher : "") };
+    try {
+      await withListenHarness({ probes }, async ({ tempRoot, api }) => {
+        await writeListenerPidRecord(sessionId, "Codex", {
+          targetPath: tempRoot,
+          pid: parent.pid,
+          listenerId: "listener-codex-exited",
+        });
+        const recordedAtMs = Date.parse((await readListenerPidRecord(sessionId, "Codex", { targetPath: tempRoot })).startedAt);
+        // Started before the record, so only the ancestry says it is not the record's
+        // listener; or a second after it, which a POSIX start time cannot tell from before.
+        const now = withinSlack ? recordedAtMs + 2_000 : Date.now();
+        const rows = launchedCheckerRows({ sessionId, parent: parent.pid, grandparent: grandparent.pid, now });
+        const scan = scriptedScan([rows]);
+        setListenerProcessProbesForTests({ ...probes, listProcesses: scan.listProcesses });
+
+        const status = await getListenerProcessStatus(sessionId, "Codex", { targetPath: tempRoot });
+        assert.equal(status.state, "not_running");
+        assert.equal(status.holder, "ancestor");
+        assert.equal(status.record.pid, parent.pid);
+
+        await runSessionCommand(listenArgs(sessionId, tempRoot, ["--force"]));
+        assert.deepEqual(scan.timeouts, [LISTENER_PROCESS_SCAN_TIMEOUT_MS, LISTENER_PROCESS_SCAN_TIMEOUT_MS]);
+        assert.equal(api.calls.filter((call) => call.method === "GET").length, 1);
+      });
+      assert.equal(isRunning(parent), true, "the parent was stopped");
+      assert.equal(isRunning(grandparent), true, "the grandparent was stopped");
+    } finally {
+      await stopIdles(idles);
+    }
+  });
+}
+
+test("Listener ancestors: a pid record whose process start time is unknown authorises nothing: --force refuses and stops nothing", LISTEN_TEST, async () => {
+  const sessionId = "ancestors-record-unknown-start";
+  const holder = await spawnIdle();
+  const probes = { readCommandLine: async () => listenerCommandLine({ sessionId }) };
+  try {
+    await withListenHarness({ probes }, async ({ tempRoot, api }) => {
+      await writeListenerPidRecord(sessionId, "Codex", {
+        targetPath: tempRoot,
+        pid: holder.pid,
+        listenerId: "listener-codex-unknown-start",
+      });
+      const rows = [
+        { pid: process.pid, ppid: OUTSIDE_PID, startedAtMs: Date.now(), commandLine: listenerCommandLine({ sessionId }) },
+        { pid: holder.pid, ppid: OUTSIDE_PID, commandLine: listenerCommandLine({ sessionId }) },
+      ];
+      const scan = scriptedScan([rows]);
+      setListenerProcessProbesForTests({ ...probes, listProcesses: scan.listProcesses });
+
+      await assert.rejects(
+        runSessionCommand(listenArgs(sessionId, tempRoot, ["--force"])),
+        (error) => {
+          assert.match(error.message, /^Could not confirm whether a session listener is already running/);
+          assert.ok(error.message.includes("(pid_record_unconfirmed)"), error.message);
+          assert.match(error.message, /No listener was started\./);
+          return true;
+        },
+      );
+      assert.deepEqual(scan.timeouts, [LISTENER_PROCESS_SCAN_TIMEOUT_MS, LISTENER_PROCESS_SCAN_RETRY_TIMEOUT_MS]);
+      assert.deepEqual(api.calls, []);
+    });
+    assert.equal(isRunning(holder), true, "the record's process was stopped");
+  } finally {
+    await stopIdles([holder]);
+  }
+});
+
+// What the takeover's own scan can say about the listener the status check found.
+const TAKEOVER_SCAN_CHANGES = {
+  "is now a launcher above this process": {
+    rows: (listenerPid, now) => [
+      { pid: process.pid, ppid: listenerPid, startedAtMs: now },
+      { pid: listenerPid, ppid: OUTSIDE_PID, startedAtMs: now - 5_000, commandLine: null },
+    ],
+    refusal: (pid) => new RegExp(`Could not confirm that pid ${pid} is a session listener --force can replace .*\\(ancestor\\)\\. No listener was stopped or started\\.`),
+  },
+  "is now a listener above this process": {
+    rows: (listenerPid, now, sessionId) => [
+      { pid: process.pid, ppid: listenerPid, startedAtMs: now },
+      { pid: listenerPid, ppid: OUTSIDE_PID, startedAtMs: now - 5_000, commandLine: nodeListenerCommandLine(sessionId) },
+    ],
+    refusal: (pid) => new RegExp(`\\(pid ${pid}\\), and this command runs under it, so --force will not stop it\\. No listener was stopped or started\\.`),
+  },
+  "is now an ancestor that may be a listener": {
+    rows: (listenerPid, now, sessionId) => [
+      { pid: process.pid, ppid: listenerPid, startedAtMs: now },
+      { pid: listenerPid, ppid: OUTSIDE_PID, startedAtMs: now - 5_000, commandLine: unnamedExecutableCommandLine(sessionId) },
+    ],
+    refusal: (pid) => new RegExp(`Could not confirm that pid ${pid} is a session listener --force can replace .*\\(ancestor_unconfirmed\\)\\. No listener was stopped or started\\.`),
+  },
+  "changed hands": {
+    rows: (listenerPid, now) => [
+      { pid: process.pid, ppid: OUTSIDE_PID, startedAtMs: now },
+      { pid: listenerPid, ppid: OUTSIDE_PID, startedAtMs: now + 1_000, commandLine: null },
+    ],
+    refusal: (pid) => new RegExp(`Could not confirm that pid ${pid} is a session listener --force can replace .*\\(reused\\)\\. No listener was stopped or started\\.`),
+  },
+};
+
+for (const [change, { rows: takeoverRows, refusal }] of Object.entries(TAKEOVER_SCAN_CHANGES)) {
+  test(`Listener ancestors: --force does not stop the listener the status check found when the takeover scan says it ${change}`, LISTEN_TEST, async () => {
+    const sessionId = `ancestors-takeover-${change.replace(/\W+/g, "-")}`;
+    const listener = await spawnIdle();
+    try {
+      const now = Date.now();
+      const statusRows = [
+        { pid: process.pid, ppid: OUTSIDE_PID, startedAtMs: now },
+        { pid: listener.pid, ppid: OUTSIDE_PID, startedAtMs: now - 5_000, commandLine: listenerCommandLine({ sessionId }) },
+      ];
+      const scan = scriptedScan([statusRows, takeoverRows(listener.pid, now, sessionId)]);
+      await withListenHarness({ probes: { listProcesses: scan.listProcesses } }, async ({ tempRoot, api }) => {
+        await assert.rejects(runSessionCommand(listenArgs(sessionId, tempRoot, ["--force"])), refusal(listener.pid));
+        assert.deepEqual(scan.timeouts, [LISTENER_PROCESS_SCAN_TIMEOUT_MS, LISTENER_PROCESS_SCAN_TIMEOUT_MS]);
+        assert.deepEqual(api.calls, []);
+      });
+      assert.equal(isRunning(listener), true, "the listener was stopped");
+    } finally {
+      await stopIdles([listener]);
+    }
+  });
+}
+
+test("Listener ancestors: a pid record held by this process's real parent is not a running listener", LISTEN_TEST, async () => {
+  const sessionId = "ancestors-record-held-by-real-parent";
   const parentPid = process.ppid;
-  const parentStartedAtMs = await readProcessStartTime(parentPid);
-  assert.equal(Number.isFinite(parentStartedAtMs), true, "could not read the parent's start time");
-  // What a launcher of this process shows, had it been given the pid of the listener that
-  // wrote the record. Only the refusing path can run, so the parent is never stopped.
+  // The real process table; only the parent's command line is made up, as a launcher's.
+  // Only the refusing path can run, so the parent is never stopped.
   const launcherCommandLine = `/usr/bin/bash -c "${fullListenCommand(sessionId)}"`;
-  const probes = {
-    listProcesses: async () => [],
-    readCommandLine: async (pid) => (Number(pid) === parentPid ? launcherCommandLine : ""),
-  };
+  const probes = { readCommandLine: async (pid) => (Number(pid) === parentPid ? launcherCommandLine : "") };
   await withListenHarness({ probes }, async ({ tempRoot, api }) => {
-    // A listener that wrote its record a minute before this process's parent was created.
+    // Written after the parent started, so only the ancestry tells the two apart.
     await writeListenerPidRecord(sessionId, "Codex", {
       targetPath: tempRoot,
       pid: parentPid,
       listenerId: "listener-codex-exited",
     });
-    const writtenAt = new Date(parentStartedAtMs - 60_000).toISOString();
-    for (const recordPath of [
-      resolveListenerPidPath(sessionId, "Codex", { targetPath: tempRoot }),
-      resolveGlobalListenerPidPath(sessionId, "Codex"),
-    ]) {
-      const record = JSON.parse(await readFile(recordPath, "utf-8"));
-      await writeFile(recordPath, `${JSON.stringify({ ...record, startedAt: writtenAt }, null, 2)}\n`, "utf-8");
-    }
-
-    const status = await getListenerProcessStatus(sessionId, "Codex", { targetPath: tempRoot });
-    assert.equal(status.state, "not_running");
-    assert.equal(status.stale, true);
-    assert.equal(status.reused, true);
+    const status = await getListenerProcessStatus(sessionId, "Codex", {
+      targetPath: tempRoot,
+      scanTimeoutMs: LISTENER_PROCESS_SCAN_RETRY_TIMEOUT_MS,
+    });
+    assert.equal(status.state, "not_running", JSON.stringify(status));
+    assert.equal(status.holder, "ancestor");
     assert.equal(status.record.pid, parentPid);
 
     await runSessionCommand(listenArgs(sessionId, tempRoot));
