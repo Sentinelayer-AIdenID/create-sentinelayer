@@ -631,6 +631,11 @@ test("Listener ancestors: a launcher is told from a listener by its executable a
       assert.equal(kind(`node ${preload} /opt/sl/bin/sl.js ${listen}`, platform), "unknown", `${platform} ${preload}`);
     }
     assert.equal(kind(`node --some-new-flag value /opt/sl/bin/sl.js ${listen}`, platform), "unknown", platform);
+    // An option is judged by its name whatever its spelling, so "=" proves nothing.
+    assert.equal(kind(`node --unknown-opt=1 /opt/sl/bin/sl.js ${listen}`, platform), "unknown", platform);
+    assert.equal(kind(`node --no-warnings=1 /opt/sl/bin/sl.js ${listen}`, platform), "unknown", platform);
+    assert.equal(kind(`node --import=./x.mjs /opt/sl/bin/sl.js ${listen}`, platform), "unknown", platform);
+    assert.equal(kind(`node --inspect=9229 --title sl /opt/sl/bin/sl.js ${listen}`, platform), "listener", platform);
     assert.equal(kind(`node -e "require('./x')" /opt/sl/bin/sl.js ${listen}`, platform), "unknown", platform);
     assert.equal(kind(`node -p 1 /opt/sl/bin/sl.js ${listen}`, platform), "unknown", platform);
     // Inline code with no CLI entry among the arguments is a launcher.
@@ -645,6 +650,14 @@ test("Listener ancestors: a launcher is told from a listener by its executable a
   assert.equal(kind(String.raw`"C:\Program Files\nodejs\node.exe" "C:\npm\bin\npx-cli.js" C:\sl\bin\sl.js ${listen}`, "win32", "node.exe"), "wrapper");
   assert.equal(kind(String.raw`"C:\Program Files\nodejs\node.exe" "C:\Program Files\nodejs\node_modules\sentinelayer-cli\bin\sl.js" ${listen}`, "win32", "node.exe"), "listener");
   assert.equal(kind(String.raw`"C:\Program Files\nodejs\node.exe" "C:\my tools\bin\sl.js ${listen}`, "win32", "node.exe"), "unknown");
+  // An empty quoted argument stays an argument: here it is --title's value, so --title does
+  // not take the CLI entry in its place. Empty where the script goes, it is not a script.
+  assert.equal(kind(String.raw`"C:\Program Files\nodejs\node.exe" --title "" C:\sl\bin\sl.js ${listen}`, "win32", "node.exe"), "listener");
+  assert.equal(kind(String.raw`"C:\Program Files\nodejs\node.exe" "" C:\sl\bin\sl.js ${listen}`, "win32", "node.exe"), "unknown");
+  // A quote escaped with a backslash cannot be read with certainty.
+  assert.equal(kind(String.raw`"C:\Program Files\nodejs\node.exe" --title "a \"b\"" C:\sl\bin\sl.js ${listen}`, "win32", "node.exe"), "unknown");
+  // In ps output a run of spaces may hide an empty argument, so it cannot be read either.
+  assert.equal(kind(`node --title  /opt/sl/bin/sl.js ${listen}`, "linux"), "unknown");
   // ps prints POSIX arguments unquoted, so a first argument that is not an entry may be the
   // first piece of an entry path with a space: unknown there.
   for (const platform of ["linux", "darwin"]) {
@@ -1026,7 +1039,30 @@ const TAKEOVER_SCAN_CHANGES = {
       { pid: process.pid, ppid: listenerPid, startedAtMs: now },
       { pid: listenerPid, ppid: OUTSIDE_PID, startedAtMs: now - 5_000, commandLine: null },
     ],
-    refusal: (pid) => new RegExp(`Could not confirm that pid ${pid} is a session listener --force can replace .*\\(ancestor\\)\\. No listener was stopped or started\\.`),
+    refusal: (pid) => new RegExp(`Could not confirm that pid ${pid} is a session listener --force can replace .*\\(unconfirmed\\)\\. No listener was stopped or started\\.`),
+  },
+  // The same process (the same start time), which this scan no longer counts as a listener
+  // for this session and agent: never stopped, and the takeover refuses.
+  "is now a launcher": {
+    rows: (listenerPid, now, sessionId) => [
+      { pid: process.pid, ppid: OUTSIDE_PID, startedAtMs: now },
+      { pid: listenerPid, ppid: OUTSIDE_PID, startedAtMs: now - 5_000, name: "bash.exe", commandLine: `/usr/bin/bash -c "${fullListenCommand(sessionId)}"` },
+    ],
+    refusal: (pid) => new RegExp(`Could not confirm that pid ${pid} is a session listener --force can replace .*\\(unconfirmed\\)\\. No listener was stopped or started\\.`),
+  },
+  "is now a listener for another session": {
+    rows: (listenerPid, now, sessionId) => [
+      { pid: process.pid, ppid: OUTSIDE_PID, startedAtMs: now },
+      { pid: listenerPid, ppid: OUTSIDE_PID, startedAtMs: now - 5_000, commandLine: nodeListenerCommandLine(`${sessionId}-other`) },
+    ],
+    refusal: (pid) => new RegExp(`Could not confirm that pid ${pid} is a session listener --force can replace .*\\(unconfirmed\\)\\. No listener was stopped or started\\.`),
+  },
+  "is now a listener for another agent": {
+    rows: (listenerPid, now, sessionId) => [
+      { pid: process.pid, ppid: OUTSIDE_PID, startedAtMs: now },
+      { pid: listenerPid, ppid: OUTSIDE_PID, startedAtMs: now - 5_000, commandLine: nodeListenerCommandLine(sessionId, "Claude") },
+    ],
+    refusal: (pid) => new RegExp(`Could not confirm that pid ${pid} is a session listener --force can replace .*\\(unconfirmed\\)\\. No listener was stopped or started\\.`),
   },
   "is now a listener above this process": {
     rows: (listenerPid, now, sessionId) => [
@@ -1073,6 +1109,41 @@ for (const [change, { rows: takeoverRows, refusal }] of Object.entries(TAKEOVER_
     }
   });
 }
+
+test("Listener ancestors: --force stops nothing when the listener the status check found changed hands to another listener, not even the other listeners", LISTEN_TEST, async () => {
+  const sessionId = "ancestors-takeover-changed-hands-to-a-listener";
+  const idles = [await spawnIdle(), await spawnIdle()];
+  const [found, other] = idles;
+  try {
+    const now = Date.now();
+    const statusRows = [
+      { pid: process.pid, ppid: OUTSIDE_PID, startedAtMs: now },
+      { pid: found.pid, ppid: OUTSIDE_PID, startedAtMs: now - 5_000, commandLine: nodeListenerCommandLine(sessionId) },
+      { pid: other.pid, ppid: OUTSIDE_PID, startedAtMs: now - 3_000, commandLine: nodeListenerCommandLine(sessionId) },
+    ];
+    // The takeover scan: the found pid is still a listener for this session and agent, but a
+    // process started since holds it. Every refusal is decided before the first stop, so the
+    // other listener, which the takeover would stop, is not stopped either.
+    const takeoverRows = [
+      statusRows[0],
+      { ...statusRows[1], startedAtMs: now + 1_000 },
+      statusRows[2],
+    ];
+    const scan = scriptedScan([statusRows, takeoverRows]);
+    await withListenHarness({ probes: { listProcesses: scan.listProcesses } }, async ({ tempRoot, api }) => {
+      await assert.rejects(
+        runSessionCommand(listenArgs(sessionId, tempRoot, ["--force"])),
+        new RegExp(`Could not confirm that pid ${found.pid} is a session listener --force can replace .*\\(reused\\)\\. No listener was stopped or started\\.`),
+      );
+      assert.deepEqual(scan.timeouts, [LISTENER_PROCESS_SCAN_TIMEOUT_MS, LISTENER_PROCESS_SCAN_TIMEOUT_MS]);
+      assert.deepEqual(api.calls, []);
+    });
+    assert.equal(isRunning(found), true, "the found pid was stopped");
+    assert.equal(isRunning(other), true, "the other listener was stopped");
+  } finally {
+    await stopIdles(idles);
+  }
+});
 
 test("Listener ancestors: a pid record held by this process's real parent is not a running listener", LISTEN_TEST, async () => {
   const sessionId = "ancestors-record-held-by-real-parent";

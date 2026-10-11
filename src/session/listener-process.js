@@ -290,30 +290,35 @@ const NODE_FLAGS = new Set([
   "--pending-deprecation", "--enable-source-maps", "--expose-gc", "--preserve-symlinks",
   "--preserve-symlinks-main", "--abort-on-uncaught-exception", "--experimental-vm-modules",
 ]);
-// Node options known to take the next argument as their value.
+// Of those, the ones that may also be given a value after "=" (--inspect=127.0.0.1:9229).
+const NODE_FLAGS_WITH_OPTIONAL_VALUE = new Set(["--inspect", "--inspect-brk", "--inspect-wait"]);
+// Node options known to take a value, as the next argument or after "=".
 const NODE_OPTIONS_WITH_VALUE = new Set([
   "--inspect-port", "--title", "-C", "--conditions", "--input-type", "--env-file",
-  "--disable-warning", "--redirect-warnings",
+  "--disable-warning", "--redirect-warnings", "--max-old-space-size", "--stack-size",
 ]);
 // Node options that load a module before the script; that module may be this CLI.
 const NODE_PRELOAD_OPTIONS = new Set(["-r", "--require", "--import", "--loader", "--experimental-loader"]);
 // Node options that run code given on the command line instead of a script.
 const NODE_INLINE_CODE_OPTIONS = new Set(["-e", "--eval", "-p", "--print", "-pe", "-ep"]);
 
-// A command line's arguments, and whether they were read with certainty. A Windows command
-// line quotes an argument with spaces in double quotes, so it is certain unless a quote is
-// left open. ps(1) prints POSIX arguments joined by spaces with no quoting, so there an
-// argument with a space reads as two (listenerProcessKind allows for that), and a quote
-// character is part of an argument, not quoting; it is dropped for comparison.
+// A command line's arguments, in order, and whether they were read with certainty.
+// - Windows quotes an argument with spaces, or an empty one, in double quotes. An empty
+//   argument ("") stays an argument, so a value option never takes the next one in its
+//   place. A quote left open, or one escaped with a backslash, is not read with certainty.
+// - ps(1) prints POSIX arguments joined by single spaces with no quoting. An argument with a
+//   space reads as two (listenerProcessKind allows for that), and a run of spaces may hide an
+//   empty argument or an argument made of spaces, so it is not read with certainty. A quote
+//   character there is part of an argument, not quoting; it is dropped for comparison.
 function commandLineArguments(commandLine, platform) {
   const text = normalizeString(commandLine);
   if (platform === "win32") {
-    const certain = (text.match(/"/g) || []).length % 2 === 0;
+    const certain = (text.match(/"/g) || []).length % 2 === 0 && !/\\"/.test(text);
     const parts = text.match(/(?:"[^"]*"?|[^\s"]+)+/g) || [];
-    return { args: parts.map((part) => part.replace(/"/g, "")).filter(Boolean), certain };
+    return { args: parts.map((part) => part.replace(/"/g, "")), certain };
   }
   const parts = text.split(/\s+/).map((part) => part.replace(/["']/g, ""));
-  return { args: parts.filter(Boolean), certain: true };
+  return { args: parts.filter(Boolean), certain: !/\s{2,}/.test(text) };
 }
 
 /**
@@ -357,14 +362,20 @@ export function listenerProcessKind(
       break;
     }
     if (!arg.startsWith("-") || arg === "-") break;
-    const name = arg.split("=")[0];
+    // Every spelling is judged by the option's name: --name, --name value, --name=value.
+    const equals = arg.indexOf("=");
+    const name = equals === -1 ? arg : arg.slice(0, equals);
+    const valueAttached = equals !== -1;
     if (NODE_INLINE_CODE_OPTIONS.has(name)) {
       return args.slice(1).some(isEntry) ? "unknown" : "wrapper";
     }
     if (NODE_PRELOAD_OPTIONS.has(name)) return "unknown";
-    if (arg.includes("=") || NODE_FLAGS.has(arg)) continue;
-    if (!NODE_OPTIONS_WITH_VALUE.has(arg)) return "unknown";
-    index += 1;
+    if (NODE_OPTIONS_WITH_VALUE.has(name)) {
+      if (!valueAttached) index += 1;
+      continue;
+    }
+    if (NODE_FLAGS.has(name) && (!valueAttached || NODE_FLAGS_WITH_OPTIONAL_VALUE.has(name))) continue;
+    return "unknown";
   }
   const script = args[index];
   if (!script) return "unknown";
@@ -890,26 +901,33 @@ export async function getListenerProcessStatus(
   return staleStatuses[0];
 }
 
-// Why the takeover may not stop `listener` (the status check's answer), judged on the
-// takeover's own scan, or null when it may. The checker and its ancestors are never stopped,
-// and the process must still be the one the status check saw (the same start time, within
-// the platform's precision): a pid that changed hands between the two scans is not stopped.
-function takeoverTargetRefusal(listener, row, { selfPid, ancestors, platform = process.platform }) {
+// Why the takeover's own scan does not bear out `listener`, the status check's answer, or
+// null when it does. `row` is the scan's row for that pid (null when it is gone, which
+// leaves nothing to stop for it), and `isListener` says whether the scan counts that row as
+// a current listener for this session and agent (readListenerScan). The pid must name the
+// same process the status check saw, by start time (exact on Windows, within 2 s on POSIX:
+// startTimeSlackMs): otherwise it changed hands ("reused"), even when the new holder is a
+// listener too. And it must still be a current listener; a start time that cannot be
+// compared, or the same process no longer counted as a listener, is "unconfirmed".
+function takeoverTargetRefusal(listener, row, { isListener, platform = process.platform }) {
   if (!row) return null;
-  if (row.pid === selfPid || ancestors.has(row.pid)) return "ancestor";
   if (!Number.isFinite(listener?.startedAtMs) || !Number.isFinite(row.startedAtMs)) return "unconfirmed";
-  return Math.abs(row.startedAtMs - listener.startedAtMs) <= startTimeSlackMs(platform) ? null : "reused";
+  if (Math.abs(row.startedAtMs - listener.startedAtMs) > startTimeSlackMs(platform)) return "reused";
+  return isListener ? null : "unconfirmed";
 }
 
 /**
- * The --force takeover: stops every listener process one scan finds for this session and
- * agent, and `listener`, the one the status check found, when this scan does not list it.
- * It never stops the checker or an ancestor of it, and never on a guess: when the scan finds
- * a listener that is an ancestor ("ancestor_listener"), a process that may be a listener
- * ("listener_unconfirmed"), or cannot confirm `listener` (takeoverTargetRefusal), it stops
- * nothing and returns { ok: true, refused: { pid, reason } }. When the process table cannot
- * be read it stops nothing and returns { ok: false, reason }; the caller then stops nothing
- * either, since what it found earlier may no longer hold.
+ * The --force takeover. --force stops only current listeners for this session and agent, and
+ * refuses with no stops if the listener the status check saw has changed hands or can no
+ * longer be confirmed. One scan is taken, and the stop set is exactly that scan's listeners
+ * for this session and agent (readListenerScan): never the checker, never a launcher, and
+ * never the pid the status check found unless this scan counts it as a listener. Every
+ * refusal is decided before the first stop: a listener that is an ancestor of the checker
+ * ("ancestor_listener"), a process that may be a listener ("listener_unconfirmed"), or the
+ * status check's listener changed hands or unconfirmed (takeoverTargetRefusal). It returns
+ * { ok: true, refused: { pid, reason } } then. When the process table cannot be read it stops
+ * nothing and returns { ok: false, reason }; the caller then stops nothing either, since what
+ * it found earlier may no longer hold.
  */
 export async function stopMatchingListenerProcesses(
   sessionId,
@@ -940,13 +958,14 @@ export async function stopMatchingListenerProcesses(
   const ancestorListener = listeners.find((row) => row.ancestor);
   if (ancestorListener) return refuse(ancestorListener.pid, "ancestor_listener");
   if (unconfirmed.length > 0) return refuse(unconfirmed[0].pid, "listener_unconfirmed");
+  // Decide everything, then act: every refusal above and here comes before the first stop.
   const matches = [...listeners];
   const listenerPid = Number(listener?.pid);
-  if (Number.isInteger(listenerPid) && listenerPid > 0 && !matches.some((row) => row.pid === listenerPid)) {
+  if (Number.isInteger(listenerPid) && listenerPid > 0) {
     const row = scan.rows.find((entry) => entry.pid === listenerPid) || null;
-    const refusal = takeoverTargetRefusal(listener, row, { selfPid, ancestors });
+    const isListener = matches.some((match) => match.pid === listenerPid);
+    const refusal = takeoverTargetRefusal(listener, row, { isListener });
     if (refusal) return refuse(listenerPid, refusal);
-    if (row) matches.push(row);
   }
   const results = [];
   for (const match of matches) {
