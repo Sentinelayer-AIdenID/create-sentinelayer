@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.46.2](https://github.com/mrrCarter/create-sentinelayer/compare/v0.46.1...v0.46.2) (2026-10-11)
+
+
+### Bug Fixes
+
+* **cli:** check the runtime before loading the CLI ([958ef28](https://github.com/mrrCarter/create-sentinelayer/commit/958ef28468cd3af779f60d6805f3125207aab90d))
+* **session:** report no process counts when the listener scan did not complete ([d63d20e](https://github.com/mrrCarter/create-sentinelayer/commit/d63d20e403c0083652f6b85287616637f0d91671))
+* **session:** treat an incomplete process check as unknown; refuse a listener it cannot verify ([ca20ce3](https://github.com/mrrCarter/create-sentinelayer/commit/ca20ce3b2a2c450b06fd1aefeb8c6d83fe0fd77d))
+
 ## [0.46.1](https://github.com/mrrCarter/create-sentinelayer/compare/v0.46.0...v0.46.1) (2026-10-11)
 
 
