@@ -281,6 +281,41 @@ test("Listener scan unknown: a completed scan that finds a duplicate refuses as 
   });
 });
 
+test("Listener bins: a duplicate started through create-sentinelayer.js from a checkout is refused", LISTEN_TEST, async () => {
+  const sessionId = "scan-finds-create-sentinelayer";
+  const duplicatePid = process.pid + 200_002;
+  // As the process table shows a checkout's listener: no "sentinelayer-cli" anywhere in it.
+  const commandLine = `"C:\\Program Files\\nodejs\\node.exe" H:/create-sentinelayer/bin/create-sentinelayer.js session listen --session ${sessionId} --agent Codex`;
+  const scan = scriptedScan([[{ pid: duplicatePid, commandLine }]]);
+  await withListenHarness({ probes: { listProcesses: scan.listProcesses } }, async ({ tempRoot, api }) => {
+    await assert.rejects(
+      runSessionCommand(listenArgs(sessionId, tempRoot)),
+      new RegExp(`already running for session ${sessionId} as codex \\(pid ${duplicatePid}\\)`),
+    );
+    assert.deepEqual(api.calls, []);
+    await assertNoPidRecords(sessionId, tempRoot);
+  });
+});
+
+test("Listener bins: the wrappers a launch leaves around a listener (npm exec, sh -c, cmd /c) are not one", LISTEN_TEST, async () => {
+  const sessionId = "scan-skips-launch-wrappers";
+  const listen = `session listen --session ${sessionId} --agent Codex`;
+  const wrappers = [
+    `npm exec sentinelayer-cli ${listen}`,
+    `sh -c sentinelayer-cli ${listen}`,
+    `"C:\\Windows\\system32\\cmd.exe" /d /s /c "sentinelayer-cli ${listen}"`,
+    `"C:\\Program Files\\nodejs\\node.exe" "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npx-cli.js" sentinelayer-cli ${listen}`,
+  ].map((commandLine, index) => ({ pid: process.pid + 200_010 + index, commandLine }));
+  const scan = scriptedScan([wrappers]);
+  await withListenHarness({ probes: { listProcesses: scan.listProcesses } }, async ({ tempRoot, api }) => {
+    await runSessionCommand(listenArgs(sessionId, tempRoot));
+
+    assert.deepEqual(scan.timeouts, [LISTENER_PROCESS_SCAN_TIMEOUT_MS]);
+    assert.equal(api.calls.filter((call) => call.method === "GET").length, 1);
+    await assertNoPidRecords(sessionId, tempRoot);
+  });
+});
+
 test("Listener scan unknown: --force replaces a verified tracked listener one-for-one when the takeover scan fails, and says so", LISTEN_TEST, async () => {
   const sessionId = "scan-unknown-force-tracked";
   const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });

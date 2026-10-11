@@ -40,6 +40,31 @@ function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// The CLI's entry points as package.json "bin" declares them (a test keeps the two in step):
+// the scripts node runs, and the command names npm links to them.
+const CLI_ENTRY_SCRIPTS = ["create-sentinelayer.js", "sentinelayer-cli.js", "sl.js"];
+const CLI_COMMAND_NAMES = ["create-sentinelayer", "sentinel", "sentinelayer-cli", "sl-cli", "slc", "sl"];
+
+/**
+ * The one test of "this command line runs this CLI": an argument that is a path ending in an
+ * entry point (a path separator, the entry name, then the end of the argument). So
+ * `.../bin/create-sentinelayer.js` counts, but `xcreate-sentinelayer.js`,
+ * `create-sentinelayer.json` and a directory named after a command do not.
+ *
+ * On POSIX, npm links each command name to its script and the kernel hands node the link path
+ * (`node /usr/local/bin/sl ...`), so the command names count there too. On Windows npm's shims
+ * start node on the script itself, and the sh shim Git Bash runs stays alive as node's parent
+ * with only the command name on its command line, so there only the scripts count.
+ *
+ * The pattern is valid in JavaScript and in .NET (the Windows scan runs it in PowerShell), and
+ * writes its quotes as \x22 and \x27 so it can sit inside a quoted PowerShell string.
+ */
+function cliEntryPattern(platform) {
+  const entries =
+    platform === "win32" ? CLI_ENTRY_SCRIPTS : [...CLI_ENTRY_SCRIPTS, ...CLI_COMMAND_NAMES];
+  return `[\\\\/](?:${entries.map(escapeRegExp).join("|")})(?=$|[\\s\\x22\\x27])`;
+}
+
 function commandLineFlagValueMatches(commandLine, flagName, expectedValue) {
   const expected = normalizeString(expectedValue).toLowerCase();
   if (!expected) return { found: false, matches: true };
@@ -58,15 +83,20 @@ function commandLineFlagValueMatches(commandLine, flagName, expectedValue) {
   return { found, matches: false };
 }
 
-function listenerCommandLineMatches(commandLine, { sessionId = "", agentId = "" } = {}) {
+/**
+ * Whether a command line is `session listen` for this session and agent, run through any of
+ * this CLI's entry points. `platform` is the system the command line was read on.
+ */
+export function listenerCommandLineMatches(
+  commandLine,
+  { sessionId = "", agentId = "", platform = process.platform } = {},
+) {
   const rawCommandLine = normalizeString(commandLine);
   const normalized = normalizeCommandLine(rawCommandLine);
   if (!normalized) return false;
   const normalizedSessionId = normalizeString(sessionId).toLowerCase();
   const normalizedAgentId = normalizeString(agentId).toLowerCase();
-  const hasCliEntry =
-    normalized.includes("sentinelayer-cli") ||
-    /[\\/](?:sl|sentinelayer-cli)\.js\b/.test(normalized);
+  const hasCliEntry = new RegExp(cliEntryPattern(platform)).test(normalized);
   const sessionFlagMatch = commandLineFlagValueMatches(rawCommandLine, "session", normalizedSessionId);
   const agentFlagMatch = commandLineFlagValueMatches(rawCommandLine, "agent", normalizedAgentId);
   return (
@@ -98,7 +128,7 @@ async function listWindowsProcesses({ timeoutMs }) {
   const command = [
     "$ErrorActionPreference = 'Stop';",
     "$rows = Get-CimInstance Win32_Process |",
-    "Where-Object { $_.CommandLine -and ($_.CommandLine -match 'sentinelayer-cli|[\\\\/](sl|sentinelayer-cli)\\.js') } |",
+    `Where-Object { $_.CommandLine -and ($_.CommandLine -match '${cliEntryPattern("win32")}') } |`,
     "Select-Object ProcessId,CommandLine;",
     "if ($rows) { $rows | ConvertTo-Json -Compress }",
   ].join(" ");
