@@ -22,6 +22,10 @@ import {
 } from "../src/session/listener-process.js";
 import { createSession } from "../src/session/store.js";
 
+// node as a real command line shows it: Windows quotes a path with a space; ps(1) prints POSIX
+// arguments unquoted (a quote there would be part of the argument).
+const NODE_ON_COMMAND_LINE = process.platform === "win32" ? `"${process.execPath}"` : process.execPath;
+
 async function seedWorkspace(rootPath) {
   await writeFile(
     path.join(rootPath, "package.json"),
@@ -37,8 +41,9 @@ async function spawnExitedPid() {
 }
 
 function listenerCommandLine({ sessionId = "sess", agentId = "Codex" } = {}) {
+  // Quoted, as a real command line quotes a path with a space.
   return [
-    process.execPath,
+    NODE_ON_COMMAND_LINE,
     path.join("node_modules", "sentinelayer-cli", "bin", "sl.js"),
     "session",
     "listen",
@@ -83,16 +88,34 @@ test("Unit listener-process: pid record round-trip and stale detection", async (
       activeIntervalSeconds: 30,
       presenceIntervalSeconds: 60,
     });
+    // A fixed process table, never the host's: the record's pid is node on a CLI entry that
+    // started before the record was written, so the record is confirmed.
+    const recordedListener = listenerCommandLine({ sessionId: session.sessionId, agentId: "Codex" });
+    const tableWithRecordPid = (startedAtMs) => async () => [
+      { pid: process.pid, startedAtMs, commandLine: recordedListener },
+    ];
     const alive = await getListenerProcessStatus(session.sessionId, "Codex", {
       targetPath: tempRoot,
       homeDir: tempRoot,
-      _readProcessCommandLine: async () =>
-        listenerCommandLine({ sessionId: session.sessionId, agentId: "Codex" }),
+      _readProcessCommandLine: async () => recordedListener,
+      _listProcesses: tableWithRecordPid(Date.now() - 60_000),
     });
     assert.equal(alive.running, true);
     assert.equal(alive.pid, process.pid);
     assert.equal(alive.record.listenerId, "listener-codex-test");
     assert.equal(alive.stale, false);
+
+    // The same pid held by a process started after the record was written is not the
+    // listener that wrote it.
+    const restarted = await getListenerProcessStatus(session.sessionId, "Codex", {
+      targetPath: tempRoot,
+      homeDir: tempRoot,
+      _readProcessCommandLine: async () => recordedListener,
+      _listProcesses: tableWithRecordPid(Date.now() + 60_000),
+    });
+    assert.equal(restarted.running, false);
+    assert.equal(restarted.stale, true);
+    assert.equal(restarted.holder, "reused");
 
     const reused = await getListenerProcessStatus(session.sessionId, "Codex", {
       targetPath: tempRoot,
@@ -182,10 +205,15 @@ test("Unit listener-process: global pid record blocks duplicates across worktree
       transport: "poll",
     });
 
+    // A fixed process table, never the host's: the record's pid is node on a CLI entry that
+    // started before the record was written.
     const fromSecondRoot = await getListenerProcessStatus(sessionId, agentId, {
       targetPath: secondRoot,
       homeDir: homeRoot,
       _readProcessCommandLine: async () => listenerCommandLine({ sessionId, agentId }),
+      _listProcesses: async () => [
+        { pid: process.pid, startedAtMs: Date.now() - 60_000, commandLine: listenerCommandLine({ sessionId, agentId }) },
+      ],
     });
     assert.equal(fromSecondRoot.running, true);
     assert.equal(fromSecondRoot.pid, process.pid);

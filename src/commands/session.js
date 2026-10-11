@@ -78,7 +78,6 @@ import {
   getListenerProcessStatus,
   LISTENER_PROCESS_SCAN_RETRY_TIMEOUT_MS,
   removeListenerPidRecord,
-  requestListenerProcessStop,
   summarizeLocalListenerProcesses,
   stopMatchingListenerProcesses,
   writeListenerPidRecord,
@@ -5515,33 +5514,30 @@ export function registerSessionCommand(program) {
           );
         }
         if (existingListener.running && options.force) {
-          const stopMatchesResult = await stopMatchingListenerProcesses(normalizedSessionId, agentId);
-          if (!stopMatchesResult.ok) {
-            // The listener being replaced is known (a verified pid record or a scan moments
-            // ago), so stopping it and starting this one never adds a listener. Only the
-            // cleanup of extra copies is skipped, and that is said rather than assumed.
-            console.error(
-              pc.yellow(
-                `The local process check did not complete (${stopMatchesResult.reason}); replacing listener pid ${existingListener.pid} only. Other copies of this listener, if any, were not checked.`,
-              ),
+          // --force never stops a process this command runs under, and never on a guess:
+          // it refuses, and stops and starts nothing, unless the takeover scan confirms
+          // what it stops.
+          const refuseTakeover = ({ pid, reason }) =>
+            new Error(
+              reason === "ancestor_listener"
+                ? `A session listener is already running for session ${normalizedSessionId} as ${agentId} (pid ${pid}), and this command runs under it, so --force will not stop it. No listener was stopped or started. Stop that listener first, or use --allow-duplicate if you intentionally need more than one.`
+                : `Could not confirm that pid ${pid} is a session listener --force can replace for session ${normalizedSessionId} as ${agentId} (${reason}). No listener was stopped or started. Run the command again, or use --allow-duplicate to start without this check (it can then run alongside an existing listener).`,
             );
+          if (existingListener.ancestor) {
+            throw refuseTakeover({ pid: existingListener.pid, reason: "ancestor_listener" });
           }
-          const scannedStops = stopMatchesResult.ok ? stopMatchesResult.results : [];
-          const stoppedPids = new Set(
-            scannedStops
-              .filter((result) => result.stopped)
-              .map((result) => Number(result.pid)),
-          );
-          let explicitStopResult = null;
-          if (existingListener.pid && !stoppedPids.has(Number(existingListener.pid))) {
-            explicitStopResult = await requestListenerProcessStop(existingListener.pid);
+          const stopMatchesResult = await stopMatchingListenerProcesses(normalizedSessionId, agentId, {
+            listener: existingListener,
+          });
+          if (!stopMatchesResult.ok) {
+            // What the status check found may no longer hold, and an unread table cannot
+            // show which processes this command runs under, so nothing is stopped.
+            throw refuseTakeover({ pid: existingListener.pid, reason: stopMatchesResult.reason });
           }
-          const failedStops = [
-            ...scannedStops.filter((result) => !result.stopped),
-            ...(explicitStopResult && !explicitStopResult.stopped
-              ? [{ pid: existingListener.pid, ...explicitStopResult }]
-              : []),
-          ];
+          if (stopMatchesResult.refused) {
+            throw refuseTakeover(stopMatchesResult.refused);
+          }
+          const failedStops = stopMatchesResult.results.filter((result) => !result.stopped);
           if (failedStops.length > 0) {
             const failed = failedStops[0];
             throw new Error(
