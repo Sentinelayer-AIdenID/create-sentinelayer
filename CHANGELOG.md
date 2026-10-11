@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.46.4](https://github.com/mrrCarter/create-sentinelayer/compare/v0.46.3...v0.46.4) (2026-10-11)
+
+
+### Bug Fixes
+
+* **session:** --force stops only current listeners, and reads node options by name ([6712007](https://github.com/mrrCarter/create-sentinelayer/commit/67120073e6f5af983e2a4f813620d2d0a6c9aa87))
+* **session:** don't count the checker's own parent processes as listeners ([1eca4c4](https://github.com/mrrCarter/create-sentinelayer/commit/1eca4c4693e190734418f1c5f80bfbccc623008d))
+* **session:** judge ancestors on a full process table, and tell launchers from listeners ([ade56fd](https://github.com/mrrCarter/create-sentinelayer/commit/ade56fd3177e63fc78653caa20fe8a42a63f08a6))
+* **session:** judge every matching process as a listener, a launcher or unknown ([93eaace](https://github.com/mrrCarter/create-sentinelayer/commit/93eaaceaf42fb6a3fb102b5d0ba50a073b2b9b2c))
+* **session:** judge every matching process as a listener, a launcher or unknown ([5d6da2c](https://github.com/mrrCarter/create-sentinelayer/commit/5d6da2c724b9388d743142f4f277a1ac2a00fd97))
+* **session:** keep quote bytes in POSIX process arguments ([60eb313](https://github.com/mrrCarter/create-sentinelayer/commit/60eb313c5f22d2e182b41d61ec26d91f10809208))
+
 ## [0.46.3](https://github.com/mrrCarter/create-sentinelayer/compare/v0.46.2...v0.46.3) (2026-10-11)
 
 
