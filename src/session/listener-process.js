@@ -309,7 +309,8 @@ const NODE_INLINE_CODE_OPTIONS = new Set(["-e", "--eval", "-p", "--print", "-pe"
 // - ps(1) prints POSIX arguments joined by single spaces with no quoting. An argument with a
 //   space reads as two (listenerProcessKind allows for that), and a run of spaces may hide an
 //   empty argument or an argument made of spaces, so it is not read with certainty. A quote
-//   character there is part of an argument, not quoting; it is dropped for comparison.
+//   character there is part of an argument, not quoting: it is kept as it is, and a command line
+//   that has one is not read with certainty, so no file name is recognised by removing it.
 function commandLineArguments(commandLine, platform) {
   const text = normalizeString(commandLine);
   if (platform === "win32") {
@@ -317,8 +318,8 @@ function commandLineArguments(commandLine, platform) {
     const parts = text.match(/(?:"[^"]*"?|[^\s"]+)+/g) || [];
     return { args: parts.map((part) => part.replace(/"/g, "")), certain };
   }
-  const parts = text.split(/\s+/).map((part) => part.replace(/["']/g, ""));
-  return { args: parts.filter(Boolean), certain: !/\s{2,}/.test(text) };
+  const parts = text.split(/\s+/);
+  return { args: parts.filter(Boolean), certain: !/\s{2,}/.test(text) && !/["']/.test(text) };
 }
 
 /**

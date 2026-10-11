@@ -31,6 +31,10 @@ import { isProcessAlive } from "../src/session/daemon-spawn.js";
 import { createSession } from "../src/session/store.js";
 import { resetSessionSyncStateForTests } from "../src/session/sync.js";
 
+// node as a real command line shows it: Windows quotes a path with a space; ps(1) prints POSIX
+// arguments unquoted (a quote there would be part of the argument).
+const NODE_ON_COMMAND_LINE = process.platform === "win32" ? `"${process.execPath}"` : process.execPath;
+
 // Every test that runs `session listen` gets this bound: the fake API stops the listener on
 // its first poll, and the timeout fails a test that still does not finish.
 const LISTEN_TEST = { timeout: 60_000 };
@@ -46,7 +50,7 @@ async function seedWorkspace(rootPath) {
 function listenerCommandLine({ sessionId, agentId = "Codex" }) {
   // Quoted, as a real command line quotes a path with a space.
   return [
-    `"${process.execPath}"`,
+    NODE_ON_COMMAND_LINE,
     path.join("node_modules", "sentinelayer-cli", "bin", "sl.js"),
     "session",
     "listen",
@@ -539,7 +543,7 @@ function fullListenCommand(sessionId, agentId = "Codex") {
 
 // node started on the CLI's entry script, as a real listener's command line reads.
 function nodeListenerCommandLine(sessionId, agentId = "Codex") {
-  return `"${process.execPath}" /opt/tools/sl/bin/sl.js session listen --session ${sessionId} --agent ${agentId} --interval 60`;
+  return `${NODE_ON_COMMAND_LINE} /opt/tools/sl/bin/sl.js session listen --session ${sessionId} --agent ${agentId} --interval 60`;
 }
 
 // A command line whose first word names no executable, so it cannot tell a launcher from a
@@ -617,7 +621,9 @@ test("Listener ancestors: a launcher is told from a listener by its executable a
     assert.equal(kind(`/usr/bin/bash -c "node /opt/sl/bin/sl.js ${listen}"`, platform), "wrapper", platform);
     // node on a CLI entry, from any of node's names, is the listener.
     for (const node of ["node", "/usr/bin/nodejs", "NODE.EXE"]) {
-      assert.equal(kind(`"${node}" /opt/sl/bin/sl.js ${listen}`, platform), "listener", `${platform} ${node}`);
+      // Windows quotes the executable path; ps(1) prints POSIX arguments as they are.
+      const shown = platform === "win32" ? `"${node}"` : node;
+      assert.equal(kind(`${shown} /opt/sl/bin/sl.js ${listen}`, platform), "listener", `${platform} ${node}`);
     }
     assert.equal(kind(`node --no-warnings --title=sl --inspect-port 0 /opt/sl/bin/sl.js ${listen}`, platform), "listener", platform);
     assert.equal(kind(`node -- /opt/sl/bin/sl.js ${listen}`, platform), "listener", platform);
@@ -638,8 +644,14 @@ test("Listener ancestors: a launcher is told from a listener by its executable a
     assert.equal(kind(`node --inspect=9229 --title sl /opt/sl/bin/sl.js ${listen}`, platform), "listener", platform);
     assert.equal(kind(`node -e "require('./x')" /opt/sl/bin/sl.js ${listen}`, platform), "unknown", platform);
     assert.equal(kind(`node -p 1 /opt/sl/bin/sl.js ${listen}`, platform), "unknown", platform);
-    // Inline code with no CLI entry among the arguments is a launcher.
-    assert.equal(kind(`node -e "spawn('C:/opt/sl/bin/sl.js','session')" ${listen}`, platform), "wrapper", platform);
+    // Inline code with no CLI entry among the arguments is a launcher. Read through ps(1), the
+    // quotes are literal bytes of the arguments, so the same line is not read with certainty.
+    assert.equal(
+      kind(`node -e "spawn('C:/opt/sl/bin/sl.js','session')" ${listen}`, platform),
+      platform === "win32" ? "wrapper" : "unknown",
+      platform,
+    );
+    assert.equal(kind(`node -e spawn(1) ${listen}`, platform), "wrapper", platform);
   }
   // The executable's name is the Windows process name, whatever the command line says.
   assert.equal(kind(String.raw`node C:\sl\bin\sl.js ${listen}`, "win32", "bash.exe"), "wrapper");
@@ -661,6 +673,13 @@ test("Listener ancestors: a launcher is told from a listener by its executable a
   // ps prints POSIX arguments unquoted, so a first argument that is not an entry may be the
   // first piece of an entry path with a space: unknown there.
   for (const platform of ["linux", "darwin"]) {
+    // A quote in ps output is a byte of the argument. A file named with one is not the CLI
+    // entry, and no name is recognised by dropping it: such a line is unknown, never a listener.
+    for (const script of [`/opt/sl/bin/sl.js'`, `'/opt/sl/bin/sl.js'`, `/opt/sl/bin/"sl.js`, `"/opt/sl/bin/sl.js"`]) {
+      assert.equal(kind(`node ${script} ${listen}`, platform), "unknown", `${platform} ${script}`);
+    }
+    // The same entry, unquoted as ps prints it, is a listener.
+    assert.equal(kind(`/usr/bin/node /opt/sl/bin/sl.js ${listen}`, platform), "listener", platform);
     assert.equal(kind(`node /home/dev/my fork/bin/sl.js ${listen}`, platform), "unknown", platform);
     assert.equal(kind(`node /usr/lib/node_modules/npm/bin/npx-cli.js /opt/sl/bin/sl.js ${listen}`, platform), "unknown", platform);
     // npm links: the command names are entries on POSIX, and Debian names node "nodejs".
@@ -668,7 +687,7 @@ test("Listener ancestors: a launcher is told from a listener by its executable a
     assert.equal(kind(`nodejs /usr/lib/node_modules/sentinelayer-cli/bin/sl.js ${listen}`, platform), "listener", platform);
   }
   // The checker's own node counts as node whatever it is named.
-  assert.equal(kind(`"${process.execPath}" /opt/sl/bin/sl.js ${listen}`, process.platform), "listener");
+  assert.equal(kind(`${NODE_ON_COMMAND_LINE} /opt/sl/bin/sl.js ${listen}`, process.platform), "listener");
   assert.equal(
     listenerProcessKind({ commandLine: `/opt/node22/bin/node22 /opt/sl/bin/sl.js ${listen}` }, { platform: "linux", nodeExecutable: "/opt/node22/bin/node22" }),
     "listener",
@@ -1275,9 +1294,9 @@ const UNCONFIRMED_PROCESSES = {
   "an executable that is neither node nor a launcher": (sessionId) =>
     `/opt/bin/mystery-runtime /opt/tools/sl/bin/sl.js session listen --session ${sessionId} --agent Codex --interval 60`,
   "node with a preload next to the CLI entry": (sessionId) =>
-    `"${process.execPath}" --require /opt/hook.js /opt/tools/sl/bin/sl.js session listen --session ${sessionId} --agent Codex --interval 60`,
+    `${NODE_ON_COMMAND_LINE} --require /opt/hook.js /opt/tools/sl/bin/sl.js session listen --session ${sessionId} --agent Codex --interval 60`,
   "node with an option this does not know": (sessionId) =>
-    `"${process.execPath}" --some-new-flag value /opt/tools/sl/bin/sl.js session listen --session ${sessionId} --agent Codex --interval 60`,
+    `${NODE_ON_COMMAND_LINE} --some-new-flag value /opt/tools/sl/bin/sl.js session listen --session ${sessionId} --agent Codex --interval 60`,
 };
 
 for (const [shape, commandLine] of Object.entries(UNCONFIRMED_PROCESSES)) {

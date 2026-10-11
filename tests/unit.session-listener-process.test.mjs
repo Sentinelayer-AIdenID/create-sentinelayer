@@ -22,6 +22,10 @@ import {
 } from "../src/session/listener-process.js";
 import { createSession } from "../src/session/store.js";
 
+// node as a real command line shows it: Windows quotes a path with a space; ps(1) prints POSIX
+// arguments unquoted (a quote there would be part of the argument).
+const NODE_ON_COMMAND_LINE = process.platform === "win32" ? `"${process.execPath}"` : process.execPath;
+
 async function seedWorkspace(rootPath) {
   await writeFile(
     path.join(rootPath, "package.json"),
@@ -39,7 +43,7 @@ async function spawnExitedPid() {
 function listenerCommandLine({ sessionId = "sess", agentId = "Codex" } = {}) {
   // Quoted, as a real command line quotes a path with a space.
   return [
-    `"${process.execPath}"`,
+    NODE_ON_COMMAND_LINE,
     path.join("node_modules", "sentinelayer-cli", "bin", "sl.js"),
     "session",
     "listen",
