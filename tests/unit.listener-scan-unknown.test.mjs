@@ -445,6 +445,9 @@ test("Listener scan unknown: session listeners reports local processes as unknow
     assert.equal(payload.count, 1);
     assert.equal(payload.localProcessScan.ok, false);
     assert.equal(payload.localProcessScan.reason, "process_scan_timeout");
+    // No count when the table was not read: null, never 0 (0 would read as "no duplicates").
+    assert.equal(payload.localProcessScan.processCount, null);
+    assert.equal(payload.localProcessScan.duplicateProcessCount, null);
     assert.equal("localProcessCount" in payload.listeners[0], false);
 
     const text = await runSessionCommand([

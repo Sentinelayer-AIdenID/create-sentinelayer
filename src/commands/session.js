@@ -5150,8 +5150,9 @@ export function registerSessionCommand(program) {
       let localProcessScan = {
         ok: false,
         reason: listeners.length > 0 ? "not_scanned" : "no_listener_rows",
-        processCount: 0,
-        duplicateProcessCount: 0,
+        // Not scanned, so no count: null, never 0, so a reader that skips `ok` can't read "no duplicates".
+        processCount: null,
+        duplicateProcessCount: null,
         agents: [],
       };
       if (listeners.length > 0) {
@@ -5182,8 +5183,8 @@ export function registerSessionCommand(program) {
           localProcessScan = {
             ok: false,
             reason: summary.reason,
-            processCount: 0,
-            duplicateProcessCount: 0,
+            processCount: null,
+            duplicateProcessCount: null,
             agents: [],
           };
         }
