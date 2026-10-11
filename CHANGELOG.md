@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.46.3](https://github.com/mrrCarter/create-sentinelayer/compare/v0.46.2...v0.46.3) (2026-10-11)
+
+
+### Bug Fixes
+
+* **session:** recognise listeners started through every bin ([13c7f85](https://github.com/mrrCarter/create-sentinelayer/commit/13c7f85f67c8ccfedcaebe6b9c5359a6517f0b41))
+* **session:** recognise listeners started through every bin ([21981d4](https://github.com/mrrCarter/create-sentinelayer/commit/21981d4a0218cd4653ca5f05878618ddd8537dbc))
+
 ## [0.46.2](https://github.com/mrrCarter/create-sentinelayer/compare/v0.46.1...v0.46.2) (2026-10-11)
 
 
