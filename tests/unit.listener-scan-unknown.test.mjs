@@ -18,6 +18,7 @@ import {
   listenerAncestorPids,
   listenerCommandLineMatches,
   listenerProcessKind,
+  normalizeImageName,
   pidRecordHolder,
   readGlobalListenerPidRecord,
   readListenerPidRecord,
@@ -43,8 +44,9 @@ async function seedWorkspace(rootPath) {
 }
 
 function listenerCommandLine({ sessionId, agentId = "Codex" }) {
+  // Quoted, as a real command line quotes a path with a space.
   return [
-    process.execPath,
+    `"${process.execPath}"`,
     path.join("node_modules", "sentinelayer-cli", "bin", "sl.js"),
     "session",
     "listen",
@@ -321,7 +323,7 @@ test("Listener bins: the wrappers a launch leaves around a listener (npm exec, s
   });
 });
 
-test("Listener scan unknown: --force replaces a verified tracked listener one-for-one when the takeover scan fails, and says so", LISTEN_TEST, async () => {
+test("Listener scan unknown: --force stops nothing when the takeover scan fails, even after the status check confirmed the record", LISTEN_TEST, async () => {
   const sessionId = "scan-unknown-force-tracked";
   const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
   const exited = once(child, "exit", { signal: AbortSignal.timeout(30_000) });
@@ -343,18 +345,20 @@ test("Listener scan unknown: --force replaces a verified tracked listener one-fo
         listenerId: "listener-codex-tracked",
       });
 
-      const { stderr } = await runSessionCommand(listenArgs(sessionId, tempRoot, ["--force"]));
-
+      // A record confirmed a moment ago is no evidence of what holds its pid now, nor of
+      // which processes this command runs under: an unread takeover scan stops nothing.
+      await assert.rejects(
+        runSessionCommand(listenArgs(sessionId, tempRoot, ["--force"])),
+        new RegExp(
+          `Could not confirm that pid ${child.pid} is a session listener --force can replace .*\\(process_scan_timeout\\)\\. No listener was stopped or started\\.`,
+        ),
+      );
       // One scan confirmed the record for the status check; the takeover scan failed.
       assert.deepEqual(scan.timeouts, [LISTENER_PROCESS_SCAN_TIMEOUT_MS, LISTENER_PROCESS_SCAN_TIMEOUT_MS]);
-      assert.match(
-        stderr,
-        new RegExp(`did not complete \\(process_scan_timeout\\); replacing listener pid ${child.pid} only`),
-      );
-      await exited;
-      assert.equal(api.calls.filter((call) => call.method === "GET").length, 1);
-      await assertNoPidRecords(sessionId, tempRoot);
+      assert.deepEqual(api.calls, []);
     });
+    assert.equal(child.exitCode, null, "the recorded listener was stopped");
+    assert.equal(isProcessAlive(child.pid), true, "the recorded listener was stopped");
   } finally {
     if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
     await exited.catch(() => {});
@@ -599,35 +603,59 @@ test("Listener ancestors: the launchers in the table are the shapes the pattern 
 test("Listener ancestors: a launcher is told from a listener by its executable and node's script", () => {
   const listen = "session listen --session s-1 --agent codex --interval 60";
   const kind = (commandLine, platform, name = "") => listenerProcessKind({ commandLine, name }, { platform });
-  // Launchers: the listen command is text in their arguments.
-  for (const platform of ["win32", "linux", "darwin"]) {
+  const PLATFORMS = ["win32", "linux", "darwin"];
+  for (const platform of PLATFORMS) {
+    // Launchers, by name: the listen command is text in their arguments.
+    for (const launcher of ["bash", "sh", "dash", "zsh", "cmd", "powershell", "pwsh", "nohup", "timeout", "env", "screen", "tmux", "script", "setsid", "nice"]) {
+      assert.equal(kind(`/usr/bin/${launcher} node /opt/sl/bin/sl.js ${listen}`, platform), "wrapper", `${platform} ${launcher}`);
+    }
     assert.equal(kind(`/usr/bin/bash -c "node /opt/sl/bin/sl.js ${listen}"`, platform), "wrapper", platform);
-    assert.equal(kind(`sh -c "node /opt/sl/bin/sl.js ${listen}"`, platform), "wrapper", platform);
-    assert.equal(kind(`nohup node /opt/sl/bin/sl.js ${listen}`, platform), "wrapper", platform);
-    assert.equal(kind(`timeout 600 node /opt/sl/bin/sl.js ${listen}`, platform), "wrapper", platform);
-    assert.equal(kind(`node -e "require('child_process')" /opt/sl/bin/sl.js ${listen}`, platform), "wrapper", platform);
-  }
-  // Windows rows come from Win32_Process: Name is the executable, and double quotes group.
-  const win = (commandLine, name) => kind(commandLine, "win32", name);
-  assert.equal(win(String.raw`"C:\Program Files\Git\usr\bin\bash.exe" -c "node C:/sl/bin/sl.js ${listen}"`, "bash.exe"), "wrapper");
-  assert.equal(win(String.raw`C:\Windows\system32\cmd.exe /d /s /c "node C:\sl\bin\sl.js ${listen}"`, "cmd.exe"), "wrapper");
-  assert.equal(win(String.raw`powershell.exe -NoProfile -Command "node C:\sl\bin\sl.js ${listen}"`, "powershell.exe"), "wrapper");
-  assert.equal(win(String.raw`"C:\Program Files\nodejs\node.exe" C:\tools\wrapper.js C:\sl\bin\sl.js ${listen}`, "node.exe"), "wrapper");
-  assert.equal(win(String.raw`"C:\Program Files\nodejs\node.exe" "C:\Program Files\nodejs\node_modules\sentinelayer-cli\bin\sl.js" ${listen}`, "node.exe"), "listener");
-  assert.equal(win(String.raw`"C:\Program Files\nodejs\node.exe" --import ./setup.mjs H:/create-sentinelayer/bin/create-sentinelayer.js ${listen}`, "node.exe"), "listener");
-  // The executable is the one Windows ran, whatever the command line's first word says.
-  assert.equal(win(String.raw`node C:\sl\bin\sl.js ${listen}`, "bash.exe"), "wrapper");
-  // POSIX rows come from ps: the first argument is the executable, and nothing is quoted.
-  assert.equal(kind(`/usr/local/bin/node /usr/local/lib/node_modules/sentinelayer-cli/bin/sl.js ${listen}`, "linux"), "listener");
-  assert.equal(kind(`node /usr/local/bin/sl ${listen}`, "darwin"), "listener");
-  assert.equal(kind(`node --require /opt/hook.js /opt/sl/bin/sl.js ${listen}`, "linux"), "listener");
-  // A script path with a space reads as two arguments there, so node's script cannot be told.
-  assert.equal(kind(`node /home/dev/my fork/bin/sl.js ${listen}`, "linux"), "unknown");
-  assert.equal(kind(`node /opt/tools/wrapper.js /opt/sl/bin/sl.js ${listen}`, "darwin"), "unknown");
-  // No executable named at all.
-  for (const platform of ["win32", "linux", "darwin"]) {
+    // node on a CLI entry, from any of node's names, is the listener.
+    for (const node of ["node", "/usr/bin/nodejs", "NODE.EXE"]) {
+      assert.equal(kind(`"${node}" /opt/sl/bin/sl.js ${listen}`, platform), "listener", `${platform} ${node}`);
+    }
+    assert.equal(kind(`node --no-warnings --title=sl --inspect-port 0 /opt/sl/bin/sl.js ${listen}`, platform), "listener", platform);
+    assert.equal(kind(`node -- /opt/sl/bin/sl.js ${listen}`, platform), "listener", platform);
+    // An executable that is neither is unknown, never a launcher.
+    assert.equal(kind(`/opt/bin/mystery-runtime /opt/sl/bin/sl.js ${listen}`, platform), "unknown", platform);
     assert.equal(kind(unnamedExecutableCommandLine("s-1"), platform), "unknown", platform);
+    // node arguments that cannot be read with certainty are unknown, never a launcher: a
+    // preload (which may load the CLI), an option this does not know (it may take the next
+    // argument), and inline code next to a CLI entry.
+    for (const preload of ["-r /opt/hook.js", "--require /opt/hook.js", "--import=./setup.mjs", "--loader ./l.mjs"]) {
+      assert.equal(kind(`node ${preload} /opt/sl/bin/sl.js ${listen}`, platform), "unknown", `${platform} ${preload}`);
+    }
+    assert.equal(kind(`node --some-new-flag value /opt/sl/bin/sl.js ${listen}`, platform), "unknown", platform);
+    assert.equal(kind(`node -e "require('./x')" /opt/sl/bin/sl.js ${listen}`, platform), "unknown", platform);
+    assert.equal(kind(`node -p 1 /opt/sl/bin/sl.js ${listen}`, platform), "unknown", platform);
+    // Inline code with no CLI entry among the arguments is a launcher.
+    assert.equal(kind(`node -e "spawn('C:/opt/sl/bin/sl.js','session')" ${listen}`, platform), "wrapper", platform);
   }
+  // The executable's name is the Windows process name, whatever the command line says.
+  assert.equal(kind(String.raw`node C:\sl\bin\sl.js ${listen}`, "win32", "bash.exe"), "wrapper");
+  assert.equal(kind(String.raw`bash C:\sl\bin\sl.js ${listen}`, "win32", "node.exe"), "listener");
+  assert.equal(kind(String.raw`C:\sl\bin\sl.js ${listen}`, "win32", "mystery-runtime.exe"), "unknown");
+  // Windows arguments are quoted, so node on another script is certainly a launcher there,
+  // unless a quote is left open.
+  assert.equal(kind(String.raw`"C:\Program Files\nodejs\node.exe" "C:\npm\bin\npx-cli.js" C:\sl\bin\sl.js ${listen}`, "win32", "node.exe"), "wrapper");
+  assert.equal(kind(String.raw`"C:\Program Files\nodejs\node.exe" "C:\Program Files\nodejs\node_modules\sentinelayer-cli\bin\sl.js" ${listen}`, "win32", "node.exe"), "listener");
+  assert.equal(kind(String.raw`"C:\Program Files\nodejs\node.exe" "C:\my tools\bin\sl.js ${listen}`, "win32", "node.exe"), "unknown");
+  // ps prints POSIX arguments unquoted, so a first argument that is not an entry may be the
+  // first piece of an entry path with a space: unknown there.
+  for (const platform of ["linux", "darwin"]) {
+    assert.equal(kind(`node /home/dev/my fork/bin/sl.js ${listen}`, platform), "unknown", platform);
+    assert.equal(kind(`node /usr/lib/node_modules/npm/bin/npx-cli.js /opt/sl/bin/sl.js ${listen}`, platform), "unknown", platform);
+    // npm links: the command names are entries on POSIX, and Debian names node "nodejs".
+    assert.equal(kind(`node /usr/local/bin/sl ${listen}`, platform), "listener", platform);
+    assert.equal(kind(`nodejs /usr/lib/node_modules/sentinelayer-cli/bin/sl.js ${listen}`, platform), "listener", platform);
+  }
+  // The checker's own node counts as node whatever it is named.
+  assert.equal(kind(`"${process.execPath}" /opt/sl/bin/sl.js ${listen}`, process.platform), "listener");
+  assert.equal(
+    listenerProcessKind({ commandLine: `/opt/node22/bin/node22 /opt/sl/bin/sl.js ${listen}` }, { platform: "linux", nodeExecutable: "/opt/node22/bin/node22" }),
+    "listener",
+  );
+  assert.equal(normalizeImageName(String.raw`C:\Program Files\nodejs\NODE.EXE`), "node");
 });
 
 for (const force of [false, true]) {
@@ -802,7 +830,7 @@ for (const force of [false, true]) {
           runSessionCommand(listenArgs(sessionId, tempRoot, force ? ["--force"] : [])),
           (error) => {
             assert.match(error.message, /^Could not confirm whether a session listener is already running/);
-            assert.ok(error.message.includes("(ancestor_unconfirmed)"), error.message);
+            assert.ok(error.message.includes("(listener_unconfirmed)"), error.message);
             assert.match(error.message, /No listener was started\./);
             return true;
           },
@@ -883,13 +911,22 @@ test("Listener ancestors: the walk ends at a cycle, a missing parent and the dep
 test("Listener ancestors: a pid record counts only for the process that wrote it, to each platform's precision", () => {
   const writtenAtMs = Date.parse("2026-10-11T08:00:00.000Z");
   const record = { pid: 500, startedAt: new Date(writtenAtMs).toISOString() };
-  const holder = (startedAtMs, options) => pidRecordHolder(record, { pid: 500, startedAtMs }, options);
+  const listener = "node /opt/sl/bin/sl.js session listen --session s-1 --agent Codex";
+  const holder = (startedAtMs, options) =>
+    pidRecordHolder(record, { pid: 500, startedAtMs, commandLine: listener }, options);
   for (const platform of ["win32", "linux", "darwin"]) {
     // Started before the record was written: the listener that wrote it.
     assert.equal(holder(writtenAtMs - 5_000, { platform }), "confirmed", platform);
     // Unknown on either side proves nothing, so it is never confirmed.
     assert.equal(holder(null, { platform }), "unconfirmed", platform);
-    assert.equal(pidRecordHolder({ pid: 500 }, { pid: 500, startedAtMs: writtenAtMs - 5_000 }, { platform }), "unconfirmed");
+    assert.equal(pidRecordHolder({ pid: 500 }, { pid: 500, startedAtMs: writtenAtMs - 5_000, commandLine: listener }, { platform }), "unconfirmed");
+    // Judged by what the process is: a launcher never wrote a listener's record, and a
+    // process that may be a listener proves nothing. The record's own command line is used
+    // when the scan's row has none.
+    const older = { pid: 500, startedAtMs: writtenAtMs - 5_000 };
+    assert.equal(pidRecordHolder(record, { ...older, commandLine: `bash -c "${listener}"` }, { platform }), "wrapper", platform);
+    assert.equal(pidRecordHolder(record, { ...older, commandLine: `mystery-runtime /opt/sl/bin/sl.js` }, { platform }), "unconfirmed", platform);
+    assert.equal(pidRecordHolder(record, older, { platform, commandLine: listener }), "confirmed", platform);
     // One of the checker's ancestors, or no process at all.
     assert.equal(holder(writtenAtMs - 5_000, { platform, ancestors: new Set([500]) }), "ancestor", platform);
     assert.equal(pidRecordHolder(record, null, { platform }), "gone", platform);
@@ -998,7 +1035,7 @@ const TAKEOVER_SCAN_CHANGES = {
       { pid: process.pid, ppid: listenerPid, startedAtMs: now },
       { pid: listenerPid, ppid: OUTSIDE_PID, startedAtMs: now - 5_000, commandLine: unnamedExecutableCommandLine(sessionId) },
     ],
-    refusal: (pid) => new RegExp(`Could not confirm that pid ${pid} is a session listener --force can replace .*\\(ancestor_unconfirmed\\)\\. No listener was stopped or started\\.`),
+    refusal: (pid) => new RegExp(`Could not confirm that pid ${pid} is a session listener --force can replace .*\\(listener_unconfirmed\\)\\. No listener was stopped or started\\.`),
   },
   "changed hands": {
     rows: (listenerPid, now) => [
@@ -1058,3 +1095,146 @@ test("Listener ancestors: a pid record held by this process's real parent is not
     assert.equal(api.calls.filter((call) => call.method === "GET").length, 1);
   });
 });
+
+// --- Every matching process judged alike ---------------------------------------------------
+
+for (const force of [false, true]) {
+  test(`Listener ancestors: a nohup launcher around a listener elsewhere counts once, through its node child${force ? "; --force stops only the node" : ""}`, LISTEN_TEST, async () => {
+    const sessionId = `uniform-nohup-sibling-${force ? "force" : "plain"}`;
+    const idles = [await spawnIdle(), await spawnIdle()];
+    const [launcher, listener] = idles;
+    try {
+      const now = Date.now();
+      const rows = [
+        { pid: process.pid, ppid: OUTSIDE_PID, startedAtMs: now, commandLine: listenerCommandLine({ sessionId }) },
+        // Another terminal: nohup started node on the CLI's entry, and waits for it.
+        { pid: launcher.pid, ppid: OUTSIDE_PID, startedAtMs: now - 2_000, commandLine: `nohup ${fullListenCommand(sessionId)}` },
+        { pid: listener.pid, ppid: launcher.pid, startedAtMs: now - 1_000, commandLine: nodeListenerCommandLine(sessionId) },
+      ];
+      const matches = await listMatchingListenerProcesses(sessionId, "Codex", { _listProcesses: async () => rows });
+      assert.deepEqual(matches.matches.map((match) => match.pid), [listener.pid]);
+      const summary = await summarizeLocalListenerProcesses(sessionId, ["Codex"], { _listProcesses: async () => rows });
+      assert.equal(summary.processCount, 1);
+      assert.equal(summary.duplicateProcessCount, 0);
+      assert.deepEqual(summary.agents[0].pids, [listener.pid]);
+
+      const scan = scriptedScan([rows]);
+      await withListenHarness({ probes: { listProcesses: scan.listProcesses } }, async ({ tempRoot, api }) => {
+        if (!force) {
+          await assert.rejects(
+            runSessionCommand(listenArgs(sessionId, tempRoot)),
+            new RegExp(`already running for session ${sessionId} as codex \\(pid ${listener.pid}\\)`),
+          );
+          assert.deepEqual(api.calls, []);
+          return;
+        }
+        await runSessionCommand(listenArgs(sessionId, tempRoot, ["--force"]));
+        assert.equal(api.calls.filter((call) => call.method === "GET").length, 1);
+      });
+      if (force) await listener.exited;
+      assert.equal(isRunning(listener), !force);
+      assert.equal(isRunning(launcher), true, "the nohup launcher was stopped");
+    } finally {
+      await stopIdles(idles);
+    }
+  });
+}
+
+// The chain Claude Code's shell tool leaves on Windows when it runs `bash -c "node ... session
+// listen ..."` (or nohup, or timeout) under Git Bash: the tool's two bash.exe carry the
+// whole command, and the inner bash was started by a forked copy of the tool's shell that has
+// exited, so the walk from the listener cannot reach them.
+function msysToolShellRows({ sessionId, now, toolLauncher, toolShell, innerShell, innerStub }) {
+  const listen = fullListenCommand(sessionId);
+  const toolCommand = `"C:\\Program Files\\Git\\bin\\bash.exe" -c "source /c/Users/dev/.claude/shell-snapshots/snapshot.sh && eval 'bash -c \\"${listen}\\"' < /dev/null"`;
+  return [
+    { pid: process.pid, ppid: innerStub, startedAtMs: now, name: "node.exe", commandLine: listenerCommandLine({ sessionId }) },
+    { pid: innerStub, ppid: innerShell, startedAtMs: now - 100, name: "bash.exe", commandLine: `"C:\\Program Files\\Git\\usr\\bin\\bash.exe" -c "${listen}"` },
+    // Its parent, the forked copy of the tool's shell, has exited.
+    { pid: innerShell, ppid: OUTSIDE_PID, startedAtMs: now - 200, name: "bash.exe", commandLine: `"C:\\Program Files\\Git\\usr\\bin\\bash.exe" -c "${listen}"` },
+    { pid: toolShell, ppid: toolLauncher, startedAtMs: now - 5_000, name: "bash.exe", commandLine: toolCommand },
+    { pid: toolLauncher, ppid: OUTSIDE_PID - 1, startedAtMs: now - 5_100, name: "bash.exe", commandLine: toolCommand },
+    { pid: OUTSIDE_PID - 1, startedAtMs: now - 60_000, name: "claude.exe", commandLine: null },
+  ];
+}
+
+for (const force of [false, true]) {
+  test(`Listener ancestors: under Git Bash, the tool shells above a broken parent chain are launchers, so it starts${force ? " and --force stops none of them" : ""}`, LISTEN_TEST, async () => {
+    const sessionId = `uniform-msys-tool-shell-${force ? "force" : "plain"}`;
+    const idles = [await spawnIdle(), await spawnIdle(), await spawnIdle(), await spawnIdle()];
+    const [toolLauncher, toolShell, innerShell, innerStub] = idles;
+    try {
+      const rows = msysToolShellRows({
+        sessionId,
+        now: Date.now(),
+        toolLauncher: toolLauncher.pid,
+        toolShell: toolShell.pid,
+        innerShell: innerShell.pid,
+        innerStub: innerStub.pid,
+      });
+      // Not vacuous: every shell carries the listen command, and the walk does not reach
+      // the tool's two.
+      for (const row of rows.slice(1, 5)) {
+        assert.equal(listenerCommandLineMatches(row.commandLine, { sessionId, agentId: "Codex" }), true, row.commandLine);
+      }
+      assert.deepEqual([...listenerAncestorPids(rows, { pid: process.pid })].sort(), [innerShell.pid, innerStub.pid].sort());
+      const matches = await listMatchingListenerProcesses(sessionId, "Codex", { _listProcesses: async () => rows });
+      assert.deepEqual(matches.matches, []);
+
+      const scan = scriptedScan([rows]);
+      await withListenHarness({ probes: { listProcesses: scan.listProcesses } }, async ({ tempRoot, api }) => {
+        await runSessionCommand(listenArgs(sessionId, tempRoot, force ? ["--force"] : []));
+        assert.deepEqual(scan.timeouts, [LISTENER_PROCESS_SCAN_TIMEOUT_MS]);
+        assert.equal(api.calls.filter((call) => call.method === "GET").length, 1);
+      });
+      for (const idle of idles) assert.equal(isRunning(idle), true, `shell ${idle.pid} was stopped`);
+    } finally {
+      await stopIdles(idles);
+    }
+  });
+}
+
+// Processes that match a listen command but cannot be told to be a listener or a launcher.
+const UNCONFIRMED_PROCESSES = {
+  "an executable that is neither node nor a launcher": (sessionId) =>
+    `/opt/bin/mystery-runtime /opt/tools/sl/bin/sl.js session listen --session ${sessionId} --agent Codex --interval 60`,
+  "node with a preload next to the CLI entry": (sessionId) =>
+    `"${process.execPath}" --require /opt/hook.js /opt/tools/sl/bin/sl.js session listen --session ${sessionId} --agent Codex --interval 60`,
+  "node with an option this does not know": (sessionId) =>
+    `"${process.execPath}" --some-new-flag value /opt/tools/sl/bin/sl.js session listen --session ${sessionId} --agent Codex --interval 60`,
+};
+
+for (const [shape, commandLine] of Object.entries(UNCONFIRMED_PROCESSES)) {
+  for (const force of [false, true]) {
+    test(`Listener ancestors: ${shape} may be a listener, so it refuses${force ? ", and --force stops nothing" : ""}`, LISTEN_TEST, async () => {
+      const sessionId = `uniform-unconfirmed-${shape.replace(/\W+/g, "-")}-${force ? "force" : "plain"}`;
+      const other = await spawnIdle();
+      try {
+        const rows = [
+          { pid: process.pid, ppid: OUTSIDE_PID, startedAtMs: Date.now(), commandLine: listenerCommandLine({ sessionId }) },
+          { pid: other.pid, ppid: OUTSIDE_PID, startedAtMs: Date.now() - 1_000, commandLine: commandLine(sessionId) },
+        ];
+        assert.equal(listenerProcessKind(rows[1]), "unknown");
+        const scan = scriptedScan([rows]);
+        await withListenHarness({ probes: { listProcesses: scan.listProcesses } }, async ({ tempRoot, api }) => {
+          await assert.rejects(
+            runSessionCommand(listenArgs(sessionId, tempRoot, force ? ["--force"] : [])),
+            (error) => {
+              assert.match(error.message, /^Could not confirm whether a session listener is already running/);
+              assert.ok(error.message.includes("(listener_unconfirmed)"), error.message);
+              return true;
+            },
+          );
+          assert.deepEqual(api.calls, []);
+          await assertNoPidRecords(sessionId, tempRoot);
+        });
+        assert.equal(isRunning(other), true, "the process was stopped");
+        // `session listeners` still shows it: it may be a listener.
+        const summary = await summarizeLocalListenerProcesses(sessionId, ["Codex"], { _listProcesses: async () => rows });
+        assert.deepEqual(summary.agents[0].pids, [other.pid]);
+      } finally {
+        await stopIdles([other]);
+      }
+    });
+  }
+}

@@ -78,7 +78,6 @@ import {
   getListenerProcessStatus,
   LISTENER_PROCESS_SCAN_RETRY_TIMEOUT_MS,
   removeListenerPidRecord,
-  requestListenerProcessStop,
   summarizeLocalListenerProcesses,
   stopMatchingListenerProcesses,
   writeListenerPidRecord,
@@ -5530,34 +5529,15 @@ export function registerSessionCommand(program) {
           const stopMatchesResult = await stopMatchingListenerProcesses(normalizedSessionId, agentId, {
             listener: existingListener,
           });
-          if (stopMatchesResult.ok && stopMatchesResult.refused) {
+          if (!stopMatchesResult.ok) {
+            // What the status check found may no longer hold, and an unread table cannot
+            // show which processes this command runs under, so nothing is stopped.
+            throw refuseTakeover({ pid: existingListener.pid, reason: stopMatchesResult.reason });
+          }
+          if (stopMatchesResult.refused) {
             throw refuseTakeover(stopMatchesResult.refused);
           }
-          if (!stopMatchesResult.ok) {
-            // The listener being replaced is known (a pid record or a listener, confirmed on a
-            // full scan moments ago), so stopping it and starting this one never adds a
-            // listener. Only the cleanup of extra copies is skipped, and that is said rather
-            // than assumed.
-            console.error(
-              pc.yellow(
-                `The local process check did not complete (${stopMatchesResult.reason}); replacing listener pid ${existingListener.pid} only. Other copies of this listener, if any, were not checked.`,
-              ),
-            );
-          }
-          const scannedStops = stopMatchesResult.ok ? stopMatchesResult.results : [];
-          let explicitStopResult = null;
-          // Only when the takeover scan could not be read: a scan that was read has judged this
-          // pid itself. The status check confirmed it on a full scan moments ago as outside this
-          // command's parent chain, and a running process cannot join that chain later.
-          if (!stopMatchesResult.ok && existingListener.pid) {
-            explicitStopResult = await requestListenerProcessStop(existingListener.pid);
-          }
-          const failedStops = [
-            ...scannedStops.filter((result) => !result.stopped),
-            ...(explicitStopResult && !explicitStopResult.stopped
-              ? [{ pid: existingListener.pid, ...explicitStopResult }]
-              : []),
-          ];
+          const failedStops = stopMatchesResult.results.filter((result) => !result.stopped);
           if (failedStops.length > 0) {
             const failed = failedStops[0];
             throw new Error(

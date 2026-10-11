@@ -231,11 +231,11 @@ function parentLinkHolds(parent, child, platform) {
  * `parentPid` when the table records none. Every row counts, with or without a command line,
  * so the chain runs through processes that are not this CLI (cmd.exe, a service host).
  *
- * What the walk cannot see on Windows: Git Bash (MSYS) starts an MSYS program such as bash,
- * nohup or timeout from a forked copy of the shell, and that copy exits once the program
- * runs. The program's parent pid then names no live process, so the walk ends there, and a
- * shell above that point whose command line carries the listen command is not known to be an
- * ancestor: it is judged as any other process is.
+ * The walk ends early under Git Bash (MSYS) on Windows: an MSYS program such as bash, nohup or
+ * timeout is started from a forked copy of the shell that exits once the program runs, so its
+ * parent pid names no live process. Counting does not rest on the walk (a launcher is never
+ * counted, wherever it sits: readListenerScan); the walk marks the listeners --force must not
+ * stop, and a listener above such a break is not marked.
  */
 export function listenerAncestorPids(
   rows,
@@ -265,62 +265,120 @@ function checkerAncestors(rows, selfPid) {
   });
 }
 
-const NODE_EXECUTABLES = new Set(["node", "nodejs"]);
-// Node options whose value can be the next argument, which is then not the script.
-const NODE_OPTIONS_WITH_VALUE = new Set([
-  "-r", "--require", "--import", "--loader", "--experimental-loader", "-C", "--conditions",
-  "--inspect-port", "--debug-port", "--title", "--input-type", "--env-file", "--disable-warning",
-]);
-// Node options that run code given on the command line instead of a script.
-const NODE_INLINE_CODE_OPTIONS = new Set(["-e", "--eval", "-p", "--print"]);
-
-// A command line's arguments. Windows command lines quote an argument with spaces in double
-// quotes; ps(1) prints POSIX arguments joined by spaces with no quoting at all.
-function commandLineArguments(commandLine, platform) {
-  const text = normalizeString(commandLine);
-  const parts = platform === "win32" ? text.match(/(?:"[^"]*"?|[^\s"]+)+/g) : text.split(/\s+/);
-  return (parts || []).filter(Boolean).map((part) => part.replace(/["']/g, ""));
-}
-
-function executableBaseName(value) {
+/**
+ * An executable's name as the process kinds below compare it: its file name, without the
+ * directory, lower-cased, and without a trailing ".exe". So `C:\Program Files\nodejs\node.exe`,
+ * `/usr/bin/node` and `NODE` all read as "node".
+ */
+export function normalizeImageName(value) {
   const base = normalizeString(value).split(/[\\/]/).pop().toLowerCase();
   return base.endsWith(".exe") ? base.slice(0, -4) : base;
 }
 
-/**
- * What a process whose command line matches a listen command is:
- * - "listener": this CLI running it. The executable is node (Win32_Process.Name on Windows,
- *   the first argument on POSIX) and node's script, its first argument that is not a node
- *   option, is a CLI entry point.
- * - "wrapper": a process that only carries the command for the process it starts: bash -c,
- *   sh -c, cmd /c, nohup, timeout, powershell, or node running inline code or another script.
- * - "unknown": the command line cannot tell. On POSIX that is node with another first
- *   argument: ps prints arguments unquoted, so a script path with a space reads as two.
- */
-export function listenerProcessKind(row, { platform = process.platform } = {}) {
-  const args = commandLineArguments(row?.commandLine, platform);
-  const executable = executableBaseName(normalizeString(row?.name) || args[0]);
-  if (!executable) return "unknown";
-  if (!NODE_EXECUTABLES.has(executable)) return "wrapper";
-  let index = 1;
-  while (index < args.length && args[index].startsWith("-")) {
-    const option = args[index];
-    if (NODE_INLINE_CODE_OPTIONS.has(option.split("=")[0])) return "wrapper";
-    index += NODE_OPTIONS_WITH_VALUE.has(option) ? 2 : 1;
+// Executables that run this CLI as node. Also the checker's own node, whatever it is named.
+const NODE_IMAGE_NAMES = ["node", "nodejs"];
+// Executables that only start other programs: a command line naming the CLI there is the
+// command they run, not this CLI running.
+const LAUNCHER_IMAGE_NAMES = new Set([
+  "bash", "sh", "dash", "zsh", "cmd", "powershell", "pwsh", "nohup", "timeout", "env",
+  "screen", "tmux", "script", "setsid", "nice",
+]);
+// Node options known to take no value, so the next argument is not theirs.
+const NODE_FLAGS = new Set([
+  "--inspect", "--inspect-brk", "--inspect-wait", "--no-warnings", "--no-deprecation",
+  "--trace-warnings", "--trace-deprecation", "--trace-uncaught", "--throw-deprecation",
+  "--pending-deprecation", "--enable-source-maps", "--expose-gc", "--preserve-symlinks",
+  "--preserve-symlinks-main", "--abort-on-uncaught-exception", "--experimental-vm-modules",
+]);
+// Node options known to take the next argument as their value.
+const NODE_OPTIONS_WITH_VALUE = new Set([
+  "--inspect-port", "--title", "-C", "--conditions", "--input-type", "--env-file",
+  "--disable-warning", "--redirect-warnings",
+]);
+// Node options that load a module before the script; that module may be this CLI.
+const NODE_PRELOAD_OPTIONS = new Set(["-r", "--require", "--import", "--loader", "--experimental-loader"]);
+// Node options that run code given on the command line instead of a script.
+const NODE_INLINE_CODE_OPTIONS = new Set(["-e", "--eval", "-p", "--print", "-pe", "-ep"]);
+
+// A command line's arguments, and whether they were read with certainty. A Windows command
+// line quotes an argument with spaces in double quotes, so it is certain unless a quote is
+// left open. ps(1) prints POSIX arguments joined by spaces with no quoting, so there an
+// argument with a space reads as two (listenerProcessKind allows for that), and a quote
+// character is part of an argument, not quoting; it is dropped for comparison.
+function commandLineArguments(commandLine, platform) {
+  const text = normalizeString(commandLine);
+  if (platform === "win32") {
+    const certain = (text.match(/"/g) || []).length % 2 === 0;
+    const parts = text.match(/(?:"[^"]*"?|[^\s"]+)+/g) || [];
+    return { args: parts.map((part) => part.replace(/"/g, "")).filter(Boolean), certain };
   }
+  const parts = text.split(/\s+/).map((part) => part.replace(/["']/g, ""));
+  return { args: parts.filter(Boolean), certain: true };
+}
+
+/**
+ * What a process whose command line matches a listen command is. Both kinds are allow-listed;
+ * anything else is "unknown", which the listener checks treat as possibly a listener, so
+ * starting and --force refuse.
+ * - "listener": this CLI running it. The executable is node (node, nodejs, or the name of the
+ *   checker's own node) and node's first argument that is not a node option is a CLI entry
+ *   point, read with certainty.
+ * - "wrapper": a launcher, which carries the command for the process it starts: an executable
+ *   in LAUNCHER_IMAGE_NAMES (bash, sh, dash, zsh, cmd, powershell, pwsh, nohup, timeout, env,
+ *   screen, tmux, script, setsid, nice); or node whose first non-option argument is certainly
+ *   another script, or node running inline code (-e, -p) with no CLI entry among its arguments.
+ * - "unknown": anything else, including node whose arguments cannot be read with certainty: a
+ *   preload option (-r, --require, --import, --loader), inline code next to a CLI entry, an
+ *   option this does not know (it may take the next argument), a quote left open, or, on
+ *   POSIX, a first argument that is not an entry (it may be the first piece of an entry path
+ *   with a space, which ps prints unquoted).
+ * The executable is Win32_Process.Name on Windows and the first argument on POSIX, compared
+ * as normalizeImageName gives it.
+ */
+export function listenerProcessKind(
+  row,
+  { platform = process.platform, nodeExecutable = process.execPath } = {},
+) {
+  const { args, certain } = commandLineArguments(row?.commandLine, platform);
+  const image = normalizeImageName(normalizeString(row?.name) || args[0]);
+  if (LAUNCHER_IMAGE_NAMES.has(image)) return "wrapper";
+  const nodeImages = new Set([...NODE_IMAGE_NAMES, normalizeImageName(nodeExecutable)].filter(Boolean));
+  if (!nodeImages.has(image)) return "unknown";
+  if (!certain) return "unknown";
   const entries =
     platform === "win32" ? CLI_ENTRY_SCRIPTS : [...CLI_ENTRY_SCRIPTS, ...CLI_COMMAND_NAMES];
-  const script = normalizeString(args[index]).toLowerCase();
-  if (new RegExp(`[\\\\/](?:${entries.map(escapeRegExp).join("|")})$`).test(script)) return "listener";
+  const entryPath = new RegExp(`[\\\\/](?:${entries.map(escapeRegExp).join("|")})$`);
+  const isEntry = (arg) => entryPath.test(normalizeString(arg).toLowerCase());
+  let index = 1;
+  for (; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--") {
+      index += 1;
+      break;
+    }
+    if (!arg.startsWith("-") || arg === "-") break;
+    const name = arg.split("=")[0];
+    if (NODE_INLINE_CODE_OPTIONS.has(name)) {
+      return args.slice(1).some(isEntry) ? "unknown" : "wrapper";
+    }
+    if (NODE_PRELOAD_OPTIONS.has(name)) return "unknown";
+    if (arg.includes("=") || NODE_FLAGS.has(arg)) continue;
+    if (!NODE_OPTIONS_WITH_VALUE.has(arg)) return "unknown";
+    index += 1;
+  }
+  const script = args[index];
+  if (!script) return "unknown";
+  if (isEntry(script)) return "listener";
   return platform === "win32" ? "wrapper" : "unknown";
 }
 
 /**
- * One scan read for one session and agent from the checking process's side. `listeners` are
- * the processes running that listener, an ancestor of the checker among them marked
- * `ancestor: true`. `unconfirmed` are ancestors whose command line matches but which cannot
- * be told apart from a launcher (listenerProcessKind "unknown"). The checker itself, and the
- * ancestors that only launch it (wrappers), are in neither.
+ * One scan read for one session and agent from the checking process's side. Every process
+ * whose command line matches, other than the checker, is judged by listenerProcessKind:
+ * `listeners` are the listeners, `unconfirmed` the processes that may be one, and launchers
+ * are in neither, wherever they sit. Ancestry is the second layer: a listener or possible
+ * listener that is an ancestor of the checker is marked `ancestor: true`, and the takeover
+ * never stops one.
  */
 function readListenerScan(rows, { sessionId, agentId, selfPid, ancestors }) {
   const listeners = [];
@@ -329,13 +387,10 @@ function readListenerScan(rows, { sessionId, agentId, selfPid, ancestors }) {
     if (row.pid === selfPid || !listenerCommandLineMatches(row.commandLine, { sessionId, agentId })) {
       continue;
     }
-    if (!ancestors.has(row.pid)) {
-      listeners.push(row);
-      continue;
-    }
     const kind = listenerProcessKind(row);
-    if (kind === "listener") listeners.push({ ...row, ancestor: true });
-    if (kind === "unknown") unconfirmed.push({ ...row, ancestor: true });
+    if (kind === "wrapper") continue;
+    const marked = ancestors.has(row.pid) ? { ...row, ancestor: true } : row;
+    (kind === "listener" ? listeners : unconfirmed).push(marked);
   }
   return { listeners, unconfirmed };
 }
@@ -386,9 +441,10 @@ async function scanProcessTable(listProcesses, timeoutMs) {
 /**
  * Listener processes for this session and agent: { ok: true, matches } when the process
  * table was read, { ok: false, reason } when it could not be. A failed scan has no
- * `matches`, so it can never be read as "no listener". The checking process (`excludePid`)
- * is never a match, nor an ancestor of it that only launches it (readListenerScan); an
- * ancestor that is a listener, or may be one, is a match marked `ancestor: true`.
+ * `matches`, so it can never be read as "no listener". The matches are the listeners and the
+ * processes that may be one (readListenerScan); the checking process (`excludePid`) and
+ * launchers never are, and a match that is an ancestor of the checker is marked
+ * `ancestor: true`.
  */
 export async function listMatchingListenerProcesses(
   sessionId,
@@ -676,22 +732,31 @@ async function listenerStatusFromRecord(
 
 /**
  * What the process at a pid record's pid is, judged on one scan (`row` is its row there, or
- * null). A listener writes its record after it starts, so the process that wrote it started
- * no later than the record's `startedAt`, within the platform's precision (startTimeSlackMs).
- * - "confirmed": that process, so the listener the record names.
+ * null; `commandLine` is the one read for the record, used when the row has none). A
+ * listener writes its record after it starts, so the process that wrote it started no later
+ * than the record's `startedAt`, within the platform's precision (startTimeSlackMs).
+ * - "confirmed": a listener (listenerProcessKind) that started by then: the one that wrote it.
  * - "ancestor": one of the checking process's ancestors (`ancestors`). The scan judges those
- *   (readListenerScan): a launcher of the checker is no listener, whatever its record says.
- * - "reused": a process started after the record was written, so not the one that wrote it.
+ *   (readListenerScan), so the record adds nothing.
+ * - "wrapper": a launcher, which never wrote a listener's record.
+ * - "reused": a listener started after the record was written, so not the one that wrote it.
  * - "gone": no longer in the process table.
- * - "unconfirmed": either start time is unknown, so the record proves nothing either way.
+ * - "unconfirmed": a process that may be a listener, or a start time that is unknown, so the
+ *   record proves nothing either way.
  */
 export function pidRecordHolder(
   record,
   row,
-  { ancestors = new Set(), platform = process.platform } = {},
+  { ancestors = new Set(), commandLine = "", platform = process.platform } = {},
 ) {
   if (!row) return "gone";
   if (ancestors.has(row.pid)) return "ancestor";
+  const kind = listenerProcessKind(
+    { name: row.name, commandLine: row.commandLine || commandLine },
+    { platform },
+  );
+  if (kind === "wrapper") return "wrapper";
+  if (kind === "unknown") return "unconfirmed";
   const recordedAtMs = Date.parse(normalizeString(record?.startedAt));
   if (!Number.isFinite(row.startedAtMs) || !Number.isFinite(recordedAtMs)) return "unconfirmed";
   return row.startedAtMs > recordedAtMs + startTimeSlackMs(platform) ? "reused" : "confirmed";
@@ -708,7 +773,7 @@ export function pidRecordHolder(
  *
  * Anything uncertain makes the answer "unknown" (`running: null`, with `reason`), never
  * "not_running": a scan that could not be read, a record whose process cannot be confirmed
- * ("pid_record_unconfirmed"), or an ancestor that may be a listener ("ancestor_unconfirmed").
+ * ("pid_record_unconfirmed"), or a process that may be a listener ("listener_unconfirmed").
  */
 export async function getListenerProcessStatus(
   sessionId,
@@ -761,7 +826,7 @@ export async function getListenerProcessStatus(
   const unconfirmedRecords = [];
   for (const status of tracked) {
     const row = table.get(Number(status.pid)) || null;
-    const holder = pidRecordHolder(status.record, row, { ancestors });
+    const holder = pidRecordHolder(status.record, row, { ancestors, commandLine: status.commandLine });
     if (holder === "confirmed") {
       confirmed.push({ ...status, startedAtMs: row.startedAtMs, ancestor: false });
     } else if (holder === "unconfirmed") {
@@ -790,7 +855,7 @@ export async function getListenerProcessStatus(
   if (unconfirmedRecords.length > 0) {
     return unknown("pid_record_unconfirmed", unconfirmedRecords[0].record);
   }
-  if (unconfirmed.length > 0) return unknown("ancestor_unconfirmed");
+  if (unconfirmed.length > 0) return unknown("listener_unconfirmed");
   // A listener that is an ancestor of this process is the one reported, so that --force
   // refuses rather than stop it.
   const ancestorListener = listeners.find((row) => row.ancestor);
@@ -840,10 +905,11 @@ function takeoverTargetRefusal(listener, row, { selfPid, ancestors, platform = p
  * The --force takeover: stops every listener process one scan finds for this session and
  * agent, and `listener`, the one the status check found, when this scan does not list it.
  * It never stops the checker or an ancestor of it, and never on a guess: when the scan finds
- * a listener that is an ancestor ("ancestor_listener"), an ancestor that may be one
- * ("ancestor_unconfirmed"), or cannot confirm `listener` (takeoverTargetRefusal), it stops
+ * a listener that is an ancestor ("ancestor_listener"), a process that may be a listener
+ * ("listener_unconfirmed"), or cannot confirm `listener` (takeoverTargetRefusal), it stops
  * nothing and returns { ok: true, refused: { pid, reason } }. When the process table cannot
- * be read it stops nothing and returns { ok: false, reason }.
+ * be read it stops nothing and returns { ok: false, reason }; the caller then stops nothing
+ * either, since what it found earlier may no longer hold.
  */
 export async function stopMatchingListenerProcesses(
   sessionId,
@@ -873,7 +939,7 @@ export async function stopMatchingListenerProcesses(
   });
   const ancestorListener = listeners.find((row) => row.ancestor);
   if (ancestorListener) return refuse(ancestorListener.pid, "ancestor_listener");
-  if (unconfirmed.length > 0) return refuse(unconfirmed[0].pid, "ancestor_unconfirmed");
+  if (unconfirmed.length > 0) return refuse(unconfirmed[0].pid, "listener_unconfirmed");
   const matches = [...listeners];
   const listenerPid = Number(listener?.pid);
   if (Number.isInteger(listenerPid) && listenerPid > 0 && !matches.some((row) => row.pid === listenerPid)) {

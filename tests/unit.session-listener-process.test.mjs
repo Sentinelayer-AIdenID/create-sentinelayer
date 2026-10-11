@@ -37,8 +37,9 @@ async function spawnExitedPid() {
 }
 
 function listenerCommandLine({ sessionId = "sess", agentId = "Codex" } = {}) {
+  // Quoted, as a real command line quotes a path with a space.
   return [
-    process.execPath,
+    `"${process.execPath}"`,
     path.join("node_modules", "sentinelayer-cli", "bin", "sl.js"),
     "session",
     "listen",
