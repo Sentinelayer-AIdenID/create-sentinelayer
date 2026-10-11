@@ -291,8 +291,13 @@ test("Listener scan unknown: a completed scan that finds a duplicate refuses as 
 test("Listener bins: a duplicate started through create-sentinelayer.js from a checkout is refused", LISTEN_TEST, async () => {
   const sessionId = "scan-finds-create-sentinelayer";
   const duplicatePid = process.pid + 200_002;
-  // As the process table shows a checkout's listener: no "sentinelayer-cli" anywhere in it.
-  const commandLine = `"C:\\Program Files\\nodejs\\node.exe" H:/create-sentinelayer/bin/create-sentinelayer.js session listen --session ${sessionId} --agent Codex`;
+  // As this platform's process table shows a checkout's listener: no "sentinelayer-cli"
+  // anywhere in it. Windows quotes the path with a space; ps prints POSIX arguments unquoted.
+  const listen = `session listen --session ${sessionId} --agent Codex`;
+  const commandLine =
+    process.platform === "win32"
+      ? `"C:\\Program Files\\nodejs\\node.exe" H:/create-sentinelayer/bin/create-sentinelayer.js ${listen}`
+      : `/usr/bin/node /home/u/create-sentinelayer/bin/create-sentinelayer.js ${listen}`;
   const scan = scriptedScan([[{ pid: duplicatePid, commandLine }]]);
   await withListenHarness({ probes: { listProcesses: scan.listProcesses } }, async ({ tempRoot, api }) => {
     await assert.rejects(
