@@ -114,22 +114,35 @@ export function listenerCommandLineMatches(
   );
 }
 
+function optionalPositiveNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+// A row is { pid, commandLine, ppid, startedAtMs }. `ppid` (the parent's pid) and
+// `startedAtMs` (when the process was created) are null when the scan did not give them.
 function normalizeProcessRows(rows = []) {
   if (!Array.isArray(rows)) return [];
   return rows
     .map((row) => ({
       pid: Number(row?.pid ?? row?.ProcessId ?? row?.processId),
       commandLine: normalizeString(row?.commandLine ?? row?.CommandLine ?? row?.command ?? row?.args),
+      ppid: optionalPositiveNumber(row?.ppid ?? row?.ParentProcessId),
+      startedAtMs: optionalPositiveNumber(row?.startedAtMs ?? row?.CreationMs),
     }))
     .filter((row) => Number.isInteger(row.pid) && row.pid > 0 && row.commandLine);
 }
+
+// Win32_Process.CreationDate as milliseconds since the epoch, for a PowerShell expression.
+const WINDOWS_CREATION_MS = "if ($_.CreationDate) { ([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds() }";
 
 async function listWindowsProcesses({ timeoutMs }) {
   const command = [
     "$ErrorActionPreference = 'Stop';",
     "$rows = Get-CimInstance Win32_Process |",
     `Where-Object { $_.CommandLine -and ($_.CommandLine -match '${cliEntryPattern("win32")}') } |`,
-    "Select-Object ProcessId,CommandLine;",
+    `Select-Object ProcessId,ParentProcessId,CommandLine,@{n='CreationMs';e={ ${WINDOWS_CREATION_MS} }};`,
     "if ($rows) { $rows | ConvertTo-Json -Compress }",
   ].join(" ");
   const { stdout } = await execFileAsync(
@@ -143,18 +156,85 @@ async function listWindowsProcesses({ timeoutMs }) {
   return normalizeProcessRows(Array.isArray(parsed) ? parsed : [parsed]);
 }
 
+// No creation times here: on POSIX a parent link needs none (see listenerAncestorPids).
 async function listPosixProcesses({ timeoutMs }) {
-  const { stdout } = await execFileAsync("ps", ["-eo", "pid=,command="], {
+  const { stdout } = await execFileAsync("ps", ["-eo", "pid=,ppid=,command="], {
     timeout: timeoutMs,
     maxBuffer: 10 * 1024 * 1024,
   });
   return String(stdout || "")
     .split(/\r?\n/)
     .map((line) => {
-      const match = line.match(/^\s*(\d+)\s+(.*)$/);
-      return match ? { pid: Number(match[1]), commandLine: normalizeString(match[2]) } : null;
+      const match = line.match(/^\s*(\d+)\s+(\d+)\s+(.*)$/);
+      return match
+        ? { pid: Number(match[1]), ppid: Number(match[2]), commandLine: normalizeString(match[3]) }
+        : null;
     })
     .filter(Boolean);
+}
+
+// How far up the parent chain the walk goes. Real launch chains are a handful deep.
+const MAX_ANCESTOR_DEPTH = 64;
+
+// Whether `parent` (the row at `child`'s recorded parent pid) is still the process that
+// started `child`. A parent is always created before its child, so a "parent" created after
+// it holds a reused pid. On POSIX a recorded parent is always the live parent, because an
+// exiting process's children are re-parented to init or a subreaper; so with no creation
+// times the link holds there. Windows never re-parents: the parent pid of a child whose
+// parent exited can name any process started since, so there a link holds only when both
+// creation times are known and in order.
+function parentLinkHolds(parent, child, platform) {
+  if (parent.startedAtMs !== null && child.startedAtMs !== null) {
+    return parent.startedAtMs <= child.startedAtMs;
+  }
+  return platform !== "win32";
+}
+
+/**
+ * The pids of a process's ancestors in one scan of the process table: its parent, that
+ * process's parent, and so on, while each parent is in the table, still the process that
+ * started its child (parentLinkHolds), not seen before (a cycle), and within
+ * MAX_ANCESTOR_DEPTH. The walk starts at the parent the table records for `pid`, or at
+ * `parentPid` when the table records none.
+ *
+ * A launcher that carries the whole command (`bash -c "node .../bin/sl.js session listen
+ * ..."`, nohup, timeout, the nested shells an agent's shell tool runs) matches the listener
+ * pattern as the listener itself does. These are the processes the listener checks must not
+ * count: the listener being started is their child, not their duplicate.
+ *
+ * What the walk cannot see on Windows: Git Bash (MSYS) starts an MSYS program such as bash,
+ * nohup or timeout from a forked copy of the shell, and that copy exits once the program
+ * runs. The program's parent pid then names no live process, so the walk ends there, and a
+ * shell above that point whose command line carries the listen command is still counted.
+ */
+export function listenerAncestorPids(
+  rows,
+  { pid = process.pid, parentPid = null, platform = process.platform } = {},
+) {
+  const table = new Map(normalizeProcessRows(rows).map((row) => [row.pid, row]));
+  const selfPid = Number(pid);
+  let child = table.get(selfPid) || { pid: selfPid, ppid: null, startedAtMs: null };
+  let next = child.ppid ?? optionalPositiveNumber(parentPid);
+  const ancestors = new Set();
+  while (next !== null && next !== selfPid && !ancestors.has(next) && ancestors.size < MAX_ANCESTOR_DEPTH) {
+    const parent = table.get(next);
+    if (!parent || !parentLinkHolds(parent, child, platform)) break;
+    ancestors.add(parent.pid);
+    child = parent;
+    next = parent.ppid;
+  }
+  return ancestors;
+}
+
+// The pids a listener scan never counts: the checking process and its ancestors (above).
+// When the checker is this process and its row has no parent, its parent is process.ppid.
+function checkerAndAncestorPids(rows, excludePid) {
+  const selfPid = Number(excludePid);
+  const ancestors = listenerAncestorPids(rows, {
+    pid: selfPid,
+    parentPid: selfPid === process.pid ? process.ppid : null,
+  });
+  return new Set([selfPid, ...ancestors]);
 }
 
 // Resolves to the process rows, or rejects when the table cannot be read (a timeout, a
@@ -168,14 +248,20 @@ async function listProcessTable({ timeoutMs = LISTENER_PROCESS_SCAN_TIMEOUT_MS }
 // The probes `session listen` uses; replaced only through setListenerProcessProbesForTests.
 let activeListProcessTable = listProcessTable;
 let activeReadProcessCommandLine = readProcessCommandLine;
+let activeReadProcessStartTime = readProcessStartTime;
 
 /**
- * Test seam: replace the process-table scan and the per-pid command-line read that the
- * listener commands use. Call with no argument to restore the real probes.
+ * Test seam: replace the process-table scan and the per-pid command-line and start-time
+ * reads that the listener commands use. Call with no argument to restore the real probes.
  */
-export function setListenerProcessProbesForTests({ listProcesses = null, readCommandLine = null } = {}) {
+export function setListenerProcessProbesForTests({
+  listProcesses = null,
+  readCommandLine = null,
+  readStartTime = null,
+} = {}) {
   activeListProcessTable = listProcesses || listProcessTable;
   activeReadProcessCommandLine = readCommandLine || readProcessCommandLine;
+  activeReadProcessStartTime = readStartTime || readProcessStartTime;
 }
 
 function processScanFailureReason(error) {
@@ -203,7 +289,8 @@ async function scanProcessTable(listProcesses, timeoutMs) {
 /**
  * Listener processes for this session and agent: { ok: true, matches } when the process
  * table was read, { ok: false, reason } when it could not be. A failed scan has no
- * `matches`, so it can never be read as "no listener".
+ * `matches`, so it can never be read as "no listener". The checking process (`excludePid`)
+ * and its ancestors are never matches (listenerAncestorPids).
  */
 export async function listMatchingListenerProcesses(
   sessionId,
@@ -216,11 +303,11 @@ export async function listMatchingListenerProcesses(
 ) {
   const scan = await scanProcessTable(_listProcesses, timeoutMs);
   if (!scan.ok) return scan;
-  const excluded = Number(excludePid);
+  const excluded = checkerAndAncestorPids(scan.rows, excludePid);
   return {
     ok: true,
     matches: scan.rows.filter((row) =>
-      row.pid !== excluded &&
+      !excluded.has(row.pid) &&
       listenerCommandLineMatches(row.commandLine, { sessionId, agentId })
     ),
   };
@@ -243,8 +330,8 @@ export async function summarizeLocalListenerProcesses(
   if (!scan.ok) {
     return { ok: false, reason: scan.reason, sessionId: normalizedSessionId };
   }
-  const excluded = Number(excludePid);
-  const candidates = scan.rows.filter((row) => row.pid !== excluded);
+  const excluded = checkerAndAncestorPids(scan.rows, excludePid);
+  const candidates = scan.rows.filter((row) => !excluded.has(row.pid));
   const agents = uniqueAgentIds.map((agentId) => {
     const matches = candidates
       .filter((row) => listenerCommandLineMatches(row.commandLine, {
@@ -307,6 +394,47 @@ export async function readProcessCommandLine(pid) {
       : await readPosixCommandLine(numericPid);
   } catch {
     return "";
+  }
+}
+
+async function readWindowsStartTime(pid) {
+  const command = [
+    "$ErrorActionPreference = 'Stop';",
+    `Get-CimInstance Win32_Process -Filter "ProcessId = ${Number(pid)}" |`,
+    `ForEach-Object { ${WINDOWS_CREATION_MS} }`,
+  ].join(" ");
+  const { stdout } = await execFileAsync(
+    "powershell.exe",
+    ["-NoProfile", "-NonInteractive", "-Command", command],
+    { windowsHide: true, timeout: 2000 },
+  );
+  return optionalPositiveNumber(normalizeString(stdout));
+}
+
+// ps(1) gives the elapsed time as [[dd-]hh:]mm:ss on Linux, macOS and busybox alike.
+async function readPosixStartTime(pid) {
+  const { stdout } = await execFileAsync("ps", ["-p", String(Number(pid)), "-o", "etime="], {
+    timeout: 2000,
+  });
+  const match = normalizeString(stdout).match(/^(?:(?:(\d+)-)?(\d+):)?(\d+):(\d+)$/);
+  if (!match) return null;
+  const [days, hours, minutes, seconds] = match.slice(1).map((part) => Number(part || 0));
+  return Date.now() - (((days * 24 + hours) * 60 + minutes) * 60 + seconds) * 1000;
+}
+
+/**
+ * When the process with this pid was created, in milliseconds since the epoch, or null when
+ * it cannot be read. On POSIX it is only good to the second (see PROCESS_START_SLACK_MS).
+ */
+export async function readProcessStartTime(pid) {
+  const numericPid = Number(pid);
+  if (!Number.isInteger(numericPid) || numericPid <= 0) return null;
+  try {
+    return process.platform === "win32"
+      ? await readWindowsStartTime(numericPid)
+      : await readPosixStartTime(numericPid);
+  } catch {
+    return null;
   }
 }
 
@@ -445,6 +573,23 @@ export async function removeListenerPidRecord(
   return Boolean(localRemoved || globalRemoved);
 }
 
+// How much later than a pid record's `startedAt` its process may appear to have started: ps
+// reports elapsed time in whole seconds, so a POSIX start time can read up to a second late.
+const PROCESS_START_SLACK_MS = 2_000;
+
+// Whether the process now at a record's pid was created after the record was written. The
+// listener writes its record after it starts, so such a process is not that listener: its pid
+// was reused. This is what keeps the record check from counting the checker's own launchers
+// (whose command lines match like a listener's): a launcher holding a recorded pid holds a
+// pid whose listener had already exited, so it was created after the record. When either time
+// is unknown the record is judged by its command line alone, as before.
+async function recordPidWasReused(record, readStartTime) {
+  const recordedAtMs = Date.parse(normalizeString(record.startedAt));
+  if (!Number.isFinite(recordedAtMs)) return false;
+  const startedAtMs = await readStartTime(record.pid);
+  return Number.isFinite(startedAtMs) && startedAtMs > recordedAtMs + PROCESS_START_SLACK_MS;
+}
+
 async function listenerStatusFromRecord(
   record,
   {
@@ -452,6 +597,7 @@ async function listenerStatusFromRecord(
     agentId,
     recordScope,
     _readProcessCommandLine = activeReadProcessCommandLine,
+    _readProcessStartTime = activeReadProcessStartTime,
   } = {},
 ) {
   const alive = isProcessAlive(record.pid);
@@ -467,7 +613,8 @@ async function listenerStatusFromRecord(
     };
   }
   const commandLine = await _readProcessCommandLine(record.pid);
-  if (!listenerCommandLineMatches(commandLine, { sessionId, agentId })) {
+  const matches = listenerCommandLineMatches(commandLine, { sessionId, agentId });
+  if (!matches || (await recordPidWasReused(record, _readProcessStartTime))) {
     return {
       state: "not_running",
       running: false,
@@ -495,9 +642,10 @@ async function listenerStatusFromRecord(
 
 /**
  * Whether a listener for this session and agent is running on this machine. `state` is
- * "running", "not_running" or "unknown". A live pid record whose command line matches is
- * "running" without a scan. Otherwise the process table decides, and when it cannot be read
- * the answer is "unknown" (`running: null`, with `reason`), never "not_running".
+ * "running", "not_running" or "unknown". A live pid record whose command line matches, and
+ * whose process is not newer than the record (recordPidWasReused), is "running" without a
+ * scan. Otherwise the process table decides, and when it cannot be read the answer is
+ * "unknown" (`running: null`, with `reason`), never "not_running".
  */
 export async function getListenerProcessStatus(
   sessionId,
@@ -507,6 +655,7 @@ export async function getListenerProcessStatus(
     homeDir = os.homedir(),
     scanTimeoutMs = LISTENER_PROCESS_SCAN_TIMEOUT_MS,
     _readProcessCommandLine = activeReadProcessCommandLine,
+    _readProcessStartTime = activeReadProcessStartTime,
     _listProcesses = activeListProcessTable,
   } = {},
 ) {
@@ -528,6 +677,7 @@ export async function getListenerProcessStatus(
       agentId,
       recordScope: entry.recordScope,
       _readProcessCommandLine,
+      _readProcessStartTime,
     });
     if (status.running) {
       return status;

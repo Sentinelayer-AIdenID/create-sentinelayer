@@ -1,7 +1,7 @@
 import "./setup-env.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import os from "node:os";
@@ -246,6 +246,75 @@ test("Listener bins: on POSIX the real process scan finds a listener started thr
     assert.match(scan.matches[0].commandLine, /[\\/]bin[\\/]sentinel session listen /);
   } finally {
     if (started) await stopIdle(started);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+// Why the real nested-shell test cannot run here, or null when it can. On Windows the bash on
+// PATH must be Git Bash (MSYS), not WSL's, which cannot run this node on a C:/ path.
+function nestedShellSkipReason() {
+  const probe = spawnSync("bash", ["-c", "uname -s"], { encoding: "utf-8", timeout: 10_000 });
+  if (probe.error || probe.status !== 0) return "bash is not available";
+  if (process.platform === "win32" && !/MINGW|MSYS|CYGWIN/i.test(probe.stdout)) {
+    return `the bash on PATH is not Git Bash (${probe.stdout.trim() || "no uname"})`;
+  }
+  return null;
+}
+
+// A stand-in listener: started as `.../bin/sl.js session listen --session S --agent A ...`,
+// it runs the real scan and prints what it counts, and every match before any exclusion.
+function scanningListenerScript(moduleUrl) {
+  return [
+    `import { listMatchingListenerProcesses } from ${JSON.stringify(moduleUrl)};`,
+    "const sessionId = process.argv[process.argv.indexOf('--session') + 1];",
+    "const agentId = process.argv[process.argv.indexOf('--agent') + 1];",
+    "const timeoutMs = 20000;",
+    "const counted = await listMatchingListenerProcesses(sessionId, agentId, { timeoutMs });",
+    "const every = await listMatchingListenerProcesses(sessionId, agentId, { timeoutMs, excludePid: -1 });",
+    "const pids = (scan) => (scan.ok ? scan.matches.map((match) => match.pid) : scan.reason);",
+    "process.stdout.write(JSON.stringify({ pid: process.pid, counted: pids(counted), every: pids(every) }) + '\\n');",
+    "",
+  ].join("\n");
+}
+
+const nestedShellSkip = nestedShellSkipReason();
+
+test("Listener ancestors: a real listener started inside bash -c launchers counts none of them", { timeout: 90_000, skip: nestedShellSkip || false }, async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sl-listener-ancestors-"));
+  const binDir = path.join(root, "bin");
+  await mkdir(binDir, { recursive: true });
+  const script = path.join(binDir, "sl.js");
+  await writeFile(path.join(root, "package.json"), JSON.stringify({ type: "module" }));
+  await writeFile(script, scanningListenerScript(new URL("../src/session/listener-process.js", import.meta.url).href));
+  const sessionId = `listener-ancestors-${randomUUID()}`;
+  const toShellPath = (value) => value.split(path.sep).join("/");
+  const listen = `"${toShellPath(process.execPath)}" ${toShellPath(script)} session listen --session ${sessionId} --agent codex --interval 60`;
+  // Two launchers above the listener, each carrying the whole listen command; the trailing
+  // `; true` keeps a shell waiting as its child's parent instead of exec-ing into it. On POSIX
+  // that is one bash inside another. Under Git Bash a bash that forks to run node stays as
+  // node's parent next to the bash that forked it, so one `bash -c` gives the two; a second,
+  // outer bash would not be seen, because an MSYS program started from an MSYS shell is
+  // started by a forked copy of that shell that then exits, which leaves no parent link to it.
+  const shellCommand = process.platform === "win32" ? `${listen}; true` : `bash -c '${listen}; true'; true`;
+  const outer = spawn("bash", ["-c", shellCommand], { stdio: ["ignore", "pipe", "pipe"] });
+  const exited = once(outer, "exit", { signal: AbortSignal.timeout(80_000) });
+  let stdout = "";
+  let stderr = "";
+  outer.stdout.on("data", (chunk) => { stdout += chunk; });
+  outer.stderr.on("data", (chunk) => { stderr += chunk; });
+  try {
+    await exited;
+    const line = stdout.split(/\r?\n/).find((entry) => entry.startsWith("{"));
+    assert.ok(line, `no result from the listener: ${stdout} ${stderr}`);
+    const result = JSON.parse(line);
+    // Not vacuous: before exclusion the scan sees the listener and both launchers above it.
+    assert.ok(Array.isArray(result.every), `scan failed: ${result.every}`);
+    assert.ok(result.every.includes(result.pid), JSON.stringify(result));
+    assert.ok(result.every.length >= 3, `expected the listener and two launchers: ${JSON.stringify(result)}`);
+    assert.deepEqual(result.counted, [], JSON.stringify(result));
+  } finally {
+    if (outer.exitCode === null && outer.signalCode === null) outer.kill("SIGTERM");
+    await exited.catch(() => {});
     await rm(root, { recursive: true, force: true });
   }
 });
