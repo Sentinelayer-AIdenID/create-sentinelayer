@@ -202,6 +202,9 @@ export const BRIDGE_DENIED_INPUTS = Object.freeze({
   "ring-owner": {
     gatewayUrl: "the gateway that receives the user's token",
   },
+  "session.join": {
+    recoverAdmission: "restores an agent credential using the delegator's retained private key; CLI control only",
+  },
   "swarm.create": {
     target: "the site that this plan tests",
   },

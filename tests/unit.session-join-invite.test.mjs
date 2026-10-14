@@ -108,6 +108,15 @@ test("Unit session join invite: accepts reserved seat before verifying membershi
           },
         });
       }
+      if (method === "GET" && endpoint.endsWith("/api/v1/sessions/agent-grants?limit=100")) {
+        return fakeJsonResponse(200, {
+          grants: [{ id: "synthetic-codex", agentId: "codex", role: "reviewer", exists: true, revoked: false, revokedAt: null }],
+          nextAfter: null,
+        });
+      }
+      if (method === "PUT" && endpoint.endsWith("/api/v1/sessions/sess-web/presence")) {
+        return fakeJsonResponse(200, { agentId: "codex", status: "ok", recorded: true, ttlSeconds: 90 });
+      }
       if (method === "GET" && endpoint.includes("/api/v1/sessions/sess-web/events/before?")) {
         return fakeJsonResponse(200, { events: [], beforeSequence: null });
       }
@@ -138,9 +147,19 @@ test("Unit session join invite: accepts reserved seat before verifying membershi
     const eventPosts = calls.filter(
       (call) => call.method === "POST" && call.endpoint.endsWith("/api/v1/sessions/sess-web/events"),
     );
+    const grantIndex = calls.findIndex(
+      (call) => call.method === "GET" && call.endpoint.endsWith("/api/v1/sessions/agent-grants?limit=100"),
+    );
+    const presenceIndex = calls.findIndex(
+      (call) => call.method === "PUT" && call.endpoint.endsWith("/api/v1/sessions/sess-web/presence"),
+    );
     assert.ok(acceptIndex >= 0, "invite accept call should be made");
     assert.ok(verifyIndex >= 0, "session verification call should be made");
     assert.ok(acceptIndex < verifyIndex, "invite accept must happen before membership verification");
+    assert.ok(verifyIndex < grantIndex, "membership must be verified before the existing agent grant");
+    assert.ok(grantIndex < presenceIndex, "the existing agent grant must be verified before presence");
+    assert.equal(calls[presenceIndex].body.agentId, "codex");
+    assert.equal(calls.some((call) => call.method === "POST" && call.endpoint.includes("/agent-grants")), false);
     assert.equal(eventPosts.length, 0, "accepted onboarding identity must not append transcript rows");
 
     const acceptCall = calls[acceptIndex];
@@ -154,6 +173,7 @@ test("Unit session join invite: accepts reserved seat before verifying membershi
     assert.match(String(acceptCall.headers["Idempotency-Key"] || ""), /^sl-cli-session-invite-accept-/);
 
     assert.equal(payload.command, "session join");
+    assert.equal(payload.joined, true);
     assert.equal(payload.invitationAccepted, true);
     assert.equal(payload.agentId, "codex");
     assert.equal(payload.role, "reviewer");
