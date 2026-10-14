@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import pc from "picocolors";
 import { resolveActiveAuthSession } from "./service.js";
+import { readStoredSessionMetadata } from "./session-store.js";
 import { resolveAgentAdmissionTarget } from "../session/admission-auth.js";
 import { authLoginHint } from "../ui/command-hints.js";
 import { isAuthenticated } from "./credential-destinations.js";
@@ -378,7 +379,9 @@ export async function checkAuthGate(args) {
         resolveError = "session_invalid";
       }
     } else {
-      resolveError = "no_session";
+      // A keyring/decryption failure leaves the metadata intact. That is not
+      // absence, and recommending logout would destroy recoverable sign-in.
+      resolveError = (await readStoredSessionMetadata()) ? "session_token_missing" : "no_session";
     }
   } catch (error) {
     resolveError = error instanceof Error ? `session_read_error: ${error.message}` : "session_read_error";
@@ -405,15 +408,19 @@ export function printAuthRequired(failureReason = null) {
   if (reason === "session_expired") {
     console.error("  Your stored session has expired. Log in again:");
   } else if (reason === "session_token_missing") {
-    console.error("  Your session metadata is present but the token is missing");
-    console.error("  (likely a keyring read failure or mismatched storage).");
+    console.error("  Your session metadata is present but its credential cannot be read.");
+    console.error("  Check the current user/home, keyring, encryption key and file permissions.");
+    console.error("  Your stored credentials were not cleared; repair storage before signing in again.");
     console.error("");
-    console.error("  " + pc.yellow("Fix:") + " log out to clear the stale metadata, then log in:");
-    console.error("    " + pc.cyan("sentinelayer-cli auth logout"));
+    process.exitCode = 1;
+    return;
   } else if (reason && reason.startsWith("session_read_error")) {
     console.error("  Session read failed: " + pc.yellow(reason.replace(/^session_read_error:\s*/, "")));
-    console.error("  Log out and back in to reset local state:");
-    console.error("    " + pc.cyan("sentinelayer-cli auth logout"));
+    console.error("  Check the current user/home and credential-file permissions.");
+    console.error("  Your stored credentials were not cleared; do not log out to repair a read error.");
+    console.error("");
+    process.exitCode = 1;
+    return;
   } else {
     console.error("  Log in to SentinelLayer to use CLI commands:");
   }

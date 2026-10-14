@@ -33,6 +33,7 @@ import {
   unregisterAgent,
 } from "../session/agent-registry.js";
 import { inferSessionAgentIdentity } from "../session/agent-identity.js";
+import { legacyJoinAdmissionRefusal, verifyLegacyAgentJoin } from "../session/agent-access.js";
 import { startSenti, stopSenti } from "../session/daemon.js";
 import {
   getDaemonStatus,
@@ -3437,6 +3438,7 @@ export function registerSessionCommand(program) {
     .option("--no-wait", "Request admission and return immediately with the approval URL")
     .option("--wait-seconds <n>", "How long to wait for approval before returning pending", "900")
     .option("--cancel-admission", "Cancel this workspace's pending admission request for the session")
+    .option("--recover-admission", "Recover a live admission with the retained agent key; requires the unchanged --goal/scope/ttl")
     .option("--json", "Emit machine-readable output")
     .action(async (sessionId, options, command) => {
       const normalizedSessionId = normalizeString(sessionId);
@@ -3455,6 +3457,27 @@ export function registerSessionCommand(program) {
       // the local registration and every later implicit command name the same agent.
       if (!explicitAgent) assertCanonicalAgentId(legacyName, "--name");
       const requestedAgent = canonicalAgentId(explicitAgent || legacyName);
+      if (options.recoverAdmission && !normalizeString(options.goal)) {
+        throw new Error("--recover-admission requires --goal and the admission's unchanged scope/ttl.");
+      }
+      const rejectLegacyJoin = (verification, agentId) => {
+        process.exitCode = 4;
+        const payload = {
+          command: "session join", joined: false, sessionId: normalizedSessionId,
+          agentId, remoteAgentVerification: verification,
+        };
+        if (emitJson) console.log(JSON.stringify(payload, null, 2));
+        else {
+          const hint = verification.code.includes("UNAVAILABLE")
+            ? "Retry when the API/presence service is available; no new approval was requested."
+            : verification.code.includes("CONTRACT_MISMATCH")
+              ? "Verify the CLI/server contract; no new authorization was created."
+              : verification.code === "LEGACY_GRANT_ROLE_MISMATCH"
+                ? "Use the already-granted role, or request an explicit owner-approved change."
+                : "Request scoped admission with --goal, or have the owner explicitly authorize its legacy grant.";
+          console.log(pc.red(`Agent was not joined: ${verification.code}. ${hint}`));
+        }
+      };
       if (options.cancelAdmission) {
         const cancelled = await cancelAdmission(normalizedSessionId, {
           agentId: requestedAgent,
@@ -3472,6 +3495,13 @@ export function registerSessionCommand(program) {
         if (emitJson) console.log(JSON.stringify(payload, null, 2));
         else console.log(`Admission request ${payload.admission.admissionId || ""} cancelled.`);
         return;
+      }
+      if (requestedAgent && !normalizeString(options.goal)) {
+        const refusal = await legacyJoinAdmissionRefusal(normalizedSessionId, requestedAgent);
+        if (refusal) {
+          rejectLegacyJoin(refusal, requestedAgent);
+          return;
+        }
       }
       // Membership first. Only a member may ask for an agent to be admitted, so an
       // invitation is accepted BEFORE the admission request, never after.
@@ -3491,13 +3521,14 @@ export function registerSessionCommand(program) {
             : null;
       }
       let admission = null;
+      let admissionJoinOptions = null;
       if (normalizeString(options.goal)) {
         const admissionAgent = requestedAgent;
         if (!admissionAgent) {
           throw new Error("--goal requires --agent <id>: admission is requested for one named agent.");
         }
         const waitSeconds = Number.parseInt(String(options.waitSeconds ?? "900"), 10);
-        admission = await runAdmissionJoin(normalizedSessionId, {
+        admissionJoinOptions = {
           agentId: admissionAgent,
           displayName: legacyName && explicitAgent ? legacyName : "",
           model: options.model,
@@ -3508,6 +3539,7 @@ export function registerSessionCommand(program) {
           actions: parseAdmissionScope(options.scope),
           ttlSeconds: parseAdmissionTtlSeconds(options.ttl),
           wait: options.wait !== false,
+          recoverActive: Boolean(options.recoverAdmission),
           waitTimeoutMs: (Number.isFinite(waitSeconds) && waitSeconds >= 0 ? waitSeconds : 900) * 1000,
           targetPath,
           onPending: ({ approveUrl, phase }) => {
@@ -3523,7 +3555,8 @@ export function registerSessionCommand(program) {
             else if (phase === "identity") console.log(pc.yellow(line));
             else console.log(line);
           },
-        });
+        };
+        admission = await runAdmissionJoin(normalizedSessionId, admissionJoinOptions);
         if (admission.status !== "active") {
           // Only an ACTIVE admission joins. Pending, denied, cancelled or expired never
           // registers the agent or materializes the room for it.
@@ -3550,6 +3583,34 @@ export function registerSessionCommand(program) {
         }
       }
 
+      const admittedAgentId = admission ? requestedAgent : "";
+      const acceptedOnboarding = normalizeSessionOnboarding(
+        invitationAcceptResult?.onboarding,
+        invitationAcceptResult?.claimedSeat,
+      );
+      const acceptedAgentId = normalizeString(acceptedOnboarding?.agentId);
+      if (!admission && !explicitAgent && acceptedAgentId) {
+        assertCanonicalAgentId(acceptedAgentId, "the invitation's agent id");
+      }
+      const agentSeed = admission ? admittedAgentId : explicitAgent || acceptedAgentId || legacyName;
+      const resolvedAgentId = await defaultAgentId(agentSeed, targetPath);
+      if (admission && resolvedAgentId !== admittedAgentId) {
+        throw new Error(`join would register "${resolvedAgentId}", not the admitted agent "${admittedAgentId}".`);
+      }
+      const roleWasExplicit = optionWasSetByCli(command, "role");
+      const role =
+        normalizeString(roleWasExplicit ? options.role : acceptedOnboarding?.role || options.role) ||
+        "coder";
+      const model = normalizeString(options.model) || "cli";
+      const namedLegacyAgent = !admission && Boolean(agentSeed || normalizeString(process.env.SENTINELAYER_AGENT_ID));
+      if (namedLegacyAgent) {
+        const refusal = await legacyJoinAdmissionRefusal(normalizedSessionId, resolvedAgentId);
+        if (refusal) {
+          rejectLegacyJoin(refusal, resolvedAgentId);
+          return;
+        }
+      }
+
       // PR #483 contract: verify the session exists and the caller has access
       // BEFORE materializing local cache state. Without this we'd silently
       // create a phantom local NDJSON for a session that's archived or owned
@@ -3564,20 +3625,35 @@ export function registerSessionCommand(program) {
       // grant's receipt, and never with the human token. A cached "active" is not
       // reported until this succeeds (a revoked grant is not joined), and nothing
       // about the room is fetched on the human's authority.
-      const admittedAgentId = admission ? requestedAgent : "";
       let admissionReceipt = null;
       if (admission) {
-        try {
-          admissionReceipt = await withAgentAdmission(normalizedSessionId, admittedAgentId, () =>
+        const verifyAdmissionReceipt = async () => {
+          const receipt = await withAgentAdmission(normalizedSessionId, admittedAgentId, () =>
             fetchOwnAdmissionReceipt(normalizedSessionId, { targetPath }),
           );
           // The grant must be for EXACTLY the identity this join registers, byte for
           // byte: a receipt for any other spelling is a different agent's authority.
-          const receiptAgent = String(admissionReceipt?.agentId ?? "");
+          const receiptAgent = String(receipt?.agentId ?? "");
           if (receiptAgent !== admittedAgentId) {
             throw new Error(
               `the admission is for agent "${receiptAgent || "(none)"}", not "${admittedAgentId}"`,
             );
+          }
+          return receipt;
+        };
+        try {
+          try {
+            admissionReceipt = await verifyAdmissionReceipt();
+          } catch (error) {
+            // One key-possession recovery for a stale bearer, never a different
+            // identity, denied scope, provider/network failure or generic 403.
+            if (options.recoverAdmission || !(error instanceof SentinelayerApiError) ||
+                ![401, 403].includes(error.status) || error.code !== "INVALID_TOKEN") throw error;
+            admission = await runAdmissionJoin(normalizedSessionId, {
+              ...admissionJoinOptions, recoverActive: true,
+            });
+            if (admission.status !== "active") throw new Error("The admission is not active; recovery did not join the agent.");
+            admissionReceipt = await verifyAdmissionReceipt();
           }
         } catch (error) {
           process.exitCode = 4;
@@ -3594,7 +3670,7 @@ export function registerSessionCommand(program) {
             },
           };
           if (emitJson) console.log(JSON.stringify(payload, null, 2));
-          else console.log(pc.red(`The API no longer accepts this agent's admission; it was not joined.`));
+          else console.log(pc.red(`The API no longer accepts this agent's admission; it was not joined. For a live grant with a retained key, retry the unchanged request with --recover-admission.`));
           return;
         }
         admission = { ...admission, verified: true, receipt: admissionReceipt };
@@ -3622,6 +3698,16 @@ export function registerSessionCommand(program) {
       }
 
       const remoteSession = verification.session || {};
+      let legacyAgentVerification = null;
+      if (namedLegacyAgent) {
+        legacyAgentVerification = await verifyLegacyAgentJoin(normalizedSessionId, {
+          agentId: resolvedAgentId, role, model, targetPath, remoteSession,
+        });
+        if (!legacyAgentVerification.ok) {
+          rejectLegacyJoin(legacyAgentVerification, resolvedAgentId);
+          return;
+        }
+      }
       const localSession = await ensureLocalSessionForRemoteCommand(normalizedSessionId, {
         targetPath,
         title: normalizeString(remoteSession.title),
@@ -3637,29 +3723,6 @@ export function registerSessionCommand(program) {
             )
           : { skipped: true, reason: "the grant does not include session.read" };
 
-      const acceptedOnboarding = normalizeSessionOnboarding(
-        invitationAcceptResult?.onboarding,
-        invitationAcceptResult?.claimedSeat,
-      );
-      const acceptedAgentId = normalizeString(acceptedOnboarding?.agentId);
-      // An admitted join registers the admitted identity and nothing else. Otherwise an
-      // invitation's onboarding agent id is the identity only when none was given, and
-      // it is held to the same canonical rule before anything is registered locally.
-      if (!admission && !explicitAgent && acceptedAgentId) {
-        assertCanonicalAgentId(acceptedAgentId, "the invitation's agent id");
-      }
-      const agentSeed = admission ? admittedAgentId : explicitAgent || acceptedAgentId || legacyName;
-      const resolvedAgentId = await defaultAgentId(agentSeed, targetPath);
-      if (admission && resolvedAgentId !== admittedAgentId) {
-        throw new Error(`join would register "${resolvedAgentId}", not the admitted agent "${admittedAgentId}".`);
-      }
-      const roleWasExplicit = optionWasSetByCli(command, "role");
-      const role =
-        normalizeString(roleWasExplicit ? options.role : acceptedOnboarding?.role || options.role) ||
-        "coder";
-      const model = normalizeString(options.model) || "cli";
-      const hasConcreteAgentIdentity = Boolean(explicitAgent || acceptedAgentId);
-
       // Registration updates the local participant projection and returns
       // onboarding directly to this process. It never writes join, identity,
       // or coaching rows into the transcript.
@@ -3671,7 +3734,7 @@ export function registerSessionCommand(program) {
         clientKind: "cli",
         role,
         trackProcessExit: false,
-        awaitRemoteSync: hasConcreteAgentIdentity,
+        preserveIdentity: Boolean(admission || namedLegacyAgent),
       });
       const agentJoinRelayed = false;
       const localBriefingPayload =
@@ -3714,6 +3777,7 @@ export function registerSessionCommand(program) {
         materializedLocalSession: localSession.materialized,
         refreshedLocalSession: Boolean(localSession.refreshed),
         verificationSource: verification.source,
+        remoteAgentVerification: legacyAgentVerification,
         joinHydration,
         eventCount: Number.isFinite(eventCount) ? eventCount : 0,
         agentCount: Number.isFinite(agentCount) ? agentCount : 0,

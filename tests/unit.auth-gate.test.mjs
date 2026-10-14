@@ -4,9 +4,9 @@ import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
-import { mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
+import { mkdtemp, rename, rm, unlink, writeFile } from "node:fs/promises";
 
-import { checkAuthGate } from "../src/auth/gate.js";
+import { checkAuthGate, printAuthRequired } from "../src/auth/gate.js";
 import { writeStoredSession } from "../src/auth/session-store.js";
 import { bearerOf } from "./credential-probe.mjs";
 
@@ -373,6 +373,76 @@ test("Unit auth gate: rejects stored session when token expiry is missing", asyn
     else process.env.USERPROFILE = previousUserProfile;
     if (previousDisableKeyring === undefined) delete process.env.SENTINELAYER_DISABLE_KEYRING;
     else process.env.SENTINELAYER_DISABLE_KEYRING = previousDisableKeyring;
+    await rm(tempHome, { recursive: true, force: true });
+  }
+});
+
+test("Unit auth gate: expired stored authority is still rejected, not silently recovered", async () => {
+  const tempHome = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-expired-gate-"));
+  const previousEnv = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+  try {
+    process.env.HOME = tempHome;
+    process.env.USERPROFILE = tempHome;
+    await writeStoredSession({
+      apiUrl: "https://api.sentinelayer.com", token: "synthetic_expired",
+      tokenExpiresAt: new Date(Date.now() - 60_000).toISOString(),
+    }, { homeDir: tempHome });
+    const result = await checkAuthGate(["audit"]);
+    assert.equal(result.authenticated, false);
+    assert.equal(result.failureReason, "session_expired");
+  } finally {
+    for (const [name, value] of Object.entries(previousEnv)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    await rm(tempHome, { recursive: true, force: true });
+  }
+});
+
+test("Unit auth gate: read failures recommend profile/permission repair without clearing sign-in", () => {
+  const previousError = console.error;
+  const previousExitCode = process.exitCode;
+  const output = [];
+  try {
+    console.error = (...values) => output.push(values.join(" "));
+    printAuthRequired("session_read_error: EACCES");
+    assert.match(output.join("\n"), /credential-file permissions/);
+    assert.doesNotMatch(output.join("\n"), /auth logout|auth login/);
+    assert.equal(process.exitCode, 1);
+  } finally {
+    console.error = previousError;
+    process.exitCode = previousExitCode;
+  }
+});
+
+test("Unit auth gate: missing encryption key is unavailable storage, not absent sign-in", async () => {
+  const tempHome = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-missing-key-gate-"));
+  const previousEnv = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+  const previousError = console.error;
+  const previousExitCode = process.exitCode;
+  const output = [];
+  try {
+    process.env.HOME = tempHome;
+    process.env.USERPROFILE = tempHome;
+    await writeStoredSession({
+      apiUrl: "https://api.sentinelayer.com", token: "synthetic_retained",
+      tokenExpiresAt: "2099-01-01T00:00:00Z",
+    }, { homeDir: tempHome });
+    const keyPath = path.join(tempHome, ".sentinelayer", "keys", "credentials.key");
+    await rename(keyPath, `${keyPath}.retained`);
+    const result = await checkAuthGate(["audit"]);
+    assert.equal(result.authenticated, false);
+    assert.equal(result.failureReason, "session_token_missing");
+    console.error = (...values) => output.push(values.join(" "));
+    printAuthRequired(result.failureReason);
+    assert.doesNotMatch(output.join("\n"), /auth logout|auth login/);
+  } finally {
+    console.error = previousError;
+    process.exitCode = previousExitCode;
+    for (const [name, value] of Object.entries(previousEnv)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
     await rm(tempHome, { recursive: true, force: true });
   }
 });

@@ -7,6 +7,7 @@ import open from "open";
 import { loadConfig } from "../config/service.js";
 import { scopedAdmissionAuth } from "./admission-scope.js";
 import {
+  CredentialDestinationRefused,
   DEFAULT_API_URL,
   assertTrustedApiUrl,
   credentialFor,
@@ -453,6 +454,7 @@ async function rotateStoredApiTokenIfNeeded({
       tokenPrefix: issued.token_prefix || null,
       tokenExpiresAt: issued.expires_at || null,
       user: session.user,
+      aidenid: session.aidenid,
     },
     { homeDir }
   );
@@ -490,7 +492,8 @@ async function rotateStoredApiTokenIfNeeded({
  *   tokenTtlDays?: number,
  *   ide?: string,
  *   cliVersion?: string,
- *   homeDir?: string
+ *   homeDir?: string,
+ *   onAuthorize?: (details: { authorizeUrl: string, browserOpened: boolean }) => void | Promise<void>
  * }} [options]
  * @returns {Promise<{
  *   apiUrl: string,
@@ -521,6 +524,7 @@ export async function loginAndPersistSession({
   ide = DEFAULT_IDE_NAME,
   cliVersion = "",
   homeDir,
+  onAuthorize = () => {},
 } = {}) {
   const apiUrl = await resolveApiUrl({ cwd, env, explicitApiUrl, homeDir });
   // The token this flow issues is the user's, so the API that issues it must be the configured
@@ -547,6 +551,10 @@ export async function loginAndPersistSession({
       browserOpened = false;
     }
   }
+
+  // Headless hosts must receive the URL before approval polling can complete.
+  // The command renders this on stderr in JSON mode, keeping stdout parseable.
+  await onAuthorize({ authorizeUrl, browserOpened });
 
   const approval = await pollCliAuthSession({
     apiUrl,
@@ -768,7 +776,8 @@ export async function resolveActiveAuthSession({
  *   homeDir?: string
  * }} [options]
  * @returns {Promise<{
- *   authenticated: boolean,
+ *   authenticated: boolean | null,
+ *   validation: "none" | "not_checked" | "verified" | "rejected" | "unavailable" | "storage_unavailable",
  *   apiUrl: string,
  *   source: string | null,
  *   storage: string | null,
@@ -805,20 +814,25 @@ export async function getAuthStatus({
   });
 
   if (!session) {
+    // Encrypted metadata can survive a missing/unreadable key or keyring.
+    // Distinguish recoverable storage from actual absence without creating a
+    // replacement key, validating remotely, or claiming authentication.
+    const stored = await readStoredSessionMetadata({ homeDir });
     return {
-      authenticated: false,
+      authenticated: stored ? null : false,
+      validation: stored ? "storage_unavailable" : "none",
       apiUrl: await resolveApiUrl({ cwd, env, explicitApiUrl, homeDir }),
-      source: null,
-      storage: null,
-      user: null,
-      aidenid: null,
+      source: stored ? "storage_unknown" : null,
+      storage: stored?.storage || null,
+      user: stored ? normalizeUser(stored.user || {}) : null,
+      aidenid: stored?.aidenid || null,
       remoteUser: null,
       remoteError: null,
       rotated: false,
-      tokenExpiresAt: null,
-      tokenPrefix: null,
-      tokenId: null,
-      filePath: null,
+      tokenExpiresAt: stored?.tokenExpiresAt || null,
+      tokenPrefix: stored?.tokenPrefix || null,
+      tokenId: stored?.tokenId || null,
+      filePath: stored?.filePath || null,
     };
   }
 
@@ -829,12 +843,12 @@ export async function getAuthStatus({
       remoteUser = normalizeUser(await fetchCurrentUser({ apiUrl: session.apiUrl, credential: session.credential }));
     } catch (error) {
       remoteError =
-        error instanceof SentinelayerApiError
+        error instanceof SentinelayerApiError || error instanceof CredentialDestinationRefused
           ? {
               code: error.code,
               message: error.message,
-              status: error.status,
-              requestId: error.requestId,
+              status: error instanceof CredentialDestinationRefused ? 403 : error.status,
+              requestId: error.requestId || null,
             }
           : {
               code: "UNKNOWN",
@@ -845,8 +859,13 @@ export async function getAuthStatus({
     }
   }
 
+  const validationUnavailable = remoteError && (
+    [408, 425, 429, 499].includes(remoteError.status) || remoteError.status >= 500
+  );
   return {
-    authenticated: !remoteError,
+    // Unknown remote health is neither a successful validation nor a logout.
+    authenticated: validationUnavailable ? null : !remoteError,
+    validation: validationUnavailable ? "unavailable" : remoteError ? "rejected" : checkRemote ? "verified" : "not_checked",
     apiUrl: session.apiUrl,
     source: session.source,
     storage: session.storage,

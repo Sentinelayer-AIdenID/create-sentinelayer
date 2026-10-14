@@ -5,7 +5,7 @@ import "./setup-env.mjs";
 // REQUEST time. A route-id or preimage mismatch fails here, not first in prod.
 
 import assert from "node:assert/strict";
-import { createPublicKey, randomBytes, randomUUID, verify as verifyBytes } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey, randomBytes, randomUUID, sign as signBytes, verify as verifyBytes } from "node:crypto";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import os from "node:os";
@@ -15,6 +15,8 @@ import test from "node:test";
 import {
   CLAIM_DOMAIN,
   CLAIM_FIELDS,
+  RECOVERY_DOMAIN,
+  RECOVERY_FIELDS,
   admissionCredentialPath,
   agentKeyPath,
   readAdmissionCredentialState,
@@ -23,6 +25,7 @@ import {
   publishKeyFile,
   parseTtlSeconds,
   runAdmissionJoin,
+  withAdmissionCredentialLock,
 } from "../src/session/admission.js";
 import { canonicalPreimage } from "../src/session/admission-preimage.js";
 import { createSessionMutationCsrfToken } from "../src/session/invitations.js";
@@ -33,10 +36,31 @@ const TOKEN = "unit-test-human-bearer";
 // The fake API is the configured API: the user's credential is only sent to that origin.
 process.env.SENTINELAYER_API_URL = "https://api.test";
 
+test("recovery proof is byte-identical to the Python API fixture", () => {
+  const fields = {
+    admissionId: "00000000-0000-4000-8000-000000000001", sessionId: "test-room", agentId: "test-agent",
+    publicKey: "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+    keyThumbprint: "56475aa75463474c0285df5dbf2bcab73da651358839e9b77481b2eab107708c",
+    nonce: "AAAAAHDb2awAAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHw",
+    delegatorUserId: "00000000-0000-4000-8000-000000000002",
+    tenantUserId: "00000000-0000-4000-8000-000000000003", grantId: "test-grant", passportId: "test-passport",
+    goalDigest: "a".repeat(64), actions: ["session.post", "session.read"], policyVersion: "admission-v0.1",
+    expiresAt: 1893459600, aidenidIdentityId: "test-identity", aidenidHandle: "test-agent@example.invalid",
+    challengeExpiresAt: 1893456300,
+  };
+  const preimage = canonicalPreimage(fields, { domain: RECOVERY_DOMAIN, fields: [...RECOVERY_FIELDS] });
+  assert.equal(createHash("sha256").update(preimage).digest("hex"), "6e67c9a0c3763946bce9f56027c6eab2fc4e3a399d71f5620f6e08b63633f71d");
+  // RFC8410 PKCS#8 framing; inert fixture seed 00..1f, never a deployed key.
+  const key = createPrivateKey({ key: Buffer.concat([
+    Buffer.from("302e020100300506032b657004220420", "hex"), Buffer.from(Array.from({ length: 32 }, (_, i) => i)),
+  ]), format: "der", type: "pkcs8" });
+  assert.equal(signBytes(null, preimage, key).toString("base64url"), "_-Nr_gUTPQhqOfQaw9KPDPRMfRQpaL3VotyczsPeeXCe63arHhNMP6bi8Lxp8Qvuggk1f8P4_FpspRv7DuJiCQ");
+});
+
 // reportsIdentityReadiness=false is a server that issues the claim challenge on
 // approval and never reports identity readiness (the shape sentinelayer-api served
 // before identity-gated claims).
-function fakeApi({ onPoll, reportsIdentityReadiness = true } = {}) {
+function fakeApi({ onPoll, reportsIdentityReadiness = true, onRecoveryChallenge, onRecoveryResult } = {}) {
   const admissions = new Map();
   const calls = [];
   const expectCsrf = (headers, routeId, idempotencyKey) => {
@@ -84,7 +108,7 @@ function fakeApi({ onPoll, reportsIdentityReadiness = true } = {}) {
       const ok = verifyBytes(null, canonicalPreimage(fields, { domain: CLAIM_DOMAIN, fields: [...CLAIM_FIELDS] }), publicKey, Buffer.from(body.signature, "base64url"));
       if (!ok) throw new Error("claim proof did not verify");
       adm.status = "active";
-      return {
+      adm.claimed = {
         admissionId: adm.id,
         status: "active",
         identity: { subject: `sl-agent:u/${adm.body.agentId}`, passportId: "pid", passportStatus: "issued", keyThumbprint: "t".repeat(64), popAssurance: "agent_held_key", email: { status: "provisioned", address: `${adm.body.agentId}@agents.test` }, passport: { passport_id: "pid" } },
@@ -93,6 +117,45 @@ function fakeApi({ onPoll, reportsIdentityReadiness = true } = {}) {
         jev: { verificationStatus: "not_evaluated" },
         credential: { token: `sladm_${"S".repeat(43)}`, deliveredOnce: true },
       };
+      return adm.claimed;
+    }
+    const recoveryMatch = url.match(/\/admissions\/([^/]+)\/recover(\/challenge)?$/);
+    if (recoveryMatch) {
+      const adm = admissions.get(decodeURIComponent(recoveryMatch[1]));
+      assert.equal(adm.status, "active", "only a live grant can be recovered");
+      const preimage = {
+        admissionId: adm.id, sessionId: SID, agentId: adm.body.agentId,
+        publicKey: adm.body.publicKey, keyThumbprint: adm.claimed.identity.keyThumbprint,
+        delegatorUserId: "human-1", tenantUserId: "tenant-1", grantId: adm.claimed.grant.grantId,
+        passportId: adm.claimed.identity.passportId, goalDigest: adm.claimed.grant.goalDigest,
+        actions: [...adm.claimed.grant.actions].sort(), policyVersion: "admission-v0.1",
+        expiresAt: adm.claimed.grant.expiresAt, aidenidIdentityId: "email-id-1",
+        aidenidHandle: adm.claimed.identity.email.address,
+        nonce: adm.recoveryNonce, challengeExpiresAt: Math.floor(Date.now() / 1000) + 300,
+      };
+      if (recoveryMatch[2]) {
+        expectCsrf(headers, "POST /api/v1/sessions/{session_id}/admissions/{admission_id}/recover/challenge", idempotencyKey);
+        adm.recoveryNonce = randomBytes(40).toString("base64url");
+        preimage.nonce = adm.recoveryNonce;
+        adm.recoveryPreimage = preimage;
+        const challenge = { admissionId: adm.id, status: "active", recovery: {
+          domain: RECOVERY_DOMAIN, fields: [...RECOVERY_FIELDS], preimage,
+        } };
+        onRecoveryChallenge?.(challenge);
+        return challenge;
+      }
+      expectCsrf(headers, "POST /api/v1/sessions/{session_id}/admissions/{admission_id}/recover", idempotencyKey);
+      assert.equal(body.nonce, adm.recoveryNonce);
+      const publicKey = createPublicKey({ key: { kty: "OKP", crv: "Ed25519", x: adm.body.publicKey }, format: "jwk" });
+      assert.equal(verifyBytes(null, canonicalPreimage(adm.recoveryPreimage, {
+        domain: RECOVERY_DOMAIN, fields: [...RECOVERY_FIELDS],
+      }), publicKey, Buffer.from(body.signature, "base64url")), true);
+      adm.recoveryNonce = null;
+      const result = { ...adm.claimed, recovered: true, credential: {
+        token: `sladm_${randomBytes(32).toString("base64url")}`, deliveredOnce: true,
+      } };
+      onRecoveryResult?.(result);
+      return result;
     }
     throw new Error(`unexpected mutation ${url}`);
   };
@@ -221,7 +284,8 @@ test("approved admission waits for verified AIdenID identity evidence before cla
   assert.equal(pending.length, 1);
   assert.equal(pending[0].phase, "identity");
   assert.equal(pending[0].identityReady, false);
-  assert.equal(api.calls.filter((call) => call.method === "GET").length, 2);
+  assert.equal(api.calls.filter((call) => call.method === "GET").length, 3,
+    "two readiness polls plus a fresh nonce read inside the credential publication lock");
   assert.equal(api.calls.filter((call) => call.url.endsWith("/claim")).length, 1);
 });
 
@@ -386,6 +450,177 @@ test("only the IDENTICAL request is reused locally, with no request at all", asy
   const reused = await runAdmissionJoin(SID, base(api, dirs));
   assert.equal(reused.reused, true);
   assert.equal(api.calls.length, before);
+});
+
+test("email and cryptographic identity survive a cached reconnect without exposing the bearer", async () => {
+  const dirs = await scratch();
+  const api = fakeApi({ onPoll: (adm) => { adm.status = "approved"; } });
+  const first = await runAdmissionJoin(SID, base(api, dirs));
+  const again = await runAdmissionJoin(SID, base(api, dirs));
+  assert.deepEqual(again.identity, first.identity);
+  assert.equal(again.identity.email.address, "builder-1@agents.test");
+  assert.equal(again.identity.subject, first.identity.subject);
+  assert.equal(again.identity.keyThumbprint, first.identity.keyThumbprint);
+  assert.equal(JSON.stringify(again).includes("sladm_"), false);
+});
+
+test("a retained key recovers a lost credential without new approval or extending expiry", async () => {
+  const dirs = await scratch();
+  const api = fakeApi({ onPoll: (adm) => { adm.status = "approved"; } });
+  const first = await runAdmissionJoin(SID, base(api, dirs));
+  await fsp.unlink(admissionCredentialPath(SID, "builder-1", dirs));
+  const again = await runAdmissionJoin(SID, base(api, dirs));
+  assert.equal(again.recovered, true);
+  assert.equal(again.admissionId, first.admissionId);
+  assert.equal(again.grant.expiresAt, first.grant.expiresAt);
+  assert.equal(again.identity.email.address, first.identity.email.address);
+  assert.equal(api.admissions.size, 1);
+  assert.equal(JSON.stringify(again).includes("sladm_"), false);
+  assert.equal((await readAdmissionCredentialState(SID, "builder-1", dirs)).state, "live");
+});
+
+test("an interrupted claim response recovers on resume using a fresh recovery proof", async () => {
+  const dirs = await scratch();
+  const api = fakeApi({ onPoll: (adm) => { if (adm.status === "pending") adm.status = "approved"; } });
+  const interrupted = async (url, options) => {
+    const result = await api.requestMutation(url, options);
+    if (url.endsWith("/claim")) throw new Error("synthetic response lost after commit");
+    return result;
+  };
+  await assert.rejects(runAdmissionJoin(SID, base(api, dirs, { requestMutation: interrupted })), /response lost/);
+  const result = await runAdmissionJoin(SID, base(api, dirs));
+  assert.equal(result.recovered, true);
+  assert.equal(api.admissions.size, 1);
+});
+
+test("concurrent recovery serializes server rotation and the local credential write", async () => {
+  const dirs = await scratch();
+  const api = fakeApi({ onPoll: (adm) => { adm.status = "approved"; } });
+  await runAdmissionJoin(SID, base(api, dirs));
+  const filePath = admissionCredentialPath(SID, "builder-1", dirs);
+  await fsp.unlink(filePath);
+  let release;
+  const blocked = new Promise((resolve) => { release = resolve; });
+  let started;
+  const firstRotated = new Promise((resolve) => { started = resolve; });
+  let newestToken;
+  const transport = async (url, options) => {
+    const result = await api.requestMutation(url, options);
+    if (url.endsWith("/recover")) {
+      newestToken = result.credential.token;
+      started();
+      await blocked;
+    }
+    return result;
+  };
+  const first = runAdmissionJoin(SID, base(api, dirs, { requestMutation: transport }));
+  await firstRotated;
+  const second = runAdmissionJoin(SID, base(api, dirs, { requestMutation: transport }));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(api.calls.filter((call) => call.url.endsWith("/recover")).length, 1);
+  release();
+  await Promise.all([first, second]);
+  const stored = await readAdmissionCredentialState(SID, "builder-1", dirs);
+  assert.equal(stored.credential.token, newestToken);
+  assert.equal(api.calls.filter((call) => call.url.endsWith("/recover")).length, 1);
+});
+
+test("a remotely replaced bearer can be explicitly recovered without human relogin", async () => {
+  const dirs = await scratch();
+  const api = fakeApi({ onPoll: (adm) => { adm.status = "approved"; } });
+  const first = await runAdmissionJoin(SID, base(api, dirs));
+  const old = await readAdmissionCredentialState(SID, "builder-1", dirs);
+  const result = await runAdmissionJoin(SID, base(api, dirs, { recoverActive: true }));
+  const current = await readAdmissionCredentialState(SID, "builder-1", dirs);
+  assert.equal(result.recovered, true);
+  assert.notEqual(current.credential.token, old.credential.token);
+  assert.equal(result.admissionId, first.admissionId);
+  assert.equal(result.grant.expiresAt, first.grant.expiresAt);
+  assert.equal(api.calls.filter((call) => call.url.endsWith("/admissions") && call.method === "POST").length, 1,
+    "recovery must not open a new pending request");
+});
+
+test("recovery of a revoked cached grant cannot create a new admission request", async () => {
+  const dirs = await scratch();
+  const api = fakeApi({ onPoll: (adm) => { adm.status = "approved"; } });
+  const first = await runAdmissionJoin(SID, base(api, dirs));
+  api.admissions.get(first.admissionId).status = "revoked";
+  await assert.rejects(runAdmissionJoin(SID, base(api, dirs, { recoverActive: true })), /only a live grant/);
+  assert.equal(api.admissions.size, 1);
+  assert.equal(api.calls.filter((call) => call.url.endsWith("/admissions") && call.method === "POST").length, 1);
+});
+
+test("a delayed initial claim cannot overwrite a recovered replacement", async () => {
+  const dirs = await scratch();
+  const api = fakeApi({ onPoll: (adm) => { if (adm.status === "pending") adm.status = "approved"; } });
+  let release;
+  const blocked = new Promise((resolve) => { release = resolve; });
+  let started;
+  const claimCommitted = new Promise((resolve) => { started = resolve; });
+  let originalToken;
+  const transport = async (url, options) => {
+    const result = await api.requestMutation(url, options);
+    if (url.endsWith("/claim")) { originalToken = result.credential.token; started(); await blocked; }
+    return result;
+  };
+  const first = runAdmissionJoin(SID, base(api, dirs, { requestMutation: transport }));
+  await claimCommitted;
+  const second = runAdmissionJoin(SID, base(api, dirs, { requestMutation: transport }));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(api.calls.some((call) => call.url.endsWith("/recover")), false, "recovery cannot rotate while first claim is publishing");
+  release();
+  await Promise.all([first, second]);
+  const stored = await readAdmissionCredentialState(SID, "builder-1", dirs);
+  assert.equal(stored.credential.token, originalToken);
+  assert.equal(api.calls.filter((call) => call.url.endsWith("/claim")).length, 1);
+});
+
+test("a locked recovery refuses boundedly without age-based lock stealing", async () => {
+  const dirs = await scratch();
+  const filePath = admissionCredentialPath(SID, "builder-1", dirs);
+  let release;
+  const blocked = new Promise((resolve) => { release = resolve; });
+  let started;
+  const entered = new Promise((resolve) => { started = resolve; });
+  const first = withAdmissionCredentialLock(filePath, async () => { started(); await blocked; });
+  await entered;
+  try {
+    await assert.rejects(withAdmissionCredentialLock(filePath, async () => assert.fail("lock stolen"), { timeoutMs: 30 }), /already locked/);
+  } finally {
+    release();
+    await first;
+  }
+  assert.equal(fs.existsSync(`${filePath}.recovery-lock`), false);
+});
+
+for (const [label, corrupt] of [
+  ["key", (value) => { value.recovery.preimage.publicKey = "other-key"; }],
+  ["session", (value) => { value.recovery.preimage.sessionId = "other-room"; }],
+  ["agent", (value) => { value.recovery.preimage.agentId = "other-agent"; }],
+  ["email", (value) => { value.recovery.preimage.aidenidHandle = ""; }],
+  ["domain", (value) => { value.recovery.domain = CLAIM_DOMAIN; }],
+  ["fields", (value) => { value.recovery.fields = [...CLAIM_FIELDS]; }],
+  ["deadline", (value) => { value.recovery.preimage.challengeExpiresAt = 1; }],
+]) {
+  test(`recovery refuses a mismatched ${label} before signing or posting proof`, async () => {
+    const dirs = await scratch();
+    const api = fakeApi({ onPoll: (adm) => { adm.status = "approved"; }, onRecoveryChallenge: corrupt });
+    await runAdmissionJoin(SID, base(api, dirs));
+    await fsp.unlink(admissionCredentialPath(SID, "builder-1", dirs));
+    await assert.rejects(runAdmissionJoin(SID, base(api, dirs)), /invalid or mismatched.*recovery challenge/);
+    assert.equal(api.calls.some((call) => call.url.endsWith("/recover")), false);
+  });
+}
+
+test("recovery refuses a response with a different email or extended authority", async () => {
+  const dirs = await scratch();
+  const api = fakeApi({ onPoll: (adm) => { adm.status = "approved"; }, onRecoveryResult: (result) => {
+    result.grant = { ...result.grant, expiresAt: result.grant.expiresAt + 1 };
+  } });
+  await runAdmissionJoin(SID, base(api, dirs));
+  await fsp.unlink(admissionCredentialPath(SID, "builder-1", dirs));
+  await assert.rejects(runAdmissionJoin(SID, base(api, dirs)), /unchanged signed authority/);
+  assert.equal((await readAdmissionCredentialState(SID, "builder-1", dirs)).state, "none");
 });
 
 test("a narrower scope for the same goal asks the server, which reuses the held grant", async () => {

@@ -305,6 +305,7 @@ export async function registerAgent(
     role = "observer",
     targetPath = process.cwd(),
     trackProcessExit = true,
+    preserveIdentity = false,
   } = {}
 ) {
   const paths = resolveSessionPaths(sessionId, { targetPath });
@@ -320,7 +321,7 @@ export async function registerAgent(
   // a random hex blob. Caller-supplied real ids are NEVER renamed
   // (kill tests like PR 348/351 register `codex-task-holder-1` with
   // model="" and need the id to round-trip verbatim).
-  if (shouldAutoRenameInRegistry({ originalCallerAgentId })) {
+  if (!preserveIdentity && shouldAutoRenameInRegistry({ originalCallerAgentId })) {
     const existingAgents = await listAgentsInternal(paths);
     const friendly = assignFriendlyName({ model, existingAgents });
     if (friendly && friendly !== resolvedAgentId.toLowerCase()) {

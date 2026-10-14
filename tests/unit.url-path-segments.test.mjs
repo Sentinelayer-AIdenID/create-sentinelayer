@@ -192,7 +192,8 @@ test("admissions: the admission id from the server is encoded by the URL builder
     const result = await joinWith(api, tmp);
     assert.equal(result.status, "active");
     const admissions = `${API}/api/v1/sessions/sess-1/admissions`;
-    assert.deepEqual(api.urls, [admissions, `${admissions}/adm%3Fx`, `${admissions}/adm%3Fx/claim`]);
+    // Poll, then reread the claim challenge under the credential-writer lock.
+    assert.deepEqual(api.urls, [admissions, `${admissions}/adm%3Fx`, `${admissions}/adm%3Fx`, `${admissions}/adm%3Fx/claim`]);
   } finally {
     await tmp.close();
   }

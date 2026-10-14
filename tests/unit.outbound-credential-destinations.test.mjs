@@ -215,6 +215,23 @@ test("a token from the stored login session is held to the same origins", async 
   }
 });
 
+test("the bridge refuses explicit admission recovery before executing or sending anything", async () => {
+  const fx = await fixture();
+  try {
+    const result = await fx.bridge("sl.session.join", {
+      sessionId: SID, agent: "codex", goal: "review", recoverAdmission: true, json: true,
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, "invalid_cli_tool_input");
+    assert.equal(result.detail, "unsupported_input:recoverAdmission");
+    assert.deepEqual(fx.configured.requests, []);
+    assert.deepEqual(fx.gateway.requests, []);
+    assert.deepEqual(fx.other.requests, []);
+  } finally {
+    await fx.close();
+  }
+});
+
 // ---- every bridge tool, against the raw command tree and the explicit input list
 
 // The bridge's own blocks (sensitive and recursive commands) need no entry in the input list.
@@ -315,6 +332,7 @@ test("the bridge withholds exactly the denied inputs from the commands it expose
     "sl.mcp.doctor: apiUrl",
     "sl.mcp.smoke: apiUrl",
     "sl.ring-owner: gatewayUrl",
+    "sl.session.join: recoverAdmission",
     "sl.swarm.create: target",
     "sl.swarm.run: startUrl",
     "sl.swarm.scenario.init: startUrl",

@@ -2186,6 +2186,12 @@ test("Unit session join: refreshes expired local cache after remote verification
     });
     globalThis.fetch = async (url, options = {}) => {
       calls.push({ url: String(url), options });
+      if (String(url).endsWith("/api/v1/sessions/agent-grants?limit=100")) {
+        return new Response(JSON.stringify({ grants: [{ id: "synthetic-codex", agentId: "codex", role: "coder", exists: true, revoked: false, revokedAt: null }], nextAfter: null }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (options.method === "PUT" && String(url).endsWith("/presence")) {
+        return new Response(JSON.stringify({ status: "ok", recorded: true, agentId: "codex", ttlSeconds: 90 }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
       if (options.method === "GET") {
         return {
           ok: true,

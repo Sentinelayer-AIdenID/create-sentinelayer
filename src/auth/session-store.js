@@ -135,60 +135,68 @@ function resolveLegacyCredentialsKeyPath({ homeDir } = {}) {
   return path.join(resolvedHome, ".sentinelayer", "credentials.key");
 }
 
+async function readFileKeyAt(keyPath) {
+  // Exclusive-create fallback filesystems may expose a partially written key.
+  // Retry that bounded race, but never replace an invalid or unreadable key.
+  for (let attempt = 0; ; attempt += 1) {
+    let raw;
+    try {
+      raw = await fsp.readFile(keyPath, "utf-8");
+    } catch (error) {
+      if (error?.code === "ENOENT") return null;
+      throw error;
+    }
+    const encoded = String(raw || "").trim();
+    const key = Buffer.from(encoded, "base64");
+    if (key.length === 32 && key.toString("base64") === encoded) return key;
+    if (attempt >= 5) {
+      const error = new Error("Stored credential encryption key is invalid; it was not replaced.");
+      error.code = "CREDENTIALS_KEY_INVALID";
+      throw error;
+    }
+    await delayMilliseconds(20);
+  }
+}
+
+async function readFileKey({ homeDir } = {}) {
+  return (await readFileKeyAt(resolveCredentialsKeyPath({ homeDir }))) ||
+    (await readFileKeyAt(resolveLegacyCredentialsKeyPath({ homeDir })));
+}
+
 async function loadOrCreateFileKey({ homeDir } = {}) {
   const keyPath = resolveCredentialsKeyPath({ homeDir });
-  const legacyKeyPath = resolveLegacyCredentialsKeyPath({ homeDir });
-  try {
-    const raw = await fsp.readFile(keyPath, "utf-8");
-    const key = Buffer.from(String(raw || "").trim(), "base64");
-    if (key.length === 32) {
-      return key;
-    }
-  } catch (error) {
-    if (!(error && typeof error === "object" && error.code === "ENOENT")) {
-      throw error;
-    }
-  }
-
-  try {
-    const legacyRaw = await fsp.readFile(legacyKeyPath, "utf-8");
-    const legacyKey = Buffer.from(String(legacyRaw || "").trim(), "base64");
-    if (legacyKey.length === 32) {
-      await fsp.mkdir(path.dirname(keyPath), { recursive: true, mode: 0o700 });
-      await fsp.writeFile(keyPath, legacyKey.toString("base64"), { encoding: "utf-8", mode: 0o600 });
-      try {
-        await fsp.chmod(keyPath, 0o600);
-      } catch {
-        // Windows does not reliably support POSIX chmod semantics.
-      }
-      let verified = false;
-      try {
-        const verifyRaw = await fsp.readFile(keyPath, "utf-8");
-        const verifyKey = Buffer.from(String(verifyRaw || "").trim(), "base64");
-        verified = verifyKey.length === 32 && verifyKey.equals(legacyKey);
-      } catch {
-        verified = false;
-      }
-      if (verified) {
-        await fsp.rm(legacyKeyPath, { force: true });
-      }
-      return legacyKey;
-    }
-  } catch (error) {
-    if (!(error && typeof error === "object" && error.code === "ENOENT")) {
-      throw error;
-    }
-  }
-
-  const key = crypto.randomBytes(32);
+  const existing = await readFileKeyAt(keyPath);
+  if (existing) return existing;
+  const legacyKey = await readFileKeyAt(resolveLegacyCredentialsKeyPath({ homeDir }));
+  const key = legacyKey || crypto.randomBytes(32);
+  const encoded = key.toString("base64");
   await fsp.mkdir(path.dirname(keyPath), { recursive: true, mode: 0o700 });
-  await fsp.writeFile(keyPath, key.toString("base64"), { encoding: "utf-8", mode: 0o600 });
+  const tmpPath = `${keyPath}.${process.pid}.${crypto.randomUUID()}.tmp`;
   try {
-    await fsp.chmod(keyPath, 0o600);
-  } catch {
-    // Windows does not reliably support POSIX chmod semantics.
+    await fsp.writeFile(tmpPath, encoded, { encoding: "utf-8", mode: 0o600, flag: "wx" });
+    await syncFile(tmpPath);
+    try {
+      // Publish complete bytes once. Every concurrent writer then uses the winner.
+      await fsp.link(tmpPath, keyPath);
+    } catch (error) {
+      if (error?.code !== "EEXIST") {
+        if (!["ENOTSUP", "ENOSYS", "EXDEV", "EPERM"].includes(error?.code)) throw error;
+        try {
+          await fsp.writeFile(keyPath, encoded, { encoding: "utf-8", mode: 0o600, flag: "wx" });
+        } catch (fallbackError) {
+          if (fallbackError?.code !== "EEXIST") throw fallbackError;
+        }
+      }
+    }
+    const persisted = await readFileKeyAt(keyPath);
+    if (!persisted) throw new Error("Credential encryption key could not be persisted.");
+    await syncFile(keyPath);
+    await syncDirectory(path.dirname(keyPath));
+    // Keep the legacy key: deleting it can race a read-only legacy reader.
+    return persisted;
+  } finally {
+    await fsp.rm(tmpPath, { force: true }).catch(() => {});
   }
-  return key;
 }
 
 function encryptToken(token, key) {
@@ -540,7 +548,11 @@ async function tryDecryptFileToken({ metadata, homeDir }) {
     return null;
   }
   try {
-    const key = await loadOrCreateFileKey({ homeDir });
+    const key = await readFileKey({ homeDir });
+    if (!key) {
+      emitSessionWarning("FILE_CREDENTIAL_UNAVAILABLE", { reason: "key_missing", source: "file-encrypted" });
+      return null;
+    }
     const token = decryptToken(
       {
         tokenEncrypted: metadata.tokenEncrypted,
@@ -550,7 +562,13 @@ async function tryDecryptFileToken({ metadata, homeDir }) {
       key
     );
     return token || null;
-  } catch {
+  } catch (error) {
+    emitSessionWarning("FILE_CREDENTIAL_UNAVAILABLE", {
+      reason: error?.code === "EACCES" || error?.code === "EPERM"
+        ? "key_unreadable"
+        : error?.code === "CREDENTIALS_KEY_INVALID" ? "key_invalid" : "decryption_failed",
+      source: "file-encrypted",
+    });
     return null;
   }
 }
@@ -722,6 +740,7 @@ export async function readStoredSessionMetadata({ homeDir } = {}) {
  *   tokenPrefix?: string | null,
  *   tokenExpiresAt?: string | null,
  *   user?: Record<string, unknown>
+ *   aidenid?: Record<string, unknown> | null
  * }} [session]
  * @param {{ homeDir?: string }} [options]
  * @returns {Promise<{
@@ -754,6 +773,7 @@ export async function writeStoredSession(
     tokenPrefix = null,
     tokenExpiresAt = null,
     user = {},
+    aidenid = null,
   } = {},
   { homeDir } = {}
 ) {
@@ -778,6 +798,7 @@ export async function writeStoredSession(
     tokenPrefix,
     tokenExpiresAt,
     user: normalizeUser(user),
+    aidenid,
     createdAt: existingMetadata?.createdAt || updatedAt,
     updatedAt,
   });

@@ -60,9 +60,18 @@ export const CLAIM_FIELDS = Object.freeze([
   "keyThumbprint",
   "nonce",
 ]);
+export const RECOVERY_DOMAIN = "sentinelayer.admission.recover.v1";
+export const RECOVERY_FIELDS = Object.freeze([
+  "admissionId", "sessionId", "agentId", "delegatorUserId", "publicKey",
+  "keyThumbprint", "grantId", "goalDigest", "actions", "policyVersion",
+  "expiresAt", "nonce", "challengeExpiresAt", "tenantUserId", "passportId",
+  "aidenidIdentityId", "aidenidHandle",
+]);
 const ROUTE = {
   request: "POST /api/v1/sessions/{session_id}/admissions",
   claim: "POST /api/v1/sessions/{session_id}/admissions/{admission_id}/claim",
+  recoverChallenge: "POST /api/v1/sessions/{session_id}/admissions/{admission_id}/recover/challenge",
+  recover: "POST /api/v1/sessions/{session_id}/admissions/{admission_id}/recover",
   cancel: "POST /api/v1/sessions/{session_id}/admissions/{admission_id}/cancel",
 };
 // Final admission statuses: polling stops, nothing is claimed, local request state is cleared.
@@ -402,6 +411,155 @@ async function mutate(auth, sessionId, routeId, url, body, { requestMutation, op
   });
 }
 
+// Recovery rotates only an ACTIVE credential. It never extends a permission or
+// signs the old claim domain, and it needs both the human connection and this
+// agent's own retained private key. A lost response can be recovered again with
+// another fresh server challenge; plaintext credentials are never redelivered.
+async function recoverCredential(auth, sid, agent, admissionId, key, deps, now) {
+  const challenge = await mutate(
+    auth, sid, ROUTE.recoverChallenge,
+    admissionMemberUrl(auth.apiUrl, sid, admissionId, "/recover/challenge"), {},
+    { ...deps, operationName: "session.admission_recovery_challenge" }
+  );
+  const fields = challenge?.recovery?.preimage;
+  const advertised = challenge?.recovery?.fields;
+  if (
+    challenge?.status !== "active" || challenge.admissionId !== admissionId ||
+    challenge?.recovery?.domain !== RECOVERY_DOMAIN || !fields ||
+    !Array.isArray(advertised) || advertised.length !== RECOVERY_FIELDS.length ||
+    [...advertised].sort().join("\0") !== [...RECOVERY_FIELDS].sort().join("\0") ||
+    fields.admissionId !== admissionId || fields.sessionId !== sid ||
+    fields.agentId !== agent || fields.publicKey !== key.publicKey ||
+    !normalizeString(fields.aidenidIdentityId) || !normalizeString(fields.aidenidHandle) ||
+    !Array.isArray(fields.actions) || !fields.actions.length ||
+    fields.actions.some((action) => !ADMISSION_ACTIONS.includes(action)) ||
+    !Number.isSafeInteger(fields.expiresAt) || fields.expiresAt * 1000 <= now() ||
+    !Number.isSafeInteger(fields.challengeExpiresAt) || fields.challengeExpiresAt * 1000 <= now()
+  ) {
+    throw new Error("Refusing to sign: invalid or mismatched admission recovery challenge.");
+  }
+  const signature = signBytes(null, canonicalPreimage(fields, {
+    domain: RECOVERY_DOMAIN, fields: [...RECOVERY_FIELDS],
+  }), key.privateKey);
+  const recovered = await mutate(
+    auth, sid, ROUTE.recover,
+    admissionMemberUrl(auth.apiUrl, sid, admissionId, "/recover"),
+    { nonce: fields.nonce, signature: signature.toString("base64url") },
+    { ...deps, operationName: "session.admission_recover" }
+  );
+  if (
+    recovered?.status !== "active" || recovered.admissionId !== admissionId ||
+    recovered?.grant?.sessionId !== sid || recovered.grant.grantId !== fields.grantId ||
+    recovered.grant.expiresAt !== fields.expiresAt ||
+    recovered.grant.goalDigest !== fields.goalDigest ||
+    !Array.isArray(recovered.grant.actions) ||
+    [...recovered.grant.actions].sort().join("\0") !== [...fields.actions].sort().join("\0") ||
+    recovered?.identity?.keyThumbprint !== fields.keyThumbprint ||
+    recovered.identity.passportId !== fields.passportId ||
+    recovered.identity.email?.address !== fields.aidenidHandle
+  ) {
+    throw new Error("Recovered admission does not match the unchanged signed authority.");
+  }
+  return recovered;
+}
+
+/** Serialize credential rotation AND publication across CLI processes.
+ * No age-based lock stealing: an API call may still commit after a local timer
+ * expires. Unknown/crashed owners fail explicitly without changing identity.
+ */
+export async function withAdmissionCredentialLock(filePath, run, { timeoutMs = 180_000 } = {}) {
+  const lockPath = `${filePath}.recovery-lock`;
+  await fsp.mkdir(path.dirname(lockPath), { recursive: true, mode: 0o700 });
+  const deadline = Date.now() + timeoutMs;
+  let handle;
+  for (;;) {
+    try {
+      handle = await fsp.open(lockPath, "wx", 0o600);
+      break;
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+      if (Date.now() >= deadline) {
+        throw new Error(`Agent credential recovery is already locked at ${lockPath}. ` +
+          "Wait for the other join; if its process crashed, verify it has stopped before removing only this lock file. Human sign-in and the agent key were not changed.");
+      }
+      await sleepMs(25);
+    }
+  }
+  try {
+    await handle.writeFile(JSON.stringify({ pid: process.pid, host: os.hostname(), createdAt: new Date().toISOString() }));
+    return await run();
+  } finally {
+    await handle.close();
+    await fsp.unlink(lockPath);
+  }
+}
+
+async function recoverAndStore(auth, sid, agent, admissionId, key, fingerprint, deps, homeDir, now, rejectedToken = null) {
+  return withAdmissionCredentialLock(admissionCredentialPath(sid, agent, { homeDir }), async () => {
+    // Another process may have completed recovery while this process waited.
+    const current = await readAdmissionCredentialState(sid, agent, { homeDir, now: now() });
+    if (current.state === "live" && current.credential.admissionId === admissionId &&
+        current.credential.requestFingerprint === fingerprint && current.credential.publicKey === key.publicKey &&
+        current.credential.apiUrl === auth.apiUrl && current.credential.token !== rejectedToken) {
+      return redacted({ status: "active", reused: true, stored: current.credential, sid, agent, homeDir });
+    }
+    const claimed = await recoverCredential(auth, sid, agent, admissionId, key, deps, now);
+    const stored = await storeClaimedCredential(claimed, { auth, sid, agent, key, fingerprint, homeDir, now });
+    return { ...redacted({ status: "active", reused: true, stored, claimed, sid, agent, homeDir }), recovered: true };
+  });
+}
+
+async function storeClaimedCredential(claimed, { auth, sid, agent, key, fingerprint, homeDir, now }) {
+  if (!String(claimed?.credential?.token || "").startsWith("sladm_")) {
+    throw new Error("Admission did not return a scoped agent credential.");
+  }
+  const identity = identityMetadata(claimed.identity);
+  const grant = grantMetadata(claimed.grant);
+  const previous = await readAdmissionCredentialState(sid, agent, { homeDir, now: now() });
+  if (previous.state === "live" && previous.credential.admissionId === claimed.admissionId &&
+      previous.credential.publicKey === key.publicKey && previous.credential.apiUrl === auth.apiUrl &&
+      previous.credential.identity?.passportId === identity.passportId &&
+      previous.credential.identity?.keyThumbprint === identity.keyThumbprint &&
+      previous.credential.grant?.grantId === grant.grantId && previous.credential.expiresAt === grant.expiresAt) {
+    // Recovery does not reissue signed documents. Retain original documents
+    // only for this exact unchanged identity/grant; never synthesize new ones.
+    identity.passport ??= previous.credential.identity.passport;
+    grant.document ??= previous.credential.grant.document;
+  }
+  const stored = {
+    version: 3, sessionId: sid, agentId: agent, apiUrl: auth.apiUrl,
+    publicKey: key.publicKey, requestFingerprint: fingerprint,
+    admissionId: claimed.admissionId, token: claimed.credential.token,
+    expiresAt: claimed.grant.expiresAt, grantedActions: claimed.grant.actions,
+    passportId: claimed.identity.passportId, subject: claimed.identity.subject,
+    // Non-secret identity metadata survives reconnects. Email is never used as
+    // authentication: the credential/key binding remains the authority.
+    identity,
+    grant,
+    correlation: claimed.correlation,
+    storedAt: new Date(now()).toISOString(),
+  };
+  await writeSecretFile(admissionCredentialPath(sid, agent, { homeDir }), stored);
+  return stored;
+}
+
+function identityMetadata(identity) {
+  return {
+    subject: identity.subject, passportId: identity.passportId,
+    passportStatus: identity.passportStatus, keyThumbprint: identity.keyThumbprint,
+    popAssurance: identity.popAssurance,
+    email: identity.email && { status: identity.email.status, address: identity.email.address },
+    passport: identity.passport,
+  };
+}
+
+function grantMetadata(grant) {
+  return {
+    grantId: grant.grantId, sessionId: grant.sessionId, actions: grant.actions,
+    expiresAt: grant.expiresAt, goalDigest: grant.goalDigest, document: grant.document,
+  };
+}
+
 /**
  * Request admission, wait for a human decision, and claim the grant.
  * Returns a REDACTED result: the credential token is never included.
@@ -419,6 +577,7 @@ export async function runAdmissionJoin(
     actions = DEFAULT_ADMISSION_ACTIONS,
     ttlSeconds = 7200,
     wait = true,
+    recoverActive = false,
     waitTimeoutMs = 15 * 60_000,
     targetPath = process.cwd(),
     homeDir,
@@ -464,8 +623,18 @@ export async function runAdmissionJoin(
   // same key. A different goal, scope or duration is a question for the server,
   // which answers with the existing grant (same purpose) or a conflict (new one).
   const held = await readAdmissionCredentialState(sid, agent, { homeDir, now: now() });
-  if (held.state === "live" && held.credential.requestFingerprint === fingerprint) {
+  if (!recoverActive && held.state === "live" && held.credential.requestFingerprint === fingerprint) {
     return redacted({ status: "active", reused: true, stored: held.credential, sid, agent, homeDir });
+  }
+  if (recoverActive && held.credential?.admissionId) {
+    if (held.credential.requestFingerprint !== fingerprint || held.credential.publicKey !== key.publicKey ||
+        held.credential.apiUrl !== auth.apiUrl) {
+      throw new Error("Credential recovery requires the unchanged agent key, API, goal, scope and TTL.");
+    }
+    // Go directly to recovery, never file a new request after a refused cached
+    // bearer. A revoked/expired grant must be refused, not reopened as pending.
+    return recoverAndStore(auth, sid, agent, held.credential.admissionId, key, fingerprint, deps, homeDir, now,
+      held.credential.token);
   }
 
   const statePath = admissionStatePath(targetPath, sid, agent);
@@ -501,6 +670,7 @@ export async function runAdmissionJoin(
     if (
       created?.status === "active" &&
       created?.reused &&
+      !recoverActive &&
       held.state === "live" &&
       held.credential.admissionId === created.admissionId
     ) {
@@ -508,12 +678,10 @@ export async function runAdmissionJoin(
       return redacted({ status: "active", reused: true, stored: held.credential, sid, agent, homeDir });
     }
     if (created?.status === "active" && created?.reused) {
-      // The server already holds a live grant for this key, but we have no stored
-      // credential for it (e.g. a different machine). It cannot be re-issued.
-      throw new Error(
-        "This agent already holds an active admission here, but no credential is stored " +
-          "on this machine. Ask the room owner to revoke it, then join again."
-      );
+      const recovered = await recoverAndStore(auth, sid, agent, created.admissionId, key, fingerprint, deps, homeDir, now,
+        recoverActive && held.state === "live" ? held.credential.token : null);
+      await fsp.rm(statePath, { force: true });
+      return recovered;
     }
     state = {
       admissionId: created.admissionId,
@@ -590,46 +758,53 @@ export async function runAdmissionJoin(
     return { status: polled.status, admissionId: state.admissionId, waited: true };
   }
   if (polled.status === "active") {
-    throw new Error("Admission is already active but this machine holds no credential for it.");
+    const recovered = await recoverAndStore(auth, sid, agent, state.admissionId, key, fingerprint, deps, homeDir, now,
+      recoverActive && held.state === "live" ? held.credential.token : null);
+    await fsp.rm(statePath, { force: true });
+    return recovered;
   }
 
-  const fields = polled?.claim?.preimage;
-  if (!fields || polled.claim.domain !== CLAIM_DOMAIN) {
-    throw new Error("Approved admission did not include a valid claim challenge.");
-  }
-  // Never sign a claim for a key or agent that is not ours.
-  if (fields.publicKey !== key.publicKey || fields.agentId !== agent || fields.sessionId !== sid) {
-    throw new Error("Refusing to sign: the claim challenge does not name this agent's key.");
-  }
-  const signature = signBytes(null, canonicalPreimage(fields, { domain: CLAIM_DOMAIN, fields: [...CLAIM_FIELDS] }), key.privateKey);
-  const claimed = await mutate(
-    auth,
-    sid,
-    ROUTE.claim,
-    admissionMemberUrl(auth.apiUrl, sid, state.admissionId, "/claim"),
-    { nonce: fields.nonce, signature: signature.toString("base64url") },
-    { ...deps, operationName: "session.admission_claim" }
-  );
-
-  const stored = {
-    version: 2,
-    sessionId: sid,
-    agentId: agent,
-    // The credential is only ever sent to the API that issued it.
-    apiUrl: auth.apiUrl,
-    publicKey: key.publicKey,
-    requestFingerprint: fingerprint,
-    admissionId: claimed.admissionId,
-    token: claimed.credential.token,
-    expiresAt: claimed.grant.expiresAt,
-    grantedActions: claimed.grant.actions,
-    passportId: claimed.identity.passportId,
-    subject: claimed.identity.subject,
-    storedAt: new Date(now()).toISOString(),
-  };
-  await writeSecretFile(admissionCredentialPath(sid, agent, { homeDir }), stored);
+  // Initial claim is a credential writer too. The same cross-process lock must
+  // cover it through publication, or a delayed first claim could overwrite a
+  // recovered replacement. Refresh the nonce only after obtaining this lock.
+  const result = await withAdmissionCredentialLock(admissionCredentialPath(sid, agent, { homeDir }), async () => {
+    const current = await readAdmissionCredentialState(sid, agent, { homeDir, now: now() });
+    if (current.state === "live" && current.credential.admissionId === state.admissionId &&
+        current.credential.requestFingerprint === fingerprint && current.credential.publicKey === key.publicKey &&
+        current.credential.apiUrl === auth.apiUrl) {
+      return redacted({ status: "active", reused: true, stored: current.credential, sid, agent, homeDir });
+    }
+    const fresh = await checkedTransport(requestRead)(admissionMemberUrl(auth.apiUrl, sid, state.admissionId), {
+      method: "GET", credential: auth.credential,
+    });
+    if (TERMINAL.has(fresh.status)) {
+      return { status: fresh.status, admissionId: state.admissionId, waited: true };
+    }
+    if (fresh.status === "active") {
+      const recovered = await recoverCredential(auth, sid, agent, state.admissionId, key, deps, now);
+      const stored = await storeClaimedCredential(recovered, { auth, sid, agent, key, fingerprint, homeDir, now });
+      return { ...redacted({ status: "active", reused: true, stored, claimed: recovered, sid, agent, homeDir }), recovered: true };
+    }
+    const fields = fresh?.claim?.preimage;
+    if (fresh.status !== "approved" || fresh.identityReady === false || !fields || fresh.claim.domain !== CLAIM_DOMAIN) {
+      throw new Error("Approved admission did not include a valid claim challenge.");
+    }
+    if (fields.publicKey !== key.publicKey || fields.agentId !== agent || fields.sessionId !== sid ||
+        fields.admissionId !== state.admissionId) {
+      throw new Error("Refusing to sign: the claim challenge does not name this agent's key.");
+    }
+    const signature = signBytes(null, canonicalPreimage(fields, { domain: CLAIM_DOMAIN, fields: [...CLAIM_FIELDS] }), key.privateKey);
+    const claimed = await mutate(
+      auth, sid, ROUTE.claim,
+      admissionMemberUrl(auth.apiUrl, sid, state.admissionId, "/claim"),
+      { nonce: fields.nonce, signature: signature.toString("base64url") },
+      { ...deps, operationName: "session.admission_claim" }
+    );
+    const stored = await storeClaimedCredential(claimed, { auth, sid, agent, key, fingerprint, homeDir, now });
+    return redacted({ status: "active", reused: false, stored, claimed, sid, agent, homeDir });
+  });
   await fsp.rm(statePath, { force: true });
-  return redacted({ status: "active", reused: false, stored, claimed, sid, agent, homeDir });
+  return result;
 }
 
 function redacted({ status, reused, stored, claimed, sid, agent, homeDir }) {
@@ -637,28 +812,9 @@ function redacted({ status, reused, stored, claimed, sid, agent, homeDir }) {
     status,
     reused,
     admissionId: stored.admissionId,
-    identity: claimed
-      ? {
-          subject: claimed.identity.subject,
-          passportId: claimed.identity.passportId,
-          passportStatus: claimed.identity.passportStatus,
-          keyThumbprint: claimed.identity.keyThumbprint,
-          popAssurance: claimed.identity.popAssurance,
-          email: claimed.identity.email,
-          passport: claimed.identity.passport,
-        }
-      : { subject: stored.subject, passportId: stored.passportId },
-    grant: claimed
-      ? {
-          grantId: claimed.grant.grantId,
-          sessionId: claimed.grant.sessionId,
-          actions: claimed.grant.actions,
-          expiresAt: claimed.grant.expiresAt,
-          goalDigest: claimed.grant.goalDigest,
-          document: claimed.grant.document,
-        }
-      : { sessionId: sid, actions: stored.grantedActions, expiresAt: stored.expiresAt },
-    correlation: claimed ? claimed.correlation : { actorRef: `adm:${stored.admissionId}` },
+    identity: stored.identity || (claimed ? identityMetadata(claimed.identity) : { subject: stored.subject, passportId: stored.passportId }),
+    grant: stored.grant || (claimed ? grantMetadata(claimed.grant) : { sessionId: sid, actions: stored.grantedActions, expiresAt: stored.expiresAt }),
+    correlation: claimed ? claimed.correlation : stored.correlation || { actorRef: `adm:${stored.admissionId}` },
     jev: claimed ? claimed.jev : undefined,
     // A reference only. The token itself never appears in output.
     credential: { storage: admissionCredentialPath(sid, agent, { homeDir }), redacted: true },
