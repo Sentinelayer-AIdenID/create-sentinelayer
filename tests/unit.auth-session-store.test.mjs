@@ -3,7 +3,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import crypto from "node:crypto";
+import { spawn } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 
 import {
   clearStoredSession,
@@ -299,6 +301,135 @@ test("Unit auth session store: invalid metadata payload fails closed", async () 
 
     const raw = await readFile(credentialsPath, "utf-8");
     assert.match(raw, /^\[1,2,3\]/);
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("Unit auth session store: concurrent first writes all encrypt with the persisted key", async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-key-race-"));
+  const restoreKeytar = setKeytarClientForTests(null);
+  try {
+    const sessions = await Promise.all(Array.from({ length: 16 }, (_, index) => writeStoredSession({
+      apiUrl: "https://api.sentinelayer.dev",
+      token: `synthetic_concurrent_${index}`,
+      tokenId: `synthetic_${index}`,
+      tokenExpiresAt: "2099-01-01T00:00:00.000Z",
+    }, { homeDir: tempRoot })));
+    const keyPath = path.join(tempRoot, ".sentinelayer", "keys", "credentials.key");
+    const key = Buffer.from(await readFile(keyPath, "utf8"), "base64");
+    for (const session of sessions) {
+      const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(session.tokenIv, "base64"));
+      decipher.setAuthTag(Buffer.from(session.tokenTag, "base64"));
+      const plaintext = Buffer.concat([
+        decipher.update(Buffer.from(session.tokenEncrypted, "base64")), decipher.final(),
+      ]).toString("utf8");
+      assert.equal(plaintext === session.token, true);
+    }
+    const stored = await readStoredSession({ homeDir: tempRoot });
+    assert.equal(sessions.some((session) => session.token === stored?.token), true);
+    const restarted = await import(`../src/auth/session-store.js?restart=${Date.now()}`);
+    assert.equal((await restarted.readStoredSession({ homeDir: tempRoot }))?.token === stored.token, true);
+    if (process.platform !== "win32") {
+      assert.equal((await stat(keyPath)).mode & 0o777, 0o600);
+      assert.equal((await stat(resolveCredentialsFilePath({ homeDir: tempRoot }))).mode & 0o777, 0o600);
+    }
+  } finally {
+    restoreKeytar();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("Unit auth session store: missing decryption key never creates a replacement", async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-key-missing-"));
+  const restoreKeytar = setKeytarClientForTests(null);
+  try {
+    await writeStoredSession({ apiUrl: "https://api.sentinelayer.dev", token: "synthetic_missing_key" }, { homeDir: tempRoot });
+    const keyPath = path.join(tempRoot, ".sentinelayer", "keys", "credentials.key");
+    const credentialsPath = resolveCredentialsFilePath({ homeDir: tempRoot });
+    const metadata = await readFile(credentialsPath, "utf8");
+    await rename(keyPath, `${keyPath}.retained`);
+    assert.equal(await readStoredSession({ homeDir: tempRoot }), null);
+    await assert.rejects(readFile(keyPath), { code: "ENOENT" });
+    assert.equal(await readFile(credentialsPath, "utf8"), metadata);
+    await rename(`${keyPath}.retained`, keyPath);
+    assert.equal((await readStoredSession({ homeDir: tempRoot }))?.token === "synthetic_missing_key", true);
+  } finally {
+    restoreKeytar();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("Unit auth session store: invalid keys are retained and fail closed for reads and writes", async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-key-invalid-"));
+  const restoreKeytar = setKeytarClientForTests(null);
+  try {
+    await writeStoredSession({ apiUrl: "https://api.sentinelayer.dev", token: "synthetic_invalid_key" }, { homeDir: tempRoot });
+    const keyPath = path.join(tempRoot, ".sentinelayer", "keys", "credentials.key");
+    const credentialsPath = resolveCredentialsFilePath({ homeDir: tempRoot });
+    const metadata = await readFile(credentialsPath, "utf8");
+    await writeFile(keyPath, "invalid-synthetic-key", "utf8");
+    assert.equal(await readStoredSession({ homeDir: tempRoot }), null);
+    await assert.rejects(writeStoredSession({ apiUrl: "https://api.sentinelayer.dev", token: "synthetic_new" }, { homeDir: tempRoot }), { code: "CREDENTIALS_KEY_INVALID" });
+    assert.equal(await readFile(keyPath, "utf8"), "invalid-synthetic-key");
+    assert.equal(await readFile(credentialsPath, "utf8"), metadata);
+  } finally {
+    restoreKeytar();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("Unit auth session store: legacy-key decryption is read-only and metadata retains AIdenID", async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-key-legacy-"));
+  const restoreKeytar = setKeytarClientForTests(null);
+  try {
+    const aidenid = { orgId: "synthetic-org", projectId: "synthetic-project", apiKeyPrefix: "aid_", provisionedAt: "2026-01-01T00:00:00Z" };
+    await writeStoredSession({ apiUrl: "https://api.sentinelayer.dev", token: "synthetic_legacy_key", aidenid }, { homeDir: tempRoot });
+    const keyPath = path.join(tempRoot, ".sentinelayer", "keys", "credentials.key");
+    const legacyPath = path.join(tempRoot, ".sentinelayer", "credentials.key");
+    await rename(keyPath, legacyPath);
+    const legacy = await readFile(legacyPath, "utf8");
+    const stored = await readStoredSession({ homeDir: tempRoot });
+    assert.equal(stored?.token === "synthetic_legacy_key", true);
+    assert.deepEqual(stored?.aidenid, aidenid);
+    await assert.rejects(readFile(keyPath), { code: "ENOENT" });
+    assert.equal(await readFile(legacyPath, "utf8"), legacy);
+    assert.deepEqual((await readStoredSessionMetadata({ homeDir: tempRoot }))?.aidenid, aidenid);
+  } finally {
+    restoreKeytar();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("Unit auth session store: independent processes share one first-use encryption key", async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-process-key-race-"));
+  const moduleUrl = new URL("../src/auth/session-store.js", import.meta.url).href;
+  const script = `
+    import { writeStoredSession } from ${JSON.stringify(moduleUrl)};
+    import crypto from "node:crypto";
+    import fsp from "node:fs/promises";
+    import path from "node:path";
+    const homeDir = process.argv[1];
+    const session = await writeStoredSession({ apiUrl: "https://synthetic.invalid", token: "synthetic_child_" + process.argv[2] }, { homeDir });
+    const key = Buffer.from(await fsp.readFile(path.join(homeDir, ".sentinelayer", "keys", "credentials.key"), "utf8"), "base64");
+    const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(session.tokenIv, "base64"));
+    decipher.setAuthTag(Buffer.from(session.tokenTag, "base64"));
+    const plaintext = Buffer.concat([decipher.update(Buffer.from(session.tokenEncrypted, "base64")), decipher.final()]).toString("utf8");
+    if (plaintext !== session.token) throw new Error("Synthetic encryption key mismatch");
+  `;
+  try {
+    const results = await Promise.allSettled(Array.from({ length: 8 }, (_, index) => new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, ["--input-type=module", "-e", script, tempRoot, String(index)], {
+        stdio: ["ignore", "ignore", "pipe"],
+      });
+      let stderr = "";
+      child.stderr.on("data", (chunk) => { stderr += String(chunk); });
+      child.once("error", reject);
+      child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`Synthetic child failed (${code}): ${stderr}`)));
+    })));
+    const failed = results.find((result) => result.status === "rejected");
+    if (failed) throw failed.reason;
+    assert.equal(Boolean(await readStoredSession({ homeDir: tempRoot })), true);
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
   }

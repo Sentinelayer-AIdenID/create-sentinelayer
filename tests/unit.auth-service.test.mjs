@@ -5,7 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import { createServer } from "node:http";
 import { once } from "node:events";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { Command } from "commander";
+import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 
 import {
   getAuthStatus,
@@ -17,7 +18,9 @@ import {
   revokeAuthToken,
   resolveActiveAuthSession,
 } from "../src/auth/service.js";
-import { readStoredSession, resolveCredentialsFilePath } from "../src/auth/session-store.js";
+import { readStoredSession, resolveCredentialsFilePath, writeStoredSession } from "../src/auth/session-store.js";
+import { __resetRequestCircuitForTests } from "../src/auth/http.js";
+import { registerAuthCommand } from "../src/commands/auth.js";
 import { bearerOf } from "./credential-probe.mjs";
 
 function jsonResponse(res, status, payload) {
@@ -41,7 +44,7 @@ async function readJsonBody(req) {
   return JSON.parse(raw);
 }
 
-async function startAuthRuntimeMockApi({ pollResponses = null } = {}) {
+async function startAuthRuntimeMockApi({ pollResponses = null, meStatus = 200, onPoll = () => {} } = {}) {
   const state = {
     pollCalls: 0,
     tokenIssueCalls: 0,
@@ -96,6 +99,7 @@ async function startAuthRuntimeMockApi({ pollResponses = null } = {}) {
         state.flowRequestIds.push(String(req.headers["x-flow-request-id"] || ""));
         await readJsonBody(req);
         state.pollCalls += 1;
+        onPoll();
         if (Array.isArray(pollResponses) && pollResponses.length > 0) {
           const pollResponse = pollResponses[Math.min(state.pollCalls - 1, pollResponses.length - 1)];
           return jsonResponse(res, Number(pollResponse.httpStatus || 200), pollResponse.payload || {});
@@ -129,6 +133,9 @@ async function startAuthRuntimeMockApi({ pollResponses = null } = {}) {
           return jsonResponse(res, 401, {
             error: { code: "AUTH_REQUIRED", message: "Missing bearer token" },
           });
+        }
+        if (meStatus !== 200) {
+          return jsonResponse(res, meStatus, { error: { code: "SYNTHETIC_VALIDATION_ERROR", message: "Synthetic validation response" } });
         }
         return jsonResponse(res, 200, {
           id: "user_1",
@@ -238,6 +245,7 @@ test("Unit auth service: login/status/runtime/list/logout flow remains determini
     assert.equal(loginResult.apiUrl, mock.apiUrl);
     assert.equal(loginResult.storage, "file");
     assert.equal(loginResult.user.githubUsername, "demo-user");
+    assert.equal(loginResult.aidenid?.orgId, "org_1");
     const requestIds = mock.state.requestIds.filter(Boolean);
     const flowRequestIds = mock.state.flowRequestIds.filter(Boolean);
     assert.equal(requestIds.length >= 3, true);
@@ -252,6 +260,7 @@ test("Unit auth service: login/status/runtime/list/logout flow remains determini
     assert.equal(storedSession?.token, "api_token_1");
     assert.equal(storedSession?.tokenId, "token_1");
     assert.equal(storedSession?.storage, "file");
+    assert.equal(storedSession?.aidenid?.projectId, "proj_1");
 
     const activeSession = await resolveActiveAuthSession({
       cwd: tempRoot,
@@ -509,6 +518,272 @@ test("Unit auth service: env, then the global config token; a workspace config t
     });
     assert.equal(globalSession?.source, "config");
     assert.equal(await bearerOf(globalSession?.credential), "global_token");
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("Unit auth service: headless authorization URL is delivered before the first approval poll", async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-headless-"));
+  const mock = await startAuthRuntimeMockApi({ pollResponses: [{ payload: {
+    status: "approved", auth_token: "synthetic_approval", user: { id: "synthetic_user" },
+  } }] });
+  let delivered = false;
+  try {
+    await loginAndPersistSession({
+      cwd: tempRoot, homeDir: tempRoot, env: { SENTINELAYER_API_URL: mock.apiUrl },
+      skipBrowserOpen: true,
+      onAuthorize: ({ authorizeUrl, browserOpened }) => {
+        assert.equal(mock.state.pollCalls, 0);
+        assert.equal(browserOpened, false);
+        assert.match(authorizeUrl, /cli-auth\?session_id=sess_1$/);
+        delivered = true;
+      },
+    });
+    assert.equal(delivered, true);
+    assert.equal(mock.state.pollCalls, 1);
+  } finally {
+    await mock.close();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("Unit auth service: validation outages are unknown, preserve sign-in, and never erase rejection", async () => {
+  for (const status of [429, 503, 401, 403]) {
+    __resetRequestCircuitForTests();
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-validation-"));
+    const mock = await startAuthRuntimeMockApi({ meStatus: status });
+    try {
+      await writeStoredSession({
+        apiUrl: mock.apiUrl, token: "synthetic_validation", tokenExpiresAt: "2099-01-01T00:00:00Z",
+        user: { id: "synthetic_user" },
+      }, { homeDir: tempRoot });
+      const credentialsPath = resolveCredentialsFilePath({ homeDir: tempRoot });
+      const before = await readFile(credentialsPath, "utf8");
+      const result = await getAuthStatus({
+        cwd: tempRoot, homeDir: tempRoot, env: { SENTINELAYER_API_URL: mock.apiUrl }, autoRotate: false,
+      });
+      assert.equal(result.authenticated, status >= 429 ? null : false);
+      assert.equal(result.validation, status >= 429 ? "unavailable" : "rejected");
+      assert.equal(result.remoteError?.status, status);
+      assert.equal(result.source, "session");
+      assert.equal(await readFile(credentialsPath, "utf8"), before);
+      assert.equal((await readStoredSession({ homeDir: tempRoot }))?.token === "synthetic_validation", true);
+    } finally {
+      await mock.close();
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  }
+});
+
+test("Unit auth service: near-expiry rotation preserves provisioned AIdenID metadata", async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-rotation-"));
+  const mock = await startAuthRuntimeMockApi();
+  const aidenid = { orgId: "synthetic_org", projectId: "synthetic_project", apiKeyPrefix: "aid_", provisionedAt: "2026-01-01T00:00:00Z" };
+  try {
+    await writeStoredSession({
+      apiUrl: mock.apiUrl, token: "synthetic_expiring", tokenId: "synthetic_old",
+      tokenExpiresAt: new Date(Date.now() + 60_000).toISOString(), user: { id: "synthetic_user" }, aidenid,
+    }, { homeDir: tempRoot });
+    const active = await resolveActiveAuthSession({
+      cwd: tempRoot, homeDir: tempRoot, env: { SENTINELAYER_API_URL: mock.apiUrl }, autoRotate: true,
+    });
+    assert.equal(active?.rotated, true);
+    assert.deepEqual(active?.aidenid, aidenid);
+    assert.deepEqual((await readStoredSession({ homeDir: tempRoot }))?.aidenid, aidenid);
+    assert.equal(mock.state.tokenIssueCalls, 1);
+    assert.deepEqual(mock.state.tokenDeleteIds, ["synthetic_old"]);
+  } finally {
+    await mock.close();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("Unit auth command: headless JSON prints URL on stderr before polling and one stdout document", async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-command-headless-"));
+  const stdout = [];
+  const stderr = [];
+  let outputBeforePoll;
+  const mock = await startAuthRuntimeMockApi({
+    pollResponses: [{ payload: { status: "approved", auth_token: "synthetic_command_approval", user: { id: "synthetic_user" } } }],
+    onPoll: () => { outputBeforePoll = { stdout: [...stdout], stderr: [...stderr] }; },
+  });
+  const previousEnv = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE, SENTINELAYER_API_URL: process.env.SENTINELAYER_API_URL };
+  const previousLog = console.log;
+  const previousStderrWrite = process.stderr.write;
+  try {
+    process.env.HOME = tempRoot;
+    process.env.USERPROFILE = tempRoot;
+    process.env.SENTINELAYER_API_URL = mock.apiUrl;
+    console.log = (...values) => stdout.push(values.join(" "));
+    process.stderr.write = (chunk, ...args) => {
+      stderr.push(String(chunk));
+      args.find((arg) => typeof arg === "function")?.();
+      return true;
+    };
+    const program = new Command();
+    registerAuthCommand(program);
+    await program.parseAsync(["auth", "login", "--skip-browser-open", "--json"], { from: "user" });
+    assert.deepEqual(outputBeforePoll?.stdout, []);
+    assert.match(outputBeforePoll?.stderr.join(""), /Open this URL to approve sign-in:\nhttp:\/\/127\.0\.0\.1\/cli-auth\?session_id=sess_1/);
+    assert.equal(stdout.length, 1);
+    assert.equal(JSON.parse(stdout[0]).authenticated, true);
+    assert.equal(stderr.filter((line) => line.includes("Open this URL")).length, 1);
+  } finally {
+    console.log = previousLog;
+    process.stderr.write = previousStderrWrite;
+    for (const [name, value] of Object.entries(previousEnv)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    await mock.close();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("Unit auth command: transient validation prints retry guidance without login guidance", async () => {
+  __resetRequestCircuitForTests();
+  const mock = await startAuthRuntimeMockApi({ meStatus: 503 });
+  const stdout = [];
+  const previousApiUrl = process.env.SENTINELAYER_API_URL;
+  const previousToken = process.env.SENTINELAYER_TOKEN;
+  const previousLog = console.log;
+  try {
+    process.env.SENTINELAYER_API_URL = mock.apiUrl;
+    process.env.SENTINELAYER_TOKEN = "synthetic_command_validation";
+    console.log = (...values) => stdout.push(values.join(" "));
+    const program = new Command();
+    registerAuthCommand(program);
+    await program.parseAsync(["auth", "status", "--no-auto-rotate"], { from: "user" });
+    const output = stdout.join("\n");
+    assert.match(output, /temporarily unavailable/);
+    assert.match(output, /credentials were not cleared/);
+    assert.doesNotMatch(output, /auth login|will provision on next login/);
+    assert.equal(process.env.SENTINELAYER_TOKEN === "synthetic_command_validation", true);
+  } finally {
+    console.log = previousLog;
+    if (previousApiUrl === undefined) delete process.env.SENTINELAYER_API_URL;
+    else process.env.SENTINELAYER_API_URL = previousApiUrl;
+    if (previousToken === undefined) delete process.env.SENTINELAYER_TOKEN;
+    else process.env.SENTINELAYER_TOKEN = previousToken;
+    await mock.close();
+  }
+});
+
+test("Unit auth service: a refused credential destination is not mislabeled as a validation outage", async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-status-destination-"));
+  const configured = await startAuthRuntimeMockApi();
+  const other = await startAuthRuntimeMockApi();
+  try {
+    const status = await getAuthStatus({
+      cwd: tempRoot, homeDir: tempRoot, autoRotate: false, explicitApiUrl: other.apiUrl,
+      env: { SENTINELAYER_API_URL: configured.apiUrl, SENTINELAYER_TOKEN: "synthetic_wrong_destination" },
+    });
+    assert.equal(status.authenticated, false);
+    assert.equal(status.validation, "rejected");
+    assert.equal(status.remoteError?.code, "CREDENTIAL_DESTINATION_REFUSED");
+    assert.equal(configured.state.requestIds.length, 0);
+    assert.equal(other.state.requestIds.length, 0);
+  } finally {
+    await configured.close();
+    await other.close();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("Unit auth service: missing/corrupt keys report unknown storage, preserve metadata, and do not validate remotely", async () => {
+  for (const fault of ["missing", "corrupt"]) {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-status-storage-"));
+    const mock = await startAuthRuntimeMockApi();
+    try {
+      await writeStoredSession({
+        apiUrl: mock.apiUrl, token: "synthetic_storage_status", tokenId: "synthetic-stored-id",
+        tokenExpiresAt: "2099-01-01T00:00:00Z", user: { id: "synthetic-user" },
+      }, { homeDir: tempRoot });
+      const keyPath = path.join(tempRoot, ".sentinelayer", "keys", "credentials.key");
+      const metadataPath = resolveCredentialsFilePath({ homeDir: tempRoot });
+      const metadata = await readFile(metadataPath, "utf8");
+      await rename(keyPath, `${keyPath}.retained`);
+      if (fault === "corrupt") await writeFile(keyPath, "synthetic-invalid-key", "utf8");
+      const status = await getAuthStatus({ cwd: tempRoot, homeDir: tempRoot,
+        env: { SENTINELAYER_API_URL: mock.apiUrl }, autoRotate: false,
+      });
+      assert.equal(status.authenticated, null);
+      assert.equal(status.validation, "storage_unavailable");
+      assert.equal(status.source, "storage_unknown");
+      assert.equal(status.tokenId, "synthetic-stored-id");
+      assert.equal(status.filePath, metadataPath);
+      assert.equal(status.remoteError, null);
+      assert.equal(mock.state.requestIds.length, 0);
+      assert.equal(await readFile(metadataPath, "utf8"), metadata);
+      assert.equal(JSON.stringify(status).includes("synthetic_storage_status"), false);
+      assert.equal(status.tokenEncrypted, undefined);
+      if (fault === "missing") await assert.rejects(readFile(keyPath), { code: "ENOENT" });
+      else assert.equal(await readFile(keyPath, "utf8"), "synthetic-invalid-key");
+      if (fault === "corrupt") await rm(keyPath);
+      await rename(`${keyPath}.retained`, keyPath);
+      assert.equal((await getAuthStatus({ cwd: tempRoot, homeDir: tempRoot,
+        env: { SENTINELAYER_API_URL: mock.apiUrl }, autoRotate: false, checkRemote: false,
+      })).authenticated, true, "repairing storage restores the existing sign-in without another login");
+    } finally {
+      await mock.close();
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  }
+});
+
+test("Unit auth command: unavailable storage has repair guidance and honest single-document JSON", async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-command-storage-"));
+  const previousEnv = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE, SENTINELAYER_API_URL: process.env.SENTINELAYER_API_URL };
+  const previousLog = console.log;
+  const stdout = [];
+  try {
+    process.env.HOME = tempRoot;
+    process.env.USERPROFILE = tempRoot;
+    process.env.SENTINELAYER_API_URL = "https://synthetic.invalid";
+    await writeStoredSession({ apiUrl: "https://synthetic.invalid", token: "synthetic_command_storage",
+      tokenExpiresAt: "2099-01-01T00:00:00Z",
+    }, { homeDir: tempRoot });
+    const keyPath = path.join(tempRoot, ".sentinelayer", "keys", "credentials.key");
+    await rename(keyPath, `${keyPath}.retained`);
+    console.log = (...values) => stdout.push(values.join(" "));
+    const program = new Command();
+    registerAuthCommand(program);
+    await program.parseAsync(["auth", "status", "--offline", "--no-auto-rotate"], { from: "user" });
+    const output = stdout.join("\n");
+    assert.match(output, /Authentication is unknown/);
+    assert.match(output, /current user\/home, keyring availability, encryption key and file permissions/);
+    assert.doesNotMatch(output, /auth login|auth logout|No active session token|Authenticated as/);
+    stdout.length = 0;
+    const jsonProgram = new Command();
+    registerAuthCommand(jsonProgram);
+    await jsonProgram.parseAsync(["auth", "status", "--offline", "--no-auto-rotate", "--json"], { from: "user" });
+    assert.equal(stdout.length, 1);
+    const status = JSON.parse(stdout[0]);
+    assert.equal(status.authenticated, null);
+    assert.equal(status.source, "storage_unknown");
+    assert.equal(status.validation, "storage_unavailable");
+    assert.equal(stdout[0].includes("synthetic_command_storage"), false);
+    await assert.rejects(readFile(keyPath), { code: "ENOENT" });
+  } finally {
+    console.log = previousLog;
+    for (const [name, value] of Object.entries(previousEnv)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("Unit auth service: genuinely absent credentials still report no sign-in", async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-status-absent-"));
+  try {
+    const status = await getAuthStatus({ cwd: tempRoot, homeDir: tempRoot,
+      env: { SENTINELAYER_API_URL: "https://synthetic.invalid" }, checkRemote: false, autoRotate: false,
+    });
+    assert.equal(status.authenticated, false);
+    assert.equal(status.validation, "none");
+    assert.equal(status.source, null);
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
   }

@@ -46,6 +46,22 @@ sl watch run-events --run-id <run-id>
 
 Windows PowerShell note: `sl` is a built-in alias for `Set-Location`. Use `sentinelayer-cli` (or short alias `slc`) instead.
 
+### Human sign-in and agent identity
+
+`sl auth login --skip-browser-open` prints the approval URL before waiting;
+in JSON mode the URL goes to stderr. A server outage during `auth status` is
+unavailable validation, not logout. Do not delete credential encryption keys
+or log out to repair a keyring/file-permission error.
+
+An admitted agent receives its own AIdenID email, Ed25519-backed passport and
+room-scoped credential after human approval. Its email and cryptographic
+identity remain visible on reconnect; email alone never grants access.
+An interrupted claim or missing credential can be recovered with the retained
+agent key. For a stale active credential, repeat the original join with
+`--recover-admission`, the same `--goal`, `--scope` and `--ttl`.
+Recovery requires API support, preserves the original expiry, and cannot revive
+revoked, stopped or expired permissions. It is not TTL renewal.
+
 ## MCP Live Entry Points And Incident Response
 
 Live MCP entry points:

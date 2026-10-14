@@ -11,7 +11,7 @@ import "./setup-env.mjs";
 //   - is an invitation accepted before admission is requested?
 
 import assert from "node:assert/strict";
-import { randomBytes, randomUUID } from "node:crypto";
+import { createPublicKey, randomBytes, randomUUID, verify as verifyBytes } from "node:crypto";
 import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -35,7 +35,8 @@ process.env.SENTINELAYER_TOKEN = HUMAN;
 
 const { Command } = await import("commander");
 const { registerSessionCommand } = await import("../src/commands/session.js");
-const { admissionCredentialPath } = await import("../src/session/admission.js");
+const { admissionCredentialPath, RECOVERY_DOMAIN, RECOVERY_FIELDS } = await import("../src/session/admission.js");
+const { canonicalPreimage } = await import("../src/session/admission-preimage.js");
 const { resetSessionSyncStateForTests } = await import("../src/session/sync.js");
 
 const API = "https://api.fixture.invalid";
@@ -108,7 +109,7 @@ function fakeApi({
     if (method === "GET" && /\/admissions\/self$/.test(p)) {
       const adm = [...state.admissions.values()].find((a) => a.token === bearer);
       if (!adm) return json({ error: { code: "INVALID_TOKEN" } }, 401);
-      return json({ admissionId: adm.id, sessionId: SID, agentId: receiptAgentId ?? adm.body.agentId, actions: adm.actions, expiresAt: Math.floor(Date.now() / 1000) + 3600, passportId: "pid", effectiveRole: "contributor", verifiedAt: Math.floor(Date.now() / 1000) });
+      return json({ admissionId: adm.id, sessionId: SID, agentId: receiptAgentId ?? adm.body.agentId, actions: adm.actions, expiresAt: adm.expiresAt, passportId: "pid", effectiveRole: "contributor", verifiedAt: Math.floor(Date.now() / 1000) });
     }
     // --- admission management (delegator's human token)
     if (method === "POST" && /\/invitations\/accept$/.test(p)) {
@@ -152,13 +153,47 @@ function fakeApi({
       const adm = state.admissions.get(claim[1]);
       adm.status = "active";
       adm.token = `sladm_${randomBytes(24).toString("base64url")}`;
+      adm.expiresAt = Math.floor(Date.now() / 1000) + 3600;
       return json({
         admissionId: adm.id,
         status: "active",
         identity: { subject: `sl-agent:u/${adm.body.agentId}`, passportId: "pid", passportStatus: "issued", keyThumbprint: "t".repeat(64), popAssurance: "agent_held_key", email: { status: "provisioned", address: `${adm.body.agentId}@agents.test` }, passport: {} },
-        grant: { grantId: "g", sessionId: SID, actions: adm.actions, expiresAt: Math.floor(Date.now() / 1000) + 3600, goalDigest: "d", document: {} },
+        grant: { grantId: "g", sessionId: SID, actions: adm.actions, expiresAt: adm.expiresAt, goalDigest: "d", document: {} },
         correlation: { actorRef: `adm:${adm.id}` },
         jev: { verificationStatus: "not_evaluated" },
+        credential: { token: adm.token, deliveredOnce: true },
+      });
+    }
+    const recovery = p.match(/\/admissions\/([^/]+)\/recover(?:\/(challenge))?$/);
+    if (method === "POST" && recovery) {
+      const adm = state.admissions.get(recovery[1]);
+      if (!adm || state.revoked.has(adm.id)) return json({ error: { code: "ADMISSION_REVOKED" } }, 403);
+      if (state.scopeDenied.has(adm.id)) return json({ error: { code: "ADMISSION_SCOPE_DENIED" } }, 403);
+      if (recovery[2]) {
+        state.order.push("recovery_challenge");
+        adm.recoveryFields = {
+          admissionId: adm.id, sessionId: SID, agentId: adm.body.agentId,
+          delegatorUserId: "synthetic-user", tenantUserId: "synthetic-user",
+          publicKey: adm.body.publicKey, keyThumbprint: "t".repeat(64),
+          grantId: "g", goalDigest: "d", actions: adm.actions, policyVersion: 1,
+          expiresAt: adm.expiresAt, nonce: randomBytes(32).toString("base64url"),
+          challengeExpiresAt: Math.floor(Date.now() / 1000) + 60,
+          passportId: "pid", aidenidIdentityId: "synthetic-aidenid",
+          aidenidHandle: `${adm.body.agentId}@agents.test`,
+        };
+        return json({ status: "active", admissionId: adm.id, recovery: {
+          domain: RECOVERY_DOMAIN, fields: [...RECOVERY_FIELDS], preimage: adm.recoveryFields,
+        } });
+      }
+      const body = JSON.parse(init.body);
+      assert.equal(body.nonce, adm.recoveryFields.nonce);
+      const publicKey = createPublicKey({ key: { kty: "OKP", crv: "Ed25519", x: adm.body.publicKey }, format: "jwk" });
+      assert.equal(verifyBytes(null, canonicalPreimage(adm.recoveryFields, { domain: RECOVERY_DOMAIN, fields: [...RECOVERY_FIELDS] }), publicKey, Buffer.from(body.signature, "base64url")), true);
+      state.order.push("recover");
+      adm.token = `sladm_${randomBytes(24).toString("base64url")}`;
+      return json({ status: "active", admissionId: adm.id,
+        identity: { subject: `sl-agent:u/${adm.body.agentId}`, passportId: "pid", passportStatus: "issued", keyThumbprint: "t".repeat(64), popAssurance: "agent_held_key", email: { status: "provisioned", address: adm.recoveryFields.aidenidHandle }, passport: {} },
+        grant: { grantId: "g", sessionId: SID, actions: adm.actions, expiresAt: adm.expiresAt, goalDigest: "d", document: {} },
         credential: { token: adm.token, deliveredOnce: true },
       });
     }
@@ -729,7 +764,7 @@ test("a fresh tickets.read-only join: verified by its own receipt, no history, n
   assert.equal(after.some((c) => /\/events/.test(c.path)), false, "no history for a tickets-only grant");
 });
 
-test("an identical rejoin after revoke is NOT joined, and asks nothing of the human", async () => {
+test("an identical rejoin after revoke is NOT joined; only a one-time recovery control challenge is allowed", async () => {
   const ws = await workspace();
   const api = fakeApi();
   const args = ["session", "join", SID, "--agent", "rejoin-agent", "--goal", "Same goal", "--json", "--path", ws];
@@ -743,7 +778,69 @@ test("an identical rejoin after revoke is NOT joined, and asks nothing of the hu
   assert.equal(again.exitCode, 4);
   const calls = since(api, mark);
   assert.ok(calls.some((c) => /\/admissions\/self$/.test(c.path)), "the cached grant was checked live");
-  assert.deepEqual(calls.filter((c) => c.bearer === HUMAN), []);
+  const humanCalls = calls.filter((c) => c.bearer === HUMAN);
+  assert.equal(humanCalls.length, 1);
+  assert.equal(humanCalls[0].method, "POST");
+  assert.match(humanCalls[0].path, /\/admissions\/[^/]+\/recover\/challenge$/);
+  assert.equal(calls.some((c) => /\/agent-grants/.test(c.path)), false);
+  assert.equal(calls.some((c) => /\/recover$/.test(c.path)), false, "a refused challenge never rotates authority");
+});
+
+test("a cached join with scope denial never attempts key recovery or human data-plane fallback", async () => {
+  const ws = await workspace();
+  const api = fakeApi();
+  const args = ["session", "join", SID, "--agent", "scope-denied-rejoin", "--goal", "Same scope", "--json", "--path", ws];
+  assert.equal((await sl(args)).json?.joined, true);
+  for (const adm of api.admissions.values()) api.scopeDenied.add(adm.id);
+  const mark = api.requests.length;
+  const again = await sl(args);
+  assert.equal(again.json?.joined, false);
+  assert.deepEqual(since(api, mark).filter((call) => call.bearer === HUMAN), []);
+  assert.equal(since(api, mark).some((call) => /\/recover/.test(call.path)), false);
+});
+
+test("a stale live bearer rejoins through one signed recovery without another approval or TTL expansion", async () => {
+  const ws = await workspace();
+  const api = fakeApi();
+  const args = ["session", "join", SID, "--agent", "stale-live-rejoin", "--goal", "Same live goal", "--json", "--path", ws];
+  const first = await sl(args);
+  assert.equal(first.json?.joined, true);
+  const [adm] = api.admissions.values();
+  const initialExpiry = adm.expiresAt;
+  adm.token = `sladm_${randomBytes(24).toString("base64url")}`; // remote rotation, local bearer is stale
+  const mark = api.requests.length;
+  const again = await sl(args);
+  assert.equal(again.error, null, String(again.error));
+  assert.equal(again.json?.joined, true, again.text);
+  assert.equal(again.json.admission.recovered, true);
+  assert.equal(again.json.admission.grant.expiresAt, initialExpiry);
+  assert.deepEqual(api.order, ["admission", "recovery_challenge", "recover"]);
+  const calls = since(api, mark);
+  assert.equal(calls.filter((call) => /\/recover\/challenge$/.test(call.path)).length, 1);
+  assert.equal(calls.filter((call) => /\/recover$/.test(call.path)).length, 1);
+  assert.equal(calls.some((call) => /\/agent-grants/.test(call.path)), false);
+  assert.equal(calls.filter((call) => call.bearer === HUMAN).every((call) => /\/recover(?:\/challenge)?$/.test(call.path)), true);
+  const explicit = await sl([...args, "--recover-admission"]);
+  assert.equal(explicit.json?.joined, true, explicit.text);
+  assert.equal(explicit.json.admission.recovered, true);
+  assert.equal(explicit.json.admission.grant.expiresAt, initialExpiry);
+  assert.deepEqual(api.order, ["admission", "recovery_challenge", "recover", "recovery_challenge", "recover"]);
+});
+
+test("bare rejoin with a stored admission never enters account-grant compatibility or human room reads", async () => {
+  const { ws, api } = await joinAdmitted("bare-admission-rejoin");
+  let mark = api.requests.length;
+  const args = ["session", "join", SID, "--agent", "bare-admission-rejoin", "--json", "--path", ws];
+  const live = await sl(args);
+  assert.equal(live.json?.joined, false);
+  assert.equal(live.json.remoteAgentVerification.code, "ADMISSION_REQUIRED");
+  assert.deepEqual(since(api, mark), []);
+  await expire("bare-admission-rejoin");
+  mark = api.requests.length;
+  const expired = await sl(args);
+  assert.equal(expired.json?.joined, false);
+  assert.equal(expired.json.remoteAgentVerification.code, "ADMISSION_CREDENTIAL_REFUSED");
+  assert.deepEqual(since(api, mark), []);
 });
 
 // ------------------------------------------- actor vs target (principal metadata)

@@ -9,8 +9,8 @@ import "./setup-env.mjs";
 // These tests pin the new contract:
 //   - `join <id>` GETs `/api/v1/sessions/{id}` (singleton from API PR #483)
 //     before materializing local cache; 404 surfaces a friendly error.
-//   - `--agent <granted>` relays an `agent_join` canonical event after the
-//     local stream is materialized (mirrors `post-agent` semantics).
+//   - Named agents verify an existing active grant and confirmed TTL presence
+//     before local materialization; join never appends transcript events.
 //   - `ensure --session <id>` is a thin alias over `join` for the
 //     `{sessionId, title, resumed}` JSON contract callers consume.
 //
@@ -107,6 +107,20 @@ function fakeJsonResponse(status, body) {
   };
 }
 
+function fakeLegacyAgentAccess(url, options = {}) {
+  const method = String(options.method || "GET").toUpperCase();
+  if (method === "GET" && String(url).endsWith("/api/v1/sessions/agent-grants?limit=100")) {
+    return fakeJsonResponse(200, { grants: ["agent-alpha", "codex", "codex-joiner"].map((agentId) => ({
+      id: `synthetic-${agentId}`, agentId, role: "coder", exists: true, revoked: false, revokedAt: null,
+    })), nextAfter: null });
+  }
+  if (method === "PUT" && String(url).endsWith("/presence")) {
+    const agentId = JSON.parse(String(options.body || "{}")).agentId;
+    return fakeJsonResponse(200, { agentId, status: "ok", recorded: true, ttlSeconds: 90 });
+  }
+  return null;
+}
+
 test("Unit session join: GETs singleton, materializes local, prints summary", async () => {
   resetSessionSyncStateForTests();
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-session-join-ok-"));
@@ -119,6 +133,8 @@ test("Unit session join: GETs singleton, materializes local, prints summary", as
     const lastActivityIso = new Date(Date.now() - 5 * 60_000).toISOString();
     globalThis.fetch = async (url, options = {}) => {
       calls.push({ url: String(url), method: String(options.method || "GET").toUpperCase() });
+      const access = fakeLegacyAgentAccess(url, options);
+      if (access) return access;
       if (String(url).endsWith(`/api/v1/sessions/${remoteSessionId}`)) {
         return fakeJsonResponse(200, {
           session: {
@@ -150,6 +166,8 @@ test("Unit session join: GETs singleton, materializes local, prints summary", as
     const payload = JSON.parse(stdout);
     assert.equal(payload.command, "session join");
     assert.equal(payload.joined, true);
+    assert.equal(payload.agentId, "agent-alpha", "remote-verified names must not be renamed locally");
+    assert.equal(payload.remoteAgentVerification?.ok, true);
     assert.equal(payload.sessionId, remoteSessionId);
     assert.equal(payload.title, "Carter's web-launched investigation");
     assert.equal(payload.eventCount, 7);
@@ -191,6 +209,8 @@ test("Unit session join: hydrates remote tail before returning context briefing"
     globalThis.fetch = async (url, options = {}) => {
       const method = String(options.method || "GET").toUpperCase();
       const urlString = String(url);
+      const access = fakeLegacyAgentAccess(url, options);
+      if (access) return access;
       if (method === "GET" && urlString.endsWith(`/api/v1/sessions/${remoteSessionId}`)) {
         return fakeJsonResponse(200, {
           session: {
@@ -303,6 +323,8 @@ test("Unit session join: --agent <granted> keeps join identity and briefing out 
     const remoteSessionId = "sess-relay-1111111111";
     globalThis.fetch = async (url, options = {}) => {
       const method = String(options.method || "GET").toUpperCase();
+      const access = fakeLegacyAgentAccess(url, options);
+      if (access) return access;
       if (method === "GET" && String(url).endsWith(`/api/v1/sessions/${remoteSessionId}`)) {
         return fakeJsonResponse(200, {
           session: {
@@ -379,6 +401,17 @@ test("Unit session join: spawned CLI does not emit process-exit agent_leave", as
       req.on("data", (chunk) => chunks.push(chunk));
       req.on("end", () => {
         const requestUrl = String(req.url || "");
+        if (req.method === "GET" && requestUrl === "/api/v1/sessions/agent-grants?limit=100") {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ grants: [{ id: "synthetic-codex", agentId: "codex", role: "coder", exists: true, revoked: false, revokedAt: null }], nextAfter: null }));
+          return;
+        }
+        if (req.method === "PUT" && requestUrl === `/api/v1/sessions/${remoteSessionId}/presence`) {
+          const presence = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ status: "ok", recorded: true, agentId: presence.agentId, ttlSeconds: 90 }));
+          return;
+        }
         if (req.method === "GET" && requestUrl === `/api/v1/sessions/${remoteSessionId}`) {
           res.writeHead(200, { "content-type": "application/json" });
           res.end(

@@ -133,6 +133,14 @@ export function registerAuthCommand(program) {
           tokenLabel: options.tokenLabel,
           tokenTtlDays,
           cliVersion: CLI_VERSION,
+          onAuthorize: ({ authorizeUrl }) => {
+            // A spawned opener does not prove a browser exists on a headless host.
+            if (!authorizeUrl) return;
+            const safeUrl = String(authorizeUrl).replace(/[\u0000-\u001f\u007f-\u009f]/g, "").slice(0, 4096);
+            const line = `Open this URL to approve sign-in:\n${safeUrl}\n`;
+            if (shouldEmitJson(options, command)) process.stderr.write(line);
+            else console.log(line.trimEnd());
+          },
         });
       } catch (error) {
         throw new Error(formatApiError(error));
@@ -158,10 +166,6 @@ export function registerAuthCommand(program) {
       }
       if (result.filePath) {
         console.log(pc.gray(`Session metadata: ${result.filePath}`));
-      }
-      if (!result.browserOpened && result.authorizeUrl) {
-        console.log(pc.yellow("Open this URL to approve sign-in:"));
-        console.log(result.authorizeUrl);
       }
     });
 
@@ -199,6 +203,13 @@ export function registerAuthCommand(program) {
 
       console.log(pc.bold("Authentication status"));
       console.log(pc.gray(`API: ${status.apiUrl}`));
+      if (status.validation === "storage_unavailable") {
+        console.log(pc.yellow("Stored sign-in metadata exists, but its credential cannot be read. Authentication is unknown."));
+        if (status.filePath) console.log(pc.gray(`Session metadata: ${status.filePath}`));
+        console.log(pc.gray("Check the current user/home, keyring availability, encryption key and file permissions."));
+        console.log(pc.gray("Credentials were not cleared. Repair storage instead of logging out or signing in again for this error."));
+        return;
+      }
       if (!status.source) {
         console.log(pc.yellow("No active session token found."));
         printAuthHint();
@@ -254,6 +265,15 @@ export function registerAuthCommand(program) {
             }`
           )
         );
+        if (status.validation === "unavailable") {
+          console.log(pc.yellow("Remote validation is temporarily unavailable; your existing credentials were not cleared."));
+          console.log(pc.gray("Retry auth status when the API is reachable. Do not sign in again solely for this validation error."));
+          return;
+        }
+        if (["CREDENTIAL_DESTINATION_REFUSED", "CREDENTIAL_PATH_REFUSED"].includes(status.remoteError.code)) {
+          console.log(pc.yellow("Credential destination was refused. Check the configured API; signing in again does not change this boundary."));
+          return;
+        }
       } else {
         console.log(pc.yellow("Remote validation was skipped (`--offline`)."));
       }
