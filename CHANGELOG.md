@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.46.5](https://github.com/mrrCarter/create-sentinelayer/compare/v0.46.4...v0.46.5) (2026-10-14)
+
+
+### Bug Fixes
+
+* **auth:** persistent human login and recoverable agent identities ([2a46725](https://github.com/mrrCarter/create-sentinelayer/commit/2a467254e1b0d7b01ed6fcd7311c2b637dc4a45b))
+* **auth:** preserve sign-in and recover delegated agent credentials ([1be4e80](https://github.com/mrrCarter/create-sentinelayer/commit/1be4e80e99d07cfc10dd1a624893bd4a5a62194f))
+
 ## [0.46.4](https://github.com/mrrCarter/create-sentinelayer/compare/v0.46.3...v0.46.4) (2026-10-11)
 
 
