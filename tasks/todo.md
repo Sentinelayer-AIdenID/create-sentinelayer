@@ -4087,3 +4087,30 @@ Review evidence:
   monetary cap. Primary-generation accounting and gate severities remain original.
 - Classifier resource/usage metadata is separate from original cost history and
   progress tracking. V1 independent protocol/budget review completed; coalesced fixes are in preserved successor v2. Final exact-source defect review pending.
+
+
+## Sol: PR842 hosted eval-impact evidence, 2026-10-16
+
+- [x] Read actual failed job116797177729 and unchanged eval-impact contract.
+- [x] Identify missing accepted-prefix evidence; preserve app/workflow/gate source.
+- [x] Freeze synthetic baseline/candidate input and observed contract-delta fixture.
+- [x] Consume the fixture in actual-caller deterministic tests, preserving original gate/usage (137/137).
+- [x] Verify focused regressions and real unchanged gate against exact staged tree.
+- [x] Preserve prior freezes; bind successor source/test/log/tree and hand off without commit/push.
+
+
+### Review: PR842 eval-impact correction
+
+- Exact hosted job showed the reviewed AI file changed without evidence under a
+  recognized eval path; Enforcement/Terminal failures were downstream. Gate and
+  workflow were retained, not weakened.
+- Shared synthetic JSON evidence is consumed by actual-caller tests for off/on,
+  positive cap, provider outage, malformed output and insufficient evidence.
+  All preserve original P1/P2 findings, blocking counts, fixes and generation usage.
+- Bounded deterministic selection: 137/137 pass, including 56 evaluation tests;
+  six actual mock observation records emitted. No model-quality or live-run claim.
+- Real unchanged eval-check rejects published3e12 (exit2), accepts the exact staged
+  correction tree through a labeled unreferenced proof object (exit0). Neither
+  author branch nor author index is advanced by proof construction.
+- Frozen application code and prior v1/v2 packets remain unchanged. Root owns
+  reviewed canonical commit, subsequent hosted run and publication receipts.

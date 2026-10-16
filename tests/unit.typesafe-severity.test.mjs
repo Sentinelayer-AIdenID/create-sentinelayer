@@ -4,11 +4,14 @@ import assert from "node:assert/strict";
 import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { Command } from "commander";
 import { registerOmarGateCommand } from "../src/commands/omargate.js";
 import { runAiReviewLayer } from "../src/review/ai-review.js";
 import { runOmarGateOrchestrator } from "../src/review/omargate-orchestrator.js";
 import { TYPESAFE_SEVERITY_MODEL, SEVERITY_CRITERIA, CATEGORY_CRITERIA, buildSeverityRequest, parseSeverityResponse, evaluateSeverityClassification, parseSeverityEvaluationMaxCost, severityResourceTotals } from "../src/review/typesafe-severity.js";
+
+const evalEvidence = JSON.parse(await fsp.readFile(new URL("../tasks/evals/pr-842-typesafe-severity-evaluation.json", import.meta.url), "utf8"));
 
 const finding = (overrides = {}) => ({ severity: "P1", file: ".github/workflows/release.yml", line: 17, message: "Unbound release artifact", evidence: "deploy consumes the latest artifact without checking its source revision", rationale: "Artifact provenance is missing", suggestedFix: "Bind the artifact to the reviewed revision", rootCause: "Unbound artifact lookup", userImpact: "A different build can be deployed", ...overrides });
 const env = { TYPESAFE_API_KEY: "fixture-typesafe-only" };
@@ -95,13 +98,15 @@ async function fixture(fn) {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "sl-typesafe-eval-")); const saved = globalThis.fetch;
   try { await fn(dir); } finally { globalThis.fetch = saved; assert.equal(path.dirname(dir), path.resolve(os.tmpdir())); await fsp.rm(dir, { recursive: true, force: true }); }
 }
-async function actualCaller(dir, { classifier = "typesafe", cap = 0, malformed = false, withKey = true, limits = {}, callLog = [] } = {}) {
-  const original = [finding(), finding({ severity: "P2", message: "Second finding" })]; const calls = callLog;
+async function actualCaller(dir, { classifier = "typesafe", cap = 0, malformed = false, withKey = true, limits = {}, callLog = [], sourceFindings, mockOutcome = "valid" } = {}) {
+  const original = sourceFindings || [finding(), finding({ severity: "P2", message: "Second finding" })]; const calls = callLog;
   globalThis.fetch = async (url, init) => {
     calls.push(url);
     if (url === "https://api.openai.com/v1/chat/completions") return Response.json({ choices: [{ message: { content: JSON.stringify({ summary: { highLevel: "fixture" }, findings: original }) } }] });
     assert.equal(url, "https://api.typesafe.ai/v1/systemone"); const q = JSON.parse(init.body); assert.equal(Object.hasOwn(q.state.findings[0], "severity"), false);
-    if (malformed) return new Response("{invalid"); return Response.json(response(q, "P3"));
+    if (malformed || mockOutcome === "malformed") return new Response("{invalid");
+    if (mockOutcome === "outage") return new Response("mock provider outage", { status: 429 });
+    return Response.json(response(q, mockOutcome === "insufficient" ? "insufficient_evidence" : "P3"));
   };
   const r = await runAiReviewLayer({ targetPath: dir, runDirectory: path.join(dir, "run"), outputDir: path.join(dir, "out"), runId: "fixture", mode: "full", provider: "openai", model: "gpt-5.3-codex", apiKey: "fixture-openai-only", env: withKey ? env : {}, maxCostUsd: cap, severityClassifier: classifier, deterministic: { summary: { P0: 0, P1: 0, P2: 0, P3: 0 } }, usageRecorder: async () => ({ ok: true }), ...limits });
   return { r, calls, original };
@@ -204,4 +209,63 @@ test("Actual orchestrator validates opt-in monetary caps before starting persona
     await assert.rejects(runOmarGateOrchestrator({ targetPath: dir, severityClassifier: "typesafe", maxCostUsd, aiReviewRunner: async () => { calls++; } }), /max-cost must be a finite non-negative number/);
     assert.equal(calls, 0);
   }
+}));
+
+
+test("Frozen eval evidence binds the complete synthetic comparison and canonical implementation/test source", async () => {
+  assert.equal(evalEvidence.schemaVersion, 1);
+  assert.equal(evalEvidence.evidenceKind, "deterministic_mock_contract_comparison");
+  assert.equal(evalEvidence.modelAccuracyEvidence, false);
+  assert.equal(evalEvidence.sourceBinding.baselineRevision, "6f21f9718d344157e75f83f1a3100fcc8a316112");
+  assert.equal(evalEvidence.sourceBinding.candidateImplementationRevision, "3e12b628b6a64c69aee643d327c4df0f03a9dbac");
+  assert.deepEqual(evalEvidence.cases.map((c) => c.id), ["off-compatibility", "on-schema-valid-disagreement", "positive-cap-skip", "provider-outage", "malformed-response", "insufficient-evidence"]);
+  const sourceHashes = { ...evalEvidence.sourceBinding.sourceSha256, [evalEvidence.sourceBinding.testPath]: evalEvidence.sourceBinding.testSha256 };
+  assert.equal(Object.keys(sourceHashes).length, 7);
+  for (const [file, expected] of Object.entries(sourceHashes)) {
+    const canonical = (await fsp.readFile(new URL(`../${file}`, import.meta.url), "utf8")).replace(/\r\n/g, "\n");
+    assert.equal(createHash("sha256").update(canonical).digest("hex"), expected, `canonical source binding: ${file}`);
+  }
+});
+for (const scenario of evalEvidence.cases) test(`Frozen actual-caller eval comparison: ${scenario.id}`, async (t) => fixture(async (dir) => {
+  const before = structuredClone(evalEvidence.input.findings);
+  const { r, calls, original } = await actualCaller(dir, {
+    sourceFindings: structuredClone(before), classifier: scenario.options.classifier,
+    cap: scenario.options.maxCostUsd, mockOutcome: scenario.options.mockOutcome,
+  });
+  const expected = scenario.expected;
+  assert.equal(calls.filter((url) => url === "https://api.openai.com/v1/chat/completions").length, expected.primaryGenerationRequests);
+  assert.equal(calls.filter((url) => url === "https://api.typesafe.ai/v1/systemone").length, expected.classificationRequests);
+  assert.deepEqual(r.aiSummary, evalEvidence.invariants.originalSummary);
+  assert.deepEqual(original, before);
+  assert.equal(r.usage.toolCalls, evalEvidence.invariants.generationUsageToolCalls);
+  assert.equal(r.findings.length, before.length);
+  r.findings.forEach((f, i) => {
+    for (const field of evalEvidence.invariants.preservedFields) assert.equal(f[field], before[i][field], `${scenario.id}: original ${field}`);
+    assert.equal(Object.hasOwn(f, "severityClassification"), expected.classificationPresent);
+    if (expected.classificationPresent) assert.equal(f.severityClassification.severity, expected.candidateSeverity);
+  });
+  assert.equal(Object.hasOwn(r, "severityClassification"), expected.classificationPresent);
+  if (expected.classificationPresent) {
+    assert.equal(r.severityClassification.requestedModel, evalEvidence.mockClassification.model);
+    assert.equal(r.severityClassification.dictionaryVersion, evalEvidence.sourceBinding.dictionaryVersion);
+    assert.equal(r.severityClassification.status, expected.status);
+    assert.equal(r.severityClassification.reason, expected.reason);
+    assert.equal(r.severityClassification.authority, evalEvidence.invariants.classificationAuthority);
+    assert.equal(r.severityClassification.usage !== null, expected.usageKnown);
+    if (expected.usageKnown) assert.equal(r.severityClassification.usage.inputTokens, evalEvidence.mockClassification.usage.input_tokens);
+  }
+  const report = JSON.parse(await fsp.readFile(r.artifacts.reportJsonPath, "utf8"));
+  assert.deepEqual(report.aiSummary, evalEvidence.invariants.originalSummary);
+  assert.equal(Object.hasOwn(report, "severityClassification"), expected.classificationPresent);
+  const history = JSON.parse(await fsp.readFile(r.cost.filePath, "utf8"));
+  assert.equal(history.entries.filter((e) => e.provider === "openai").length, evalEvidence.invariants.generationHistoryEntries);
+  assert.equal(history.entries.filter((e) => e.provider === "typesafe").length, evalEvidence.invariants.classifierCostHistoryEntries);
+  t.diagnostic(JSON.stringify({ evidenceKind: "mock_contract_observation", scenario: scenario.id,
+    generationRequests: calls.filter((url) => url === "https://api.openai.com/v1/chat/completions").length,
+    classificationRequests: calls.filter((url) => url === "https://api.typesafe.ai/v1/systemone").length,
+    originalSeverities: r.findings.map((f) => f.severity), originalSummary: r.aiSummary,
+    status: r.severityClassification?.status || null, reason: r.severityClassification?.reason || null,
+    candidates: r.findings.map((f) => f.severityClassification?.severity || null),
+    generationHistoryEntries: history.entries.filter((e) => e.provider === "openai").length,
+    classifierCostHistoryEntries: history.entries.filter((e) => e.provider === "typesafe").length }));
 }));

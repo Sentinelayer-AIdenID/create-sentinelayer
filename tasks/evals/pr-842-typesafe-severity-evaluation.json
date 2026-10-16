@@ -1,0 +1,201 @@
+{
+  "schemaVersion": 1,
+  "suiteId": "pr842-typesafe-severity-contract-v1",
+  "evidenceKind": "deterministic_mock_contract_comparison",
+  "modelAccuracyEvidence": false,
+  "sourceBinding": {
+    "baselineRevision": "6f21f9718d344157e75f83f1a3100fcc8a316112",
+    "baselineAiReviewBlob": "1b780ec0fdb84a2f2d3f082c3d0c783d675f5952",
+    "candidateImplementationRevision": "3e12b628b6a64c69aee643d327c4df0f03a9dbac",
+    "candidateImplementationTree": "a7710cb9f81018fb483ae72a98fd574f2d99269b",
+    "candidateAiReviewBlob": "8bc830a8dbb50543ac46b05fb8018a9e34c9ace3",
+    "canonicalization": "UTF-8; CRLF converted to LF only for Git-canonical source comparison",
+    "sourceSha256": {
+      "src/review/typesafe-severity.js": "0b93a7cf0b84ba3d6bef529265a7fccca3ecff058230eba1eeb4a5607cf65c77",
+      "src/review/ai-review.js": "d6dfc3bda0988e8bd7d62c871859cbbeac54bf39ad36830bcbebd7ea22faed01",
+      "src/review/omargate-orchestrator.js": "90d6d8f61e6e3056e937f79f584725f6cbd9e47128d22e61d1bd600227f75725",
+      "src/commands/omargate.js": "c59eee4a1bd833065e4cd6e136917adc42052c1e35e0089ef010115b6f1d83e4",
+      "src/commands/legacy-args.js": "83772b6ccd5765d1a0bd1f3ee3eefcf5c1fdaf4e9fb1a301c0312b286dbc0d29",
+      "src/legacy-cli.js": "5b5de479485cc2144b60b615697577912913f40b3052387ecf6bd51fe78a6bd7"
+    },
+    "testPath": "tests/unit.typesafe-severity.test.mjs",
+    "testSha256": "a74ec5dced81ce1977c8fd2e7f31214d8642dea75c86e44f4bacfce9229e6feb",
+    "dictionaryVersion": "omar-severity-evaluation/1"
+  },
+  "baselineMeaning": "Published base generation-only contract, with candidate off mode exercised on identical synthetic inputs; no independent baseline model/provider run.",
+  "providerLabels": {
+    "generator": "mock OpenAI chat/completions response; no network",
+    "classifier": "mock TypeSafe System One response or deterministic HTTP/JSON failure; no network"
+  },
+  "input": {
+    "findings": [
+      {
+        "severity": "P1",
+        "file": ".github/workflows/release.yml",
+        "line": 17,
+        "message": "Unbound release artifact",
+        "evidence": "deploy consumes the latest artifact without checking its source revision",
+        "rationale": "Artifact provenance is missing",
+        "suggestedFix": "Bind the artifact to the reviewed revision",
+        "rootCause": "Unbound artifact lookup",
+        "userImpact": "A different build can be deployed"
+      },
+      {
+        "severity": "P2",
+        "file": ".github/workflows/release.yml",
+        "line": 17,
+        "message": "Second finding",
+        "evidence": "deploy consumes the latest artifact without checking its source revision",
+        "rationale": "Artifact provenance is missing",
+        "suggestedFix": "Bind the artifact to the reviewed revision",
+        "rootCause": "Unbound artifact lookup",
+        "userImpact": "A different build can be deployed"
+      }
+    ]
+  },
+  "mockClassification": {
+    "model": "jev-1.13.0",
+    "severityChoice": "P3",
+    "categoryChoice": "cicd",
+    "usage": {
+      "input_tokens": 101,
+      "output_tokens": 21
+    },
+    "reasonForDisagreement": "Deliberately differs from generator severity to verify original gate ownership; not a gold label."
+  },
+  "invariants": {
+    "originalSummary": {
+      "P0": 0,
+      "P1": 1,
+      "P2": 1,
+      "P3": 0,
+      "blocking": true
+    },
+    "preservedFields": [
+      "severity",
+      "file",
+      "line",
+      "message",
+      "evidence",
+      "rationale",
+      "suggestedFix",
+      "rootCause",
+      "userImpact"
+    ],
+    "generationUsageToolCalls": 1,
+    "generationHistoryEntries": 1,
+    "classifierCostHistoryEntries": 0,
+    "classificationAuthority": "evaluation_only"
+  },
+  "cases": [
+    {
+      "id": "off-compatibility",
+      "options": {
+        "classifier": "off",
+        "maxCostUsd": 0,
+        "mockOutcome": "valid"
+      },
+      "expected": {
+        "primaryGenerationRequests": 1,
+        "classificationRequests": 0,
+        "classificationPresent": false,
+        "status": null,
+        "reason": null,
+        "candidateSeverity": null,
+        "usageKnown": false
+      }
+    },
+    {
+      "id": "on-schema-valid-disagreement",
+      "options": {
+        "classifier": "typesafe",
+        "maxCostUsd": 0,
+        "mockOutcome": "valid"
+      },
+      "expected": {
+        "primaryGenerationRequests": 1,
+        "classificationRequests": 1,
+        "classificationPresent": true,
+        "status": "verified",
+        "reason": "response_validated",
+        "candidateSeverity": "P3",
+        "usageKnown": true
+      }
+    },
+    {
+      "id": "positive-cap-skip",
+      "options": {
+        "classifier": "typesafe",
+        "maxCostUsd": 5,
+        "mockOutcome": "valid"
+      },
+      "expected": {
+        "primaryGenerationRequests": 1,
+        "classificationRequests": 0,
+        "classificationPresent": true,
+        "status": "unverified",
+        "reason": "monetary_cap_unsupported",
+        "candidateSeverity": null,
+        "usageKnown": false
+      }
+    },
+    {
+      "id": "provider-outage",
+      "options": {
+        "classifier": "typesafe",
+        "maxCostUsd": 0,
+        "mockOutcome": "outage"
+      },
+      "expected": {
+        "primaryGenerationRequests": 1,
+        "classificationRequests": 1,
+        "classificationPresent": true,
+        "status": "unverified",
+        "reason": "provider_error",
+        "candidateSeverity": null,
+        "usageKnown": false
+      }
+    },
+    {
+      "id": "malformed-response",
+      "options": {
+        "classifier": "typesafe",
+        "maxCostUsd": 0,
+        "mockOutcome": "malformed"
+      },
+      "expected": {
+        "primaryGenerationRequests": 1,
+        "classificationRequests": 1,
+        "classificationPresent": true,
+        "status": "unverified",
+        "reason": "malformed_response",
+        "candidateSeverity": null,
+        "usageKnown": false
+      }
+    },
+    {
+      "id": "insufficient-evidence",
+      "options": {
+        "classifier": "typesafe",
+        "maxCostUsd": 0,
+        "mockOutcome": "insufficient"
+      },
+      "expected": {
+        "primaryGenerationRequests": 1,
+        "classificationRequests": 1,
+        "classificationPresent": true,
+        "status": "unverified",
+        "reason": "finding_unverified",
+        "candidateSeverity": null,
+        "usageKnown": true
+      }
+    }
+  ],
+  "acceptance": "All six actual-caller cases and binding assertions pass; original findings/counts/primary usage are preserved; unsupported or failed classification is unverified, never a clean review.",
+  "limitations": [
+    "Mocked contract/compatibility evidence only, not model correctness, quality comparison, calibration or default gate adoption.",
+    "No live TypeSafe request, actual key, real repository finding corpus or provider billing measurement.",
+    "Source evidence remains generator-authored; explicit privacy review before live use remains necessary.",
+    "The base revision is a provenance/contract anchor; no claim of a fresh standalone base execution."
+  ]
+}
