@@ -259,6 +259,7 @@ async function startAidenIdMockApi({
   const state = {
     requestCount: 0,
     revokeCount: 0,
+    revokedIdentityIds: [],
     childCreateCount: 0,
     revokeChildrenCount: 0,
     domainCreateCount: 0,
@@ -299,14 +300,17 @@ async function startAidenIdMockApi({
         });
       }
 
-      const revokeMatch = pathname.match(/^\/v1\/identities\/([^/]+)\/revoke$/);
+      // Models the real AIdenID API: the single-identity revoke is POST /{id}/squash (status SQUASHED).
+      // There is no /revoke route, so a call to it falls through to this mock's 404, as on the server.
+      const revokeMatch = pathname.match(/^\/v1\/identities\/([^/]+)\/squash$/);
       if (req.method === "POST" && revokeMatch) {
         state.revokeCount += 1;
+        state.revokedIdentityIds.push(decodeURIComponent(revokeMatch[1] || ""));
         state.lastHeaders = { ...req.headers };
         state.lastRevokeIdentityId = decodeURIComponent(revokeMatch[1] || "");
         return jsonResponse(res, 200, {
           id: state.lastRevokeIdentityId,
-          status: "REVOKED",
+          status: "SQUASHED",
           revokedAt: "2026-05-01T00:00:00.000Z",
           projectId: "proj_test",
         });
@@ -6091,7 +6095,7 @@ test("CLI ai identity revoke execute mode calls API and updates lifecycle status
     assert.equal(revokePayload.command, "ai identity revoke");
     assert.equal(revokePayload.execute, true);
     assert.equal(revokePayload.identity.identityId, identityId);
-    assert.equal(revokePayload.identity.status, "REVOKED");
+    assert.equal(revokePayload.identity.status, "SQUASHED");
     assert.equal(mock.state.revokeCount, 1);
     assert.equal(mock.state.lastRevokeIdentityId, identityId);
 
@@ -6102,7 +6106,94 @@ test("CLI ai identity revoke execute mode calls API and updates lifecycle status
     });
     assert.equal(show.code, 0, show.stderr || show.stdout);
     const showPayload = JSON.parse(String(show.stdout || "").trim());
-    assert.equal(showPayload.identity.status, "REVOKED");
+    assert.equal(showPayload.identity.status, "SQUASHED");
+  } finally {
+    await mock.close();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("CLI ai identity revoke dry-run preview names the real squash route", async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-ai-revoke-preview-"));
+  const mock = await startAidenIdMockApi();
+  try {
+    const provision = await runCli({
+      cwd: tempRoot,
+      env: { ...process.env },
+      args: [
+        "ai", "provision-email", "--api-url", mock.apiUrl, "--api-key", "k_test",
+        "--org-id", "org_test", "--project-id", "proj_test", "--execute", "--json",
+      ],
+    });
+    assert.equal(provision.code, 0, provision.stderr || provision.stdout);
+    const identityId = String(JSON.parse(String(provision.stdout || "").trim()).identity?.id || "");
+    assert.equal(identityId.length > 0, true);
+
+    const preview = await runCli({
+      cwd: tempRoot,
+      env: { ...process.env },
+      args: ["ai", "identity", "revoke", identityId, "--path", tempRoot, "--api-url", mock.apiUrl, "--json"],
+    });
+    assert.equal(preview.code, 0, preview.stderr || preview.stdout);
+    const payload = JSON.parse(String(preview.stdout || "").trim());
+    assert.equal(payload.command, "ai identity revoke");
+    assert.equal(payload.execute, false);
+    assert.match(payload.curlPreview, new RegExp(`/v1/identities/${identityId}/squash \\\\`));
+    assert.doesNotMatch(payload.curlPreview, /\/revoke\b/);
+    assert.equal(mock.state.revokeCount, 0, "dry-run must not call the API");
+  } finally {
+    await mock.close();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("CLI ai identity kill-all live path squashes each non-held identity and never cascades", async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-ai-kill-all-live-"));
+  const mock = await startAidenIdMockApi();
+  try {
+    const registryPath = path.join(tempRoot, ".sentinelayer", "aidenid", "identity-registry.json");
+    await mkdir(path.dirname(registryPath), { recursive: true });
+    const identity = (identityId, legalHoldStatus) => ({
+      identityId,
+      emailAddress: `${identityId}@aidenid.com`,
+      status: "ACTIVE",
+      projectId: "proj_test",
+      expiresAt: "2026-01-01T00:00:00.000Z",
+      legalHoldStatus,
+      metadata: { tags: ["campaign-blue"], legalHoldStatus },
+    });
+    await writeFile(
+      registryPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: "1.0.0",
+          generatedAt: "2026-05-01T00:00:00.000Z",
+          identities: [identity("id_live_a", "NONE"), identity("id_live_b", "NONE"), identity("id_live_hold", "HOLD")],
+        },
+        null,
+        2
+      )}\n`,
+      "utf-8"
+    );
+
+    const killAll = await runCli({
+      cwd: tempRoot,
+      env: { ...process.env },
+      args: [
+        "ai", "identity", "kill-all", "--path", tempRoot, "--tags", "campaign-blue",
+        "--api-url", mock.apiUrl, "--api-key", "k_test", "--org-id", "org_test", "--project-id", "proj_test",
+        "--execute", "--json",
+      ],
+    });
+    assert.equal(killAll.code, 0, killAll.stderr || killAll.stdout);
+    const killPayload = JSON.parse(String(killAll.stdout || "").trim());
+    assert.equal(killPayload.command, "ai identity kill-all");
+    assert.equal(killPayload.apiCalled, true);
+    assert.equal(killPayload.updatedCount, 2);
+    assert.equal(killPayload.blockedCount, 1);
+    assert.deepEqual([...mock.state.revokedIdentityIds].sort(), ["id_live_a", "id_live_b"]);
+    assert.equal(mock.state.revokeCount, 2, "one squash per non-held identity");
+    assert.equal(mock.state.revokeChildrenCount, 0, "kill-all never calls revoke-children");
   } finally {
     await mock.close();
     await rm(tempRoot, { recursive: true, force: true });

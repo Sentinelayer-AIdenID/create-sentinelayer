@@ -440,7 +440,9 @@ export async function revokeIdentity({
   });
 
   const response = await fetchImpl(
-    `${normalizedApiUrl}/v1/identities/${urlPathSegment(normalizedIdentityId, { label: "identityId" })}/revoke`,
+    // AIdenID has no single-identity /revoke route: POST /{identity_id}/squash is the revoke (it records SQUASHED
+    // and schedules cleanup). /revoke-children (cascade) is a separate, unchanged route.
+    `${normalizedApiUrl}/v1/identities/${urlPathSegment(normalizedIdentityId, { label: "identityId" })}/squash`,
     {
       method: "POST",
       headers: requestHeaders,
@@ -450,7 +452,7 @@ export async function revokeIdentity({
   if (!response.ok) {
     const details = await parseErrorBody(response);
     throw new Error(
-      `AIdenID revoke request failed with status ${response.status}${details ? `: ${details}` : ""}`
+      `AIdenID squash (revoke) request failed with status ${response.status}${details ? `: ${details}` : ""}`
     );
   }
 
