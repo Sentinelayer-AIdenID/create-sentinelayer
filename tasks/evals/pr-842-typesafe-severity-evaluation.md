@@ -1,5 +1,7 @@
 # PR842 TypeSafe severity evaluation: deterministic contract evidence
 
+> Current privacy correction over `22b8553073bb72cfccd71fb1c06217c3e6844ff4`: the historical receipts below remain historical. The adjacent JSON now binds the corrected worktree source/test overlay, adds the unchanged central detector dependency, and consumes a seventh `secret-like-content` comparison. The explicitly named `originalImplementationRevision`/`originalImplementationTree`/`originalImplementationAiReviewBlob` fields identify the original `3e12` introduction only. `privacyCorrectionBaseRevision` identifies the assigned `22b85530` base, and the current source/test hashes identify this uncommitted overlay without claiming an uncreated commit or a fresh old-Git/provider run.
+
 ## Impact and provenance
 
 The published baseline is `6f21f9718d344157e75f83f1a3100fcc8a316112`.
@@ -139,3 +141,29 @@ remain unchanged; their 3e12 implementation/source anchor is still accurate.
 This follow-up is integration/inventory coverage, not a fresh model-quality,
 provider-authenticity or full hosted-unit-suite pass. Root owns the canonical
 commit and subsequent full hosted run.
+
+## Current secret-like input refusal correction
+
+The complete constructed TypeSafe request is checked using the existing recursive
+`containsSecret` export from `src/session/redact.js`. Any detected text, including
+`file` paths and strings in a later finding, rejects the whole batch before request
+reservation/fetch with `unverified / secret_like_content`. Original evidence is
+unchanged; no partial sanitized judgment or clean severity is substituted.
+
+The consumed seventh actual-caller comparison assembles a synthetic access-key
+shape at runtime in the second finding's evidence. Expected observations: one
+mocked generation request, zero classification requests, null candidate severity,
+unknown classification usage and the same original P1/P2 blocking summary/history.
+Additional focused controls cover every transmitted finding string with synthetic
+access-key/JWT shapes, other existing detector families, no partial batch, and
+excluded-field/plain-text controls. No real credential or provider is used.
+
+Current correction proof: 81/81 focused tests pass, with zero skips/errors;
+replacing only the runtime with exact `22b85530` fails all 16 selected refusal
+controls at their assertions. Syntax checking passes 405 files. Raw commands,
+TAP/JUnit, guard observations and exact source hashes are in the independent
+review packet. The earlier 137/189 counts above remain historical receipts.
+Default off, explicit-zero cap boundary, endpoint, deadline, byte limits, retry
+policy and original generation/gate accounting are unchanged. Reverting only this
+correction restores the prior input-disclosure gap; this paragraph is not a new
+activation or provider/privacy approval.

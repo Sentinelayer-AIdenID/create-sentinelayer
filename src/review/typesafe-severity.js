@@ -1,4 +1,5 @@
 import { performance } from "node:perf_hooks";
+import { containsSecret } from "../session/redact.js";
 
 // Opt-in evaluation only: classifications never replace the source finding or gate severity.
 // Contracts/pricing observed 2026-10-16: https://docs.typesafe.ai/api
@@ -77,6 +78,8 @@ export function buildSeverityRequest(findings) {
   const request = { model: TYPESAFE_SEVERITY_MODEL, state, questions };
   const body = JSON.stringify(request);
   if (Buffer.byteLength(body, "utf8") > MAX_REQUEST_BYTES) throw invalid("input_limit");
+  // Screen every transmitted value, including file paths and nested state, without rewriting evidence.
+  if (containsSecret(request)) throw invalid("secret_like_content");
   return request;
 }
 function readUsage(payload) {

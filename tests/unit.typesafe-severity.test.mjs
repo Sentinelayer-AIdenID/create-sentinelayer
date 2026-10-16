@@ -10,6 +10,7 @@ import { registerOmarGateCommand } from "../src/commands/omargate.js";
 import { runAiReviewLayer } from "../src/review/ai-review.js";
 import { runOmarGateOrchestrator } from "../src/review/omargate-orchestrator.js";
 import { TYPESAFE_SEVERITY_MODEL, SEVERITY_CRITERIA, CATEGORY_CRITERIA, buildSeverityRequest, parseSeverityResponse, evaluateSeverityClassification, parseSeverityEvaluationMaxCost, severityResourceTotals } from "../src/review/typesafe-severity.js";
+import { containsSecret } from "../src/session/redact.js";
 
 const evalEvidence = JSON.parse(await fsp.readFile(new URL("../tasks/evals/pr-842-typesafe-severity-evaluation.json", import.meta.url), "utf8"));
 
@@ -21,6 +22,64 @@ function response(request, tier = "P2") {
   return { model: TYPESAFE_SEVERITY_MODEL, answers: Object.fromEntries(Object.entries(request.questions).map(([id, q]) => [id, choice(q.criteria, id.endsWith("severity") ? tier : "cicd")])), usage: { input_tokens: 101, output_tokens: 21 } };
 }
 const evaluate = (options = {}) => evaluateSeverityClassification({ mode: "typesafe", findings: [finding()], env, budget: uncapped, ...options });
+
+// Synthetic detector examples assembled at runtime; never credentials or provider calls.
+const syntheticAccessKey = () => ["AK", "IA", "A".repeat(16)].join("");
+const syntheticJwt = () => ["eyJ" + "A".repeat(12), "B".repeat(12), "C".repeat(8)].join(".");
+for (const field of ["file", "message", "evidence", "rationale", "rootCause", "userImpact"]) {
+  for (const [kind, fake] of [["access-key", syntheticAccessKey], ["jwt", syntheticJwt]]) {
+    test(`TypeSafe refuses secret-like ${kind} in transmitted ${field} before dispatch`, async () => {
+      const source = finding({ [field]: `synthetic ${fake()} fixture` });
+      const before = structuredClone(source); let fetchCalls = 0; let reservations = 0;
+      assert.throws(() => buildSeverityRequest([source]), /secret_like_content/);
+      const r = await evaluate({ findings: [source], beforeRequest: async () => { reservations++; }, fetchImpl: async () => { fetchCalls++; assert.fail("secret dispatch"); } });
+      assert.equal(fetchCalls, 0); assert.equal(reservations, 0); assert.equal(r.attempted, false);
+      assert.equal(r.status, "unverified"); assert.equal(r.reason, "secret_like_content"); assert.equal(r.usage, null);
+      assert.equal(r.findings[0].severity, null); assert.deepEqual(source, before);
+    });
+  }
+}
+for (const [kind, fake] of [
+  ["github", () => ["gh", "p_", "A".repeat(24)].join("")],
+  ["github-pat", () => ["github", "_pat_", "A".repeat(24)].join("")],
+  ["sk", () => ["s", "k-", "A".repeat(24)].join("")],
+  ["private-key-header", () => ["-----BEGIN ", "RSA ", "PRIVATE KEY-----"].join("")],
+  ["slack", () => ["xox", "b-", "a".repeat(12)].join("")],
+  ["google", () => ["AI", "za", "A".repeat(35)].join("")],
+  ["known-token-name", () => ["SENTINELAYER", "_TOKEN"].join("")],
+]) test(`TypeSafe reuses central detector semantics for ${kind}`, async () => {
+  let calls = 0;
+  const r = await evaluate({ findings: [finding({ evidence: fake() })], fetchImpl: async () => { calls++; assert.fail("secret dispatch"); } });
+  assert.equal(calls, 0); assert.equal(r.reason, "secret_like_content"); assert.equal(r.attempted, false);
+});
+test("TypeSafe secret in a later nested finding refuses the entire batch without partial dispatch", async () => {
+  const sources = [finding(), finding({ rootCause: syntheticJwt() })]; const before = structuredClone(sources);
+  let calls = 0; const r = await evaluate({ findings: sources, fetchImpl: async () => { calls++; } });
+  assert.equal(calls, 0); assert.equal(r.reason, "secret_like_content"); assert.equal(r.findings.length, 2);
+  assert.ok(r.findings.every((f) => f.status === "unverified" && f.severity === null)); assert.deepEqual(sources, before);
+});
+test("TypeSafe scans secret-like content beyond the display redactor truncation boundary", async () => {
+  const prefix = "x".repeat(17000); const fake = syntheticAccessKey();
+  const safe = buildSeverityRequest([finding({ evidence: prefix + "a".repeat(fake.length) })]);
+  assert.ok(Buffer.byteLength(JSON.stringify(safe), "utf8") < 24 * 1024);
+  let calls = 0; let reservations = 0;
+  const r = await evaluate({ findings: [finding({ evidence: prefix + fake })], beforeRequest: async () => { reservations++; }, fetchImpl: async () => { calls++; } });
+  assert.equal(r.reason, "secret_like_content"); assert.equal(r.attempted, false); assert.equal(calls, 0); assert.equal(reservations, 0);
+});
+test("Central secret detector sees nested constructed request values", () => {
+  const request = buildSeverityRequest([finding(), finding()]);
+  assert.equal(containsSecret(request), false);
+  request.state.findings[1].file = `src/${syntheticJwt()}.js`;
+  assert.equal(containsSecret(request), true);
+});
+test("TypeSafe excludes non-transmitted secret fields while allowing ordinary projected text unchanged", () => {
+  const source = finding({ suggestedFix: syntheticAccessKey(), metadata: { nested: { value: syntheticJwt() } }, env: { value: syntheticAccessKey() } });
+  const before = structuredClone(source); const request = buildSeverityRequest([source]);
+  assert.equal(request.state.findings[0].evidence, source.evidence); assert.equal(request.state.findings[0].file, source.file);
+  assert.equal(JSON.stringify(request).includes(syntheticAccessKey()), false); assert.equal(JSON.stringify(request).includes(syntheticJwt()), false);
+  assert.deepEqual(source, before);
+});
+
 
 for (const tier of ["P0", "P1", "P2", "P3"]) test(`TypeSafe accepts schema-valid ${tier} without replacing original evidence`, () => {
   const source = finding(); const request = buildSeverityRequest([source]); const parsed = parseSeverityResponse(response(request, tier), request);
@@ -121,6 +180,19 @@ test("Actual AI-review caller persists/renders classification while retaining or
 test("Actual caller's malformed evaluation preserves findings and reports unknown usage rather than a verified clean result", async () => fixture(async (dir) => {
   const { r } = await actualCaller(dir, { malformed: true }); assert.equal(r.severityClassification.status, "unverified"); assert.equal(r.severityClassification.usage, null); assert.equal(r.findings.length, 2); assert.equal(r.findings[0].severity, "P1"); assert.equal(r.findings[0].severityClassification.severity, null);
 }));
+test("Actual caller secret refusal preserves original findings and never calls the secondary provider", async () => fixture(async (dir) => {
+  const sources = [finding(), finding({ severity: "P2", file: `src/${syntheticAccessKey()}.js`, evidence: syntheticJwt() })];
+  const before = structuredClone(sources); const { r, calls } = await actualCaller(dir, { sourceFindings: sources });
+  assert.deepEqual(calls, ["https://api.openai.com/v1/chat/completions"]);
+  assert.equal(r.severityClassification.status, "unverified"); assert.equal(r.severityClassification.reason, "secret_like_content");
+  assert.equal(r.severityClassification.attempted, false); assert.equal(r.severityClassification.usage, null);
+  assert.deepEqual(r.aiSummary, { P0: 0, P1: 1, P2: 1, P3: 0, blocking: true });
+  assert.equal(r.findings[1].file, before[1].file); assert.equal(r.findings[1].evidence, before[1].evidence); assert.deepEqual(sources, before);
+  const history = JSON.parse(await fsp.readFile(r.cost.filePath, "utf8")); assert.equal(history.entries.length, 1);
+  const events = (await fsp.readFile(r.telemetry.filePath, "utf8")).trim().split(/\r?\n/).map(JSON.parse);
+  assert.equal(events.filter((e) => e.metadata.layer === "severity_classification_evaluation" && e.metadata.phase === "reserved").length, 0);
+}));
+
 test("Actual caller off is unchanged and positive monetary cap cannot dispatch TypeSafe", async () => fixture(async (dir) => {
   const off = await actualCaller(path.join(dir, "off"), { classifier: "off" }); assert.equal(off.calls.length, 1); assert.equal(Object.hasOwn(off.r, "severityClassification"), false); assert.equal(Object.hasOwn(off.r.findings[0], "severityClassification"), false);
   const cap = await actualCaller(path.join(dir, "cap"), { cap: 5 }); assert.equal(cap.calls.length, 1); assert.equal(cap.r.severityClassification.reason, "monetary_cap_unsupported");
@@ -217,10 +289,11 @@ test("Frozen eval evidence binds the complete synthetic comparison and canonical
   assert.equal(evalEvidence.evidenceKind, "deterministic_mock_contract_comparison");
   assert.equal(evalEvidence.modelAccuracyEvidence, false);
   assert.equal(evalEvidence.sourceBinding.baselineRevision, "6f21f9718d344157e75f83f1a3100fcc8a316112");
-  assert.equal(evalEvidence.sourceBinding.candidateImplementationRevision, "3e12b628b6a64c69aee643d327c4df0f03a9dbac");
-  assert.deepEqual(evalEvidence.cases.map((c) => c.id), ["off-compatibility", "on-schema-valid-disagreement", "positive-cap-skip", "provider-outage", "malformed-response", "insufficient-evidence"]);
+  assert.equal(evalEvidence.sourceBinding.originalImplementationRevision, "3e12b628b6a64c69aee643d327c4df0f03a9dbac");
+  assert.equal(evalEvidence.sourceBinding.privacyCorrectionBaseRevision, "22b8553073bb72cfccd71fb1c06217c3e6844ff4");
+  assert.deepEqual(evalEvidence.cases.map((c) => c.id), ["off-compatibility", "on-schema-valid-disagreement", "positive-cap-skip", "provider-outage", "malformed-response", "insufficient-evidence", "secret-like-content"]);
   const sourceHashes = { ...evalEvidence.sourceBinding.sourceSha256, [evalEvidence.sourceBinding.testPath]: evalEvidence.sourceBinding.testSha256 };
-  assert.equal(Object.keys(sourceHashes).length, 7);
+  assert.equal(Object.keys(sourceHashes).length, 8);
   for (const [file, expected] of Object.entries(sourceHashes)) {
     const canonical = (await fsp.readFile(new URL(`../${file}`, import.meta.url), "utf8")).replace(/\r\n/g, "\n");
     assert.equal(createHash("sha256").update(canonical).digest("hex"), expected, `canonical source binding: ${file}`);
@@ -228,6 +301,7 @@ test("Frozen eval evidence binds the complete synthetic comparison and canonical
 });
 for (const scenario of evalEvidence.cases) test(`Frozen actual-caller eval comparison: ${scenario.id}`, async (t) => fixture(async (dir) => {
   const before = structuredClone(evalEvidence.input.findings);
+  if (scenario.options.syntheticSecretField) before[1][scenario.options.syntheticSecretField] = syntheticAccessKey();
   const { r, calls, original } = await actualCaller(dir, {
     sourceFindings: structuredClone(before), classifier: scenario.options.classifier,
     cap: scenario.options.maxCostUsd, mockOutcome: scenario.options.mockOutcome,

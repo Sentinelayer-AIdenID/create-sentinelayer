@@ -4135,3 +4135,13 @@ Review evidence:
   syntax passes 405 files. This is not a claimed fresh full hosted-suite pass.
 - Raw c237 hosted job/log and all prior freezes are preserved. Root owns review,
   canonical commit/push and hosted integration; this lane makes no provider calls.
+
+
+## PR842 privacy correction over 22b85530 (Sol-owned isolated successor)
+
+- [x] Reuse central containsSecret semantics to reject complete projected state before dispatch; preserve original evidence.
+- [x] Add synthetic per-string/family/actual-caller privacy controls and a consumed seventh eval comparison; refresh only affected source/test bindings.
+- [x] Document repository-layout disclosure and unreviewed account-specific retention/training terms with verified official links.
+- [x] Focused proof: 81/81 deterministic tests; exact old runtime fails all 16 selected refusal controls; syntax 405/405; Git diff check clean. No network/provider/real-key reads.
+- [ ] Independent/root review of the frozen correction overlay before commit/push.
+- [ ] Final ship requirements: npm run verify; required Omar/audit and hosted gates under root custody. No live TypeSafe activation or spending in correction preparation.

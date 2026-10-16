@@ -238,6 +238,22 @@ sl omargate deep --severity-classifier typesafe --max-cost 0 --path ./approved-r
 No live TypeSafe call or credential was used to verify this implementation. Use
 requires approval of the actual finding evidence being transmitted; string-field
 allowlisting does not prove that the text itself is free of sensitive information.
+Before any request, the complete projected request is screened with the CLI's
+existing secret-like detector. A match in any transmitted string, including
+`file`, refuses the entire evaluation as `unverified / secret_like_content` without
+rewriting the source evidence or sending a partial batch. Pattern screening is not
+complete sensitive-data detection: file paths disclose repository structure and
+ordinary finding text may still contain proprietary or personal information.
+
+This implementation review does not approve TypeSafe's retention/training terms
+or any account-specific data-processing agreement. Before approving actual state
+for transmission, review the current official
+[privacy policy](https://typesafe.ai/legal/privacy-policy),
+[customer agreement](https://typesafe.ai/legal/mca), and
+[data processing addendum](https://typesafe.ai/legal/data-processing).
+These links were verified on 2026-10-16; no zero-retention/account entitlement is
+assumed by this integration.
+
 
 There is one request per eligible review result, no retries, and no partial batch:
 1-8 findings, two independent Choice questions each, at most 24 KiB of UTF-8 JSON,
