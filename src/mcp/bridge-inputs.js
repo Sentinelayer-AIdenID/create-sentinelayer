@@ -199,6 +199,9 @@ export const BRIDGE_DENIED_INPUTS = Object.freeze({
   "mcp.smoke": {
     apiUrl: "the API that receives the user's token",
   },
+  "omargate.deep": {
+    severityClassifier: "external-provider evidence evaluation is operator CLI opt-in only; never enabled by an MCP caller",
+  },
   "ring-owner": {
     gatewayUrl: "the gateway that receives the user's token",
   },

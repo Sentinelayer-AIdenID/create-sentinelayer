@@ -105,3 +105,37 @@ This evidence correction changes no runtime setting, financial limit or workflow
 policy. Reverting only this follow-up removes the evidence/tests, not the reviewed
 implementation; it would legitimately make the original eval-impact gate fail
 again for that implementation range.
+
+
+## Hosted unit boundary inventories: follow-up over c2375ed
+
+The later hosted unit job `116800367671` in Quality run `38847153736` exercised
+head `c2375ed77f2ff050bff05101590e6fd719a969a5` and reported 2479 tests:
+2468 passed, five failed, six skipped. All five failures were explicit inventories:
+two credential-census assertions for the new sender, two MCP input-catalog/withheld
+assertions for the new optional flag, and one generic concat-call path census for
+`Buffer.concat(chunks)`. They were not evidence-hash, provider or time failures.
+
+The narrow repair records the existing TypeSafe-specific Bearer site in the
+reviewed credential census and bounded response-byte aggregation in the non-URL
+path census. Generic detection rules, stale-entry checks and planted negative
+controls are retained. A behavior control proves only `TYPESAFE_API_KEY` can reach
+the fixed HTTPS System One endpoint with redirects refused: SentinelLayer tokens
+alone cannot dispatch, alternate endpoint environment values cannot redirect the
+request, and no SentinelLayer token enters the mocked outbound request.
+
+`severityClassifier` is now explicitly documented in the existing MCP DENIED
+inventory. The bridge already withheld this unlisted option; its allowed-input
+set and runtime handler are unchanged. A focused control, even with a trusted test
+approval callback, refuses the field, its CLI-style alias and a dash-leading flag
+smuggled into another option before any CLI subprocess; a normal deep command
+still reaches the execution stub without the classifier flag. This keeps the
+external evaluation an operator CLI opt-in, not an MCP exposure.
+
+The complete affected inventory selection plus the previous 137 regressions
+passes **189/189**, with no skips. Normal syntax passes **405** files. The original
+six TypeSafe implementation files and the self-bound JSON/main evaluation test
+remain unchanged; their 3e12 implementation/source anchor is still accurate.
+This follow-up is integration/inventory coverage, not a fresh model-quality,
+provider-authenticity or full hosted-unit-suite pass. Root owns the canonical
+commit and subsequent full hosted run.

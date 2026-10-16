@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { evaluateSeverityClassification } from "../src/review/typesafe-severity.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SANCTIONED = "src/auth/credential-destinations.js"; // the one place that holds and attaches a credential
@@ -45,6 +46,8 @@ const REVIEWED = [
   ["src/ai/client.js", "authorization-header", "Bearer ${apiKey}", "a model provider's own key, sent to that provider's fixed URL"],
   ["src/ai/client.js", "bearer-template", "Bearer ${apiKey}", "a model provider's own key, sent to that provider's fixed URL"],
   ["src/ai/client.js", "api-key-header", "\"x-api-key\": apiKey", "a model provider's own key, sent to that provider's fixed URL"],
+  ["src/review/typesafe-severity.js", "authorization-header", "Authorization: `Bearer ${key}`", "TypeSafe's own TYPESAFE_API_KEY, sent only to the fixed HTTPS System One endpoint with redirects refused; never the SentinelLayer user token"],
+  ["src/review/typesafe-severity.js", "bearer-template", "Authorization: `Bearer ${key}`", "TypeSafe's own TYPESAFE_API_KEY, sent only to the fixed HTTPS System One endpoint with redirects refused; never the SentinelLayer user token"],
   ["src/memory/retrieval.js", "authorization-header", "authorization: `Bearer ${apiKey}`", "the memory service's own key (SENTINELAYER_MEMORY_API_KEY)"],
   ["src/memory/retrieval.js", "bearer-template", "authorization: `Bearer ${apiKey}`", "the memory service's own key (SENTINELAYER_MEMORY_API_KEY)"],
   ["src/session/recall/embedder.js", "authorization-header", "authorization: `Bearer ${apiKey}`", "an embedding service's own key"],
@@ -163,4 +166,35 @@ test("the census fails on new sites: headers, URLs, token reads, accessors, trus
       "13 env-template",
     ],
   );
+});
+
+
+test("reviewed TypeSafe sender uses only its provider key at the fixed HTTPS endpoint with no redirects", async () => {
+  const findings = JSON.parse(fs.readFileSync(path.join(ROOT, "tasks/evals/pr-842-typesafe-severity-evaluation.json"), "utf8")).input.findings;
+  const env = {
+    SENTINELAYER_TOKEN: "fixture-sentinelayer-user-token",
+    SENTINELAYER_API_TOKEN: "fixture-other-sentinelayer-token",
+    SENTINELAYER_API_URL: "https://not-the-typesafe-endpoint.invalid",
+    TYPESAFE_API_URL: "https://also-not-the-typesafe-endpoint.invalid",
+  };
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push(url);
+    assert.equal(url, "https://api.typesafe.ai/v1/systemone");
+    assert.equal(init.method, "POST");
+    assert.equal(init.redirect, "error");
+    assert.equal(init.headers.Authorization, "Bearer fixture-typesafe-provider-key");
+    assert.equal(JSON.stringify(init).includes(env.SENTINELAYER_TOKEN), false);
+    assert.equal(JSON.stringify(init).includes(env.SENTINELAYER_API_TOKEN), false);
+    return new Response("mock unavailable", { status: 429 });
+  };
+  const options = { mode: "typesafe", findings, budget: { limits: { maxCostUsd: 0 }, usage: {} }, fetchImpl };
+  const missing = await evaluateSeverityClassification({ ...options, env });
+  assert.equal(missing.reason, "missing_key");
+  assert.equal(missing.attempted, false);
+  assert.deepEqual(calls, [], "a SentinelLayer token cannot substitute for a TypeSafe key");
+  const ownKey = await evaluateSeverityClassification({ ...options, env: { ...env, TYPESAFE_API_KEY: "fixture-typesafe-provider-key" } });
+  assert.equal(ownKey.reason, "provider_error");
+  assert.equal(ownKey.attempted, true);
+  assert.deepEqual(calls, ["https://api.typesafe.ai/v1/systemone"]);
 });

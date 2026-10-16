@@ -4114,3 +4114,24 @@ Review evidence:
   author branch nor author index is advanced by proof construction.
 - Frozen application code and prior v1/v2 packets remain unchanged. Root owns
   reviewed canonical commit, subsequent hosted run and publication receipts.
+
+
+## Sol: PR842 hosted unit boundary inventories, 2026-10-16
+
+- [x] Preserve exact c237 hosted unit job116800367671 metadata/logs and identify all five failures.
+- [x] Confirm fixed-origin provider-key sender, existing default-deny MCP behavior and byte-only concat semantics.
+- [x] Record precise reviewed sites and explicit denied input without weakening generic census/bridge rules.
+- [x] Prove provider-key isolation/fixed origin/no redirects and MCP no-bypass controls; preserve planted negative controls.
+- [x] Run scoped inventory suites plus prior 137 regressions and bind the exact new freeze for root review (189/189; syntax405).
+
+
+### Review: PR842 hosted unit inventory repair
+
+- All five hosted failures are accounted for by precise new-site/denied-option
+  inventories. Generic guards, planted negative controls and MCP allowed inputs
+  remain intact. No TypeSafe transport, original generator or gate-authority change.
+- New provider-key isolation and MCP refusal/no-bypass controls pass. All three
+  formerly failing suites plus the existing 137 regressions pass 189/189; normal
+  syntax passes 405 files. This is not a claimed fresh full hosted-suite pass.
+- Raw c237 hosted job/log and all prior freezes are preserved. Root owns review,
+  canonical commit/push and hosted integration; this lane makes no provider calls.
