@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.47.0](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/compare/v0.46.5...v0.47.0) (2026-10-16)
+
+
+### Features
+
+* add opt-in TypeSafe severity evaluation ([3e12b62](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/3e12b628b6a64c69aee643d327c4df0f03a9dbac))
+
+
+### Bug Fixes
+
+* **ai:** identity revoke and kill-all call the real AIdenID squash route ([b140ed4](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/b140ed45e5249b2ba216037dd612744bd322323c))
+* **ai:** identity revoke calls /squash (server has no /revoke route) ([081636d](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/081636d056c5c9d458d95b737bca75c4a92d59d0))
+* refuse secret-like TypeSafe evaluation inputs ([f2a966a](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/f2a966a4535677fc42c6258b2dd5acd3b5316a4a))
+
 ## [0.46.5](https://github.com/mrrCarter/create-sentinelayer/compare/v0.46.4...v0.46.5) (2026-10-14)
 
 
