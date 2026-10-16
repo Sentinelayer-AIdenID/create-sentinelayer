@@ -42,11 +42,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/mrrCarter/create-sentinelayer"
+    "url": "https://github.com/Sentinelayer-AIdenID/create-sentinelayer"
   },
-  "homepage": "https://github.com/mrrCarter/create-sentinelayer#readme",
+  "homepage": "https://github.com/Sentinelayer-AIdenID/create-sentinelayer#readme",
   "bugs": {
-    "url": "https://github.com/mrrCarter/create-sentinelayer/issues"
+    "url": "https://github.com/Sentinelayer-AIdenID/create-sentinelayer/issues"
   },
   "dependencies": {
     "@anthropic-ai/tokenizer": "0.0.4",
