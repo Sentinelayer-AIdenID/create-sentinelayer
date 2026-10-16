@@ -331,6 +331,7 @@ test("the bridge withholds exactly the denied inputs from the commands it expose
     "sl.init: injectOpenaiKey,injectSecret",
     "sl.mcp.doctor: apiUrl",
     "sl.mcp.smoke: apiUrl",
+    "sl.omargate.deep: severityClassifier",
     "sl.ring-owner: gatewayUrl",
     "sl.session.join: recoverAdmission",
     "sl.swarm.create: target",
@@ -609,4 +610,37 @@ test("the trust context comes from the environment and the global config only", 
   } finally {
     await fsp.rm(home, { recursive: true, force: true });
   }
+});
+
+
+test("the bridge cannot opt into TypeSafe evaluation or smuggle its flag, even after test approval", async () => {
+  const tools = await buildCliCommandMcpTools();
+  const deep = tools.find((tool) => tool.name === "sl.omargate.deep");
+  assert.equal(deep.metadata.blocked, false);
+  assert.equal(Object.hasOwn(deep.inputSchema.properties, "severityClassifier"), false);
+  assert.deepEqual(deep.metadata.withheldOptions, ["severityClassifier"]);
+  assert.ok(BRIDGE_DENIED_INPUTS["omargate.deep"].severityClassifier);
+  const executed = [];
+  const handlers = createCliCommandMcpToolHandlers(tools, {
+    env: {}, approve: () => true,
+    executeCliCommandFn: async (args) => {
+      executed.push(args);
+      return { exitCode: 0, signal: null, timedOut: false, stdout: "{}", stderr: "" };
+    },
+  });
+  for (const [input, detail] of [
+    [{ severityClassifier: "typesafe", maxCost: "0", json: true }, "unsupported_input:severityClassifier"],
+    [{ "severity-classifier": "typesafe", json: true }, "unsupported_input:severity-classifier"],
+    [{ maxCost: "--severity-classifier=typesafe", json: true }, "unsupported_input_value:maxCost"],
+  ]) {
+    const result = await handlers["sl.omargate.deep"](input);
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, "invalid_cli_tool_input");
+    assert.equal(result.detail, detail);
+  }
+  assert.deepEqual(executed, [], "no CLI subprocess can start for a classifier injection");
+  const normal = await handlers["sl.omargate.deep"]({ json: true });
+  assert.equal(normal.ok, true);
+  assert.equal(executed.length, 1);
+  assert.equal(executed[0].some((arg) => arg.includes("severity-classifier")), false);
 });

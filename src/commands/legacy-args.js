@@ -57,6 +57,7 @@ export function buildLegacyArgs(baseArgs, { commandOptions = {}, command } = {})
   appendPassthroughFlag(args, "--max-runtime-minutes", commandOptions.maxRuntimeMinutes);
   appendPassthroughFlag(args, "--model", commandOptions.model);
   appendPassthroughFlag(args, "--provider", commandOptions.provider);
+  if (commandOptions.severityClassifier && commandOptions.severityClassifier !== "off") appendPassthroughFlag(args, "--severity-classifier", commandOptions.severityClassifier);
   appendPassthroughFlag(args, "--reuse-omargate", commandOptions.reuseOmargate);
   appendPassthroughFlag(args, "--scope-mode", commandOptions.scopeMode);
   appendBooleanFlag(args, "--diff", commandOptions.diff);

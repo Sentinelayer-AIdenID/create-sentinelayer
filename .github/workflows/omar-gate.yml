@@ -271,8 +271,8 @@ jobs:
               "${exchange_url}")"
             if [ "${exchange_status}" != "200" ]; then
               echo "::error::OIDC exchange failed with status ${exchange_status}."
-              exchange_error_code="$(jq -r '.error_code // .code // empty' "${exchange_body}" 2>/dev/null || true)"
-              exchange_request_id="$(jq -r '.request_id // .requestId // empty' "${exchange_body}" 2>/dev/null || true)"
+              exchange_error_code="$(jq -r '(.detail.error.code // .error_code // .code // empty) | strings | select(index("\r") == null and index("\n") == null) | select(length <= 96 and test("^[A-Z][A-Z0-9_]*$"))' "${exchange_body}" 2>/dev/null || true)"
+              exchange_request_id="$(jq -r '(.detail.error.request_id // .request_id // .requestId // empty) | strings | select(index("\r") == null and index("\n") == null) | select(test("^(req-[0-9a-f]{12}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"))' "${exchange_body}" 2>/dev/null || true)"
               if [ -n "${exchange_error_code}" ] || [ -n "${exchange_request_id}" ]; then
                 echo "::error::exchange_error_code=${exchange_error_code:-<none>} exchange_request_id=${exchange_request_id:-<none>}"
               fi
@@ -285,8 +285,8 @@ jobs:
             fi
             if ! jq -e 'type=="object" and (.sentinelayer_token|type=="string" and length>0) and (.expires_at|type=="string" and length>0) and (.issuer|type=="string" and length>0) and (.audience|type=="string" and length>0)' "${exchange_body}" >/dev/null 2>&1; then
               echo "::error::OIDC exchange response schema invalid or missing required fields."
-              exchange_error_code="$(jq -r '.error_code // .code // empty' "${exchange_body}" 2>/dev/null || true)"
-              exchange_request_id="$(jq -r '.request_id // .requestId // empty' "${exchange_body}" 2>/dev/null || true)"
+              exchange_error_code="$(jq -r '(.detail.error.code // .error_code // .code // empty) | strings | select(index("\r") == null and index("\n") == null) | select(length <= 96 and test("^[A-Z][A-Z0-9_]*$"))' "${exchange_body}" 2>/dev/null || true)"
+              exchange_request_id="$(jq -r '(.detail.error.request_id // .request_id // .requestId // empty) | strings | select(index("\r") == null and index("\n") == null) | select(test("^(req-[0-9a-f]{12}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$"))' "${exchange_body}" 2>/dev/null || true)"
               if [ -n "${exchange_error_code}" ] || [ -n "${exchange_request_id}" ]; then
                 echo "::error::exchange_error_code=${exchange_error_code:-<none>} exchange_request_id=${exchange_request_id:-<none>}"
               fi

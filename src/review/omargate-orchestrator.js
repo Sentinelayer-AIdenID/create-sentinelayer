@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 
 import { runAiReviewLayer } from "./ai-review.js";
+import { summarizeSeverityEvaluations, normalizeSeverityClassifier, parseSeverityEvaluationMaxCost } from "./typesafe-severity.js";
 import { buildPersonaReviewPrompt, PERSONA_IDS } from "./persona-prompts.js";
 import { resolveFilteredPersonas, resolveScanMode } from "./scan-modes.js";
 import { reconcileReviewFindings } from "./report.js";
@@ -562,6 +563,7 @@ async function runOmarPersonaSwarm({
   outputDir,
   provider,
   model,
+  severityClassifier = "off",
   perPersonaCost,
   dryRun,
   onEvent,
@@ -670,6 +672,7 @@ async function runOmarPersonaSwarm({
           outputDir,
           provider: provider || undefined,
           model: model || undefined,
+          ...(severityClassifier === "typesafe" ? { severityClassifier } : {}),
           sessionId: usageSessionId || `${subagentRunId}-ai`,
           maxCostUsd: budget.maxCostUsd,
           systemPrompt,
@@ -763,6 +766,7 @@ async function runOmarPersonaSwarm({
           aiCallEvidence,
           model: result?.model || model || null,
           billing: result?.billing || null,
+          ...(severityClassifier === "typesafe" ? { severityClassification: result?.severityClassification || null } : {}),
           artifacts: result?.artifacts || null,
           durationMs: Date.now() - subagentStart,
         };
@@ -892,6 +896,7 @@ async function runOmarPersonaSwarm({
 
   return {
     personaId,
+    ...(severityClassifier === "typesafe" ? { severityClassification: summarizeSeverityEvaluations(settledSubagents) } : {}),
     status: okCount > 0 ? "ok" : "error",
     findings,
     summary,
@@ -951,6 +956,7 @@ export async function runOmarGateOrchestrator({
   maxParallel = 4,
   provider = "",
   model = "",
+  severityClassifier = "off",
   maxCostUsd = 5.0,
   dryRun = false,
   outputDir = "",
@@ -963,6 +969,8 @@ export async function runOmarGateOrchestrator({
   usageRecorder = undefined,
   aiReviewRunner = runAiReviewLayer,
 } = {}) {
+  normalizeSeverityClassifier(severityClassifier);
+  if (severityClassifier === "typesafe") maxCostUsd = parseSeverityEvaluationMaxCost(maxCostUsd, 5);
   const runId = `omargate-${Date.now()}-${randomUUID().slice(0, 8)}`;
   const startTime = Date.now();
 
@@ -1052,7 +1060,8 @@ export async function runOmarGateOrchestrator({
   const detFindings = deterministic?.findings || [];
 
   // Per-persona cost budget = global / effective persona count (with minimum floor).
-  const perPersonaCost = personas.length > 0 ? Math.max(0.25, maxCostUsd / personas.length) : 0;
+  const evaluationWithoutCostCap = severityClassifier === "typesafe" && maxCostUsd === 0;
+  const perPersonaCost = evaluationWithoutCostCap ? 0 : personas.length > 0 ? Math.max(0.25, maxCostUsd / personas.length) : 0;
   let runningCostUsd = 0;
 
   const personaResults = await runWithConcurrency(personas, maxParallel, async (personaId) => {
@@ -1067,7 +1076,7 @@ export async function runOmarGateOrchestrator({
     };
 
     // Global budget check — skip remaining personas if exhausted
-    if (runningCostUsd >= maxCostUsd) {
+    if (!evaluationWithoutCostCap && runningCostUsd >= maxCostUsd) {
       if (onEvent) {
         onEvent(createAgentEvent({
           event: "persona_skipped",
@@ -1128,6 +1137,7 @@ export async function runOmarGateOrchestrator({
         outputDir,
         provider,
         model,
+        severityClassifier,
         perPersonaCost,
         dryRun,
         onEvent,
@@ -1203,6 +1213,7 @@ export async function runOmarGateOrchestrator({
         outputDir,
         provider: provider || undefined,
         model: model || undefined,
+        ...(severityClassifier === "typesafe" ? { severityClassifier } : {}),
         sessionId: usageSessionId || `${runId}-${personaId}-ai`,
         maxCostUsd: perPersonaCost,
         systemPrompt,
@@ -1281,6 +1292,7 @@ export async function runOmarGateOrchestrator({
         aiCallEvidence,
         model: result?.model || model || null,
         billing: result?.billing || null,
+        ...(severityClassifier === "typesafe" ? { severityClassification: result?.severityClassification || null } : {}),
         artifacts: result?.artifacts || null,
         durationMs: Date.now() - personaStart,
       };
@@ -1416,6 +1428,7 @@ export async function runOmarGateOrchestrator({
   const result = {
     runId,
     mode,
+    ...(severityClassifier === "typesafe" ? { severityClassification: summarizeSeverityEvaluations(settled) } : {}),
     basePersonas,
     roster,
     personaRouting,
@@ -1430,6 +1443,7 @@ export async function runOmarGateOrchestrator({
       durationMs: r.durationMs,
       model: r.model || null,
       billing: r.billing || null,
+      ...(severityClassifier === "typesafe" ? { severityClassification: r.severityClassification || null } : {}),
       error: r.error || null,
       swarm: r.swarm || null,
       artifacts: r.artifacts || null,

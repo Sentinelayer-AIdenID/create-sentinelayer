@@ -471,6 +471,7 @@ const NON_PATH_LINES = [
   ["src/mcp/smoke.js", "slash-interpolation", "${normalizedBase}/${normalizedSuffix}", "joins a base URL and a fixed route; every caller passes a constant"],
   ["src/mcp/token-service.js", "slash-interpolation", "${base}/${suffix}", "joins a base URL and a fixed route; every caller passes a constant"],
   ["src/session/file-locks.js", "join-slash", 'segments.join("/")', "a workspace file path"],
+  ["src/review/typesafe-severity.js", "concat-call", "decode(Buffer.concat(chunks))", "joins bounded response byte chunks for UTF-8 JSON decoding; not a URL path"],
   ["src/session/recall/embedder.js", "concat-call", "tokens.concat(bigrams(tokens))", "an array of tokens"],
   ["src/swarm/pentest.js", "slash-interpolation", 'raw.startsWith("/") ? raw : `/${raw}`', "a probe path on the user's own pentest target"],
   ["src/swarm/pentest.js", "relative-url", "new URL(request.path, targetUrl)", "a probe path on the user's own pentest target"],

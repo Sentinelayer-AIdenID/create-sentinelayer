@@ -4066,3 +4066,82 @@ Review evidence:
 - Post-fix verification passes: focused admission/access suite `95/95`, static
   check `394 files`, and `git diff --check` has no content errors (only expected
   Windows line-ending notices). PR/release state is recorded by the release gate.
+
+
+## Sol: opt-in TypeSafe severity evaluation, 2026-10-16
+
+- [x] Freeze published base6f21 and current primary TypeSafe contracts; approved caller/scope.
+- [x] Create isolated H worktree and install existing locked dependencies without lifecycle scripts.
+- [x] Implement bounded builder/parser/transport with honest uncertainty and usage.
+- [x] Wire explicit deep CLI opt-in through actual review caller and render JSON/Markdown.
+- [x] Verify parser, transport, real caller, flags and existing review/orchestrator regressions with mocks only (130/130).
+- [x] Record source diff, tests and limitations for root review; no push or live provider call.
+
+
+### Review: TypeSafe evaluation slice
+
+- Mock-only focused and existing review/orchestrator/reporting/command/budget/telemetry
+  regression selection: 130/130 passed; new evaluation file contributes 49 tests.
+- No provider call, secret, default authority/policy change, or financial-cap bypass.
+  Positive monetary/output caps skip explicitly; opt-in explicit zero means no
+  monetary cap. Primary-generation accounting and gate severities remain original.
+- Classifier resource/usage metadata is separate from original cost history and
+  progress tracking. V1 independent protocol/budget review completed; coalesced fixes are in preserved successor v2. Final exact-source defect review pending.
+
+
+## Sol: PR842 hosted eval-impact evidence, 2026-10-16
+
+- [x] Read actual failed job116797177729 and unchanged eval-impact contract.
+- [x] Identify missing accepted-prefix evidence; preserve app/workflow/gate source.
+- [x] Freeze synthetic baseline/candidate input and observed contract-delta fixture.
+- [x] Consume the fixture in actual-caller deterministic tests, preserving original gate/usage (137/137).
+- [x] Verify focused regressions and real unchanged gate against exact staged tree.
+- [x] Preserve prior freezes; bind successor source/test/log/tree and hand off without commit/push.
+
+
+### Review: PR842 eval-impact correction
+
+- Exact hosted job showed the reviewed AI file changed without evidence under a
+  recognized eval path; Enforcement/Terminal failures were downstream. Gate and
+  workflow were retained, not weakened.
+- Shared synthetic JSON evidence is consumed by actual-caller tests for off/on,
+  positive cap, provider outage, malformed output and insufficient evidence.
+  All preserve original P1/P2 findings, blocking counts, fixes and generation usage.
+- Bounded deterministic selection: 137/137 pass, including 56 evaluation tests;
+  six actual mock observation records emitted. No model-quality or live-run claim.
+- Real unchanged eval-check rejects published3e12 (exit2), accepts the exact staged
+  correction tree through a labeled unreferenced proof object (exit0). Neither
+  author branch nor author index is advanced by proof construction.
+- Frozen application code and prior v1/v2 packets remain unchanged. Root owns
+  reviewed canonical commit, subsequent hosted run and publication receipts.
+
+
+## Sol: PR842 hosted unit boundary inventories, 2026-10-16
+
+- [x] Preserve exact c237 hosted unit job116800367671 metadata/logs and identify all five failures.
+- [x] Confirm fixed-origin provider-key sender, existing default-deny MCP behavior and byte-only concat semantics.
+- [x] Record precise reviewed sites and explicit denied input without weakening generic census/bridge rules.
+- [x] Prove provider-key isolation/fixed origin/no redirects and MCP no-bypass controls; preserve planted negative controls.
+- [x] Run scoped inventory suites plus prior 137 regressions and bind the exact new freeze for root review (189/189; syntax405).
+
+
+### Review: PR842 hosted unit inventory repair
+
+- All five hosted failures are accounted for by precise new-site/denied-option
+  inventories. Generic guards, planted negative controls and MCP allowed inputs
+  remain intact. No TypeSafe transport, original generator or gate-authority change.
+- New provider-key isolation and MCP refusal/no-bypass controls pass. All three
+  formerly failing suites plus the existing 137 regressions pass 189/189; normal
+  syntax passes 405 files. This is not a claimed fresh full hosted-suite pass.
+- Raw c237 hosted job/log and all prior freezes are preserved. Root owns review,
+  canonical commit/push and hosted integration; this lane makes no provider calls.
+
+
+## PR842 privacy correction over 22b85530 (Sol-owned isolated successor)
+
+- [x] Reuse central containsSecret semantics to reject complete projected state before dispatch; preserve original evidence.
+- [x] Add synthetic per-string/family/actual-caller privacy controls and a consumed seventh eval comparison; refresh only affected source/test bindings.
+- [x] Document repository-layout disclosure and unreviewed account-specific retention/training terms with verified official links.
+- [x] Focused proof: 81/81 deterministic tests; exact old runtime fails all 16 selected refusal controls; syntax 405/405; Git diff check clean. No network/provider/real-key reads.
+- [ ] Independent/root review of the frozen correction overlay before commit/push.
+- [ ] Final ship requirements: npm run verify; required Omar/audit and hosted gates under root custody. No live TypeSafe activation or spending in correction preparation.

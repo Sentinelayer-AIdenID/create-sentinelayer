@@ -196,3 +196,126 @@ After each scan, results are synced to `sentinelayer.com/dashboard/runs` via fir
 - Per-persona findings, cost, and duration
 - Combined severity counts
 - Run history with trending
+
+
+## Opt-in TypeSafe severity evaluation
+
+`sl omargate deep --severity-classifier typesafe` adds an experimental classification
+sidecar after the existing review has generated findings. It defaults to `off`.
+This is evaluation data for later privacy review and calibration, not a replacement
+for the generator, Codex, the existing gate policy, or independent review.
+
+The sidecar is reachable through the normal deep CLI, its persona/swarm calls, and
+`runAiReviewLayer`. It retains original findings, assigned severities, confidence,
+evidence, fixes, locations, gate counts, and primary-generation coverage unchanged.
+Each persona's `REVIEW_AI.json` and `REVIEW_AI.md` includes the run result and
+per-finding `severityClassification`; the orchestrator JSON retains nested results.
+A `verified` evaluation means **response schema validated only**. It does not mean
+that a severity is correct, a vulnerability is reproduced, or a gate is approved.
+Outage, insufficient evidence, a tied result, malformed answers, unsupported caps,
+and missing credentials produce explicit `unverified` metadata. They never become
+P3, remove findings, or certify a clean review.
+
+### Cost, usage, and runtime
+
+The normal positive `--max-cost` (default $5) causes a preflight skip of this
+sidecar: current TypeSafe documentation does not establish an enforceable upper
+bound on aggregate billed input for this request shape. A context limit is not a
+billing ceiling. Finite output-token caps also skip. The existing required
+billing-ledger route does not support TypeSafe and therefore skips the sidecar.
+These skips do not replace or bypass original-generation accounting/failures.
+
+For this opt-in path only, an explicit `--max-cost 0` means **NO monetary cap**,
+including the original generation. It is not a free-call setting. Invalid,
+negative, and nonfinite values cannot disable the cap; an absent value remains $5.
+For example, after reviewing the data projection and configuring `TYPESAFE_API_KEY`
+privately, an explicitly uncapped evaluation would be:
+
+```sh
+sl omargate deep --severity-classifier typesafe --max-cost 0 --path ./approved-repository
+```
+
+No live TypeSafe call or credential was used to verify this implementation. Use
+requires approval of the actual finding evidence being transmitted; string-field
+allowlisting does not prove that the text itself is free of sensitive information.
+Before any request, the complete projected request is screened with the CLI's
+existing secret-like detector. A match in any transmitted string, including
+`file`, refuses the entire evaluation as `unverified / secret_like_content` without
+rewriting the source evidence or sending a partial batch. Pattern screening is not
+complete sensitive-data detection: file paths disclose repository structure and
+ordinary finding text may still contain proprietary or personal information.
+
+This implementation review does not approve TypeSafe's retention/training terms
+or any account-specific data-processing agreement. Before approving actual state
+for transmission, review the current official
+[privacy policy](https://typesafe.ai/legal/privacy-policy),
+[customer agreement](https://typesafe.ai/legal/mca), and
+[data processing addendum](https://typesafe.ai/legal/data-processing).
+These links were verified on 2026-10-16; no zero-retention/account entitlement is
+assumed by this integration.
+
+
+There is one request per eligible review result, no retries, and no partial batch:
+1-8 findings, two independent Choice questions each, at most 24 KiB of UTF-8 JSON,
+a 64 KiB streamed response, and a five-second fetch-and-body deadline. The timer
+is cooperative under event-loop stalls; monotonic elapsed-time checks reject
+late success after body decoding and response validation. This cannot preempt
+synchronous JavaScript or promise a hard wall-clock bound on the whole command.
+When `runAiReviewLayer` is supplied finite runtime/request caps, the sidecar checks
+the original session counters plus persisted sidecar counters, reserves one
+request before dispatch, and uses the remaining runtime as its deadline. The
+normal deep command currently exposes its existing monetary cap only; this feature
+does not introduce new global time/request flags or claim a whole-run hard cap.
+Original generation retains its existing post-call budget semantics.
+
+Reservation and completion markers in the existing run-event log retain request
+and elapsed-time counters. An unfinished reservation prevents another finite-time
+sidecar from treating its elapsed time as known. A local per-session/output-root
+queue serializes evaluation accounting within one process. This supports
+sequential accounting, not an atomic shared whole-session cap. Original generation
+is outside the queue, so even same-process parallel generation sharing a session
+can change sampled counters during another evaluation. Independent processes also
+have no atomic shared budget. Persistence failure skips dispatch or
+marks the attempted evaluation unverified.
+
+Actual provider-reported input/output tokens are retained separately. The pinned
+model's published input-only list price gives an explicitly named estimate, not a
+provider invoice or proof of a bounded charge. Missing usage remains unknown,
+never a zero-cost claim. Original top-level generation cost/usage/coverage fields
+remain generation-only; classification usage and unknown billing appear in the
+separate evaluation record. Sidecar markers do not create cost-history rows or
+change original-generation progress/no-progress semantics.
+
+### Model input and versioned dictionary
+
+The fixed endpoint is `https://api.typesafe.ai/v1/systemone`, with model
+`jev-1.13.0` and dictionary `omar-severity-evaluation/1`. The allowlisted state for
+each already-generated finding contains only `file`, `line`, `message`, `evidence`,
+`rationale`, `rootCause`, and `userImpact`. Line must be a positive safe integer;
+nested location objects are rejected. No source severity/confidence, fix text,
+environment, arbitrary metadata, original prompt, or repository-wide contents are
+included. The sidecar does not read source files. It requires nonempty evidence,
+impact, and rationale, then asks for insufficient evidence if impact/exposure or
+the definitions do not establish a tier. Those fields remain generator-authored
+claims, not independently verified facts.
+
+The severity criteria are the existing generic Omar labels: P0 Critical, P1 High,
+P2 Medium, P3 Low, plus `insufficient_evidence`. They are deliberately coarse, not
+an established detailed error dictionary or inherited persona-specific rubric.
+The category taxonomy is an evaluation taxonomy covering engineering categories,
+including CI/CD, plus insufficient evidence. It does not reuse a vulnerability-only
+whitelist. A later detailed rubric or default authority requires independent
+review and measured calibration; this slice makes no model-quality comparison.
+
+Answers must match the pinned model, exact requested question IDs, Choice shape,
+complete finite probability distribution, selected maximum, and the documented
+confidence formula `(p_max - 1/n) / (1 - 1/n)`. No old self-confidence thresholds are
+used. Category and severity questions are independent and evaluated from the same
+bounded evidence. Ambiguous or insufficient answers retain their distributions
+but have no assigned candidate severity/category.
+
+Primary contract/pricing references, observed 2026-10-16:
+[API](https://docs.typesafe.ai/api),
+[Choice](https://docs.typesafe.ai/primitives/choice),
+[confidence](https://docs.typesafe.ai/confidence), and
+[models](https://docs.typesafe.ai/models).
