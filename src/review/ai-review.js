@@ -12,9 +12,10 @@ import { buildBillingRunId, buildCallIdempotencyKey, sanitizeBillingMetadata } f
 import { recordSessionUsage } from "../billing/session-usage.js";
 import { loadConfig, userConfigValues } from "../config/service.js";
 import { evaluateBudget } from "../cost/budget.js";
-import { appendCostEntry, summarizeCostHistory } from "../cost/history.js";
+import { appendCostEntry, summarizeCostHistory, loadCostHistory } from "../cost/history.js";
 import { estimateTokens } from "../cost/tokenizer.js";
-import { appendRunEvent, deriveStopClassFromBudget } from "../telemetry/ledger.js";
+import { evaluateSeverityClassification, normalizeSeverityClassifier, withSeverityEvaluationQueue, severityResourceTotals, parseSeverityEvaluationMaxCost, TYPESAFE_SEVERITY_MODEL, SEVERITY_DICTIONARY_VERSION } from "./typesafe-severity.js";
+import { appendRunEvent, loadRunEvents, deriveStopClassFromBudget } from "../telemetry/ledger.js";
 
 const AI_SEVERITIES = new Set(["P0", "P1", "P2", "P3"]);
 const DEFAULT_AI_MAX_FINDINGS = 20;
@@ -361,6 +362,7 @@ function composeAiReviewMarkdown({
   dryRun,
   findings = [],
   usage,
+  severityClassification = null,
   combinedSummary,
 } = {}) {
   const findingLines =
@@ -374,7 +376,8 @@ function composeAiReviewMarkdown({
               (finding.userImpact ? `   user_impact: ${finding.userImpact}\n` : "") +
               (finding.trafficLight ? `   traffic_light: ${finding.trafficLight}\n` : "") +
               `   suggested_fix: ${finding.suggestedFix}` +
-              (finding.confidence === null ? "" : `\n   confidence: ${finding.confidence.toFixed(2)}`)
+              (finding.confidence === null ? "" : `\n   confidence: ${finding.confidence.toFixed(2)}`) +
+              (finding.severityClassification ? `\n   severity_evaluation: ${finding.severityClassification.status} / ${finding.severityClassification.reason}; candidate=${finding.severityClassification.severity || "unverified"}; category=${finding.severityClassification.category || "unverified"}; authority=evaluation_only` : "")
           )
           .join("\n")
       : "- none";
@@ -390,11 +393,12 @@ function composeAiReviewMarkdown({
     `Dry run: ${dryRun ? "yes" : "no"}`,
     `Parser: ${parser}`,
     "",
+    ...(severityClassification ? [`TypeSafe classification evaluation: ${severityClassification.status} / ${severityClassification.reason}; schema validation only, original gate severities unchanged.`, `Classifier usage: ${severityClassification.usage ? JSON.stringify(severityClassification.usage) : "unknown/not submitted (not zero cost)"}; attempted=${severityClassification.attempted}`, ""] : []),
     "Summary:",
     `- ${summary || "No summary provided."}`,
     `- Combined findings: P0=${combinedSummary.P0} P1=${combinedSummary.P1} P2=${combinedSummary.P2} P3=${combinedSummary.P3}`,
     `- Blocking: ${combinedSummary.blocking ? "yes" : "no"}`,
-    `- Usage: input_tokens=${usage.inputTokens} output_tokens=${usage.outputTokens} cost_usd=${usage.costUsd.toFixed(6)} duration_ms=${usage.durationMs}`,
+    `- ${severityClassification ? "Generation usage" : "Usage"}: input_tokens=${usage.inputTokens} output_tokens=${usage.outputTokens} cost_usd=${usage.costUsd.toFixed(6)} duration_ms=${usage.durationMs}`,
     "",
     "AI Findings:",
     findingLines,
@@ -486,6 +490,7 @@ export async function runAiReviewLayer({
   warningThresholdPercent = 80,
   systemPrompt = "",
   dryRun = false,
+  severityClassifier = "off",
   requireUsageLedger = false,
   usageRecorder = recordSessionUsage,
   sourceCommand = "review",
@@ -496,6 +501,8 @@ export async function runAiReviewLayer({
   usageFailureLabel = "Review AI",
   env = process.env,
 } = {}) {
+  normalizeSeverityClassifier(severityClassifier);
+  if (severityClassifier === "typesafe") maxCostUsd = parseSeverityEvaluationMaxCost(maxCostUsd, 1);
   const normalizedTargetPath = path.resolve(String(targetPath || "."));
   const normalizedRunDirectory = path.resolve(String(runDirectory || "."));
   const normalizedMode = normalizeString(mode) || "full";
@@ -624,7 +631,7 @@ export async function runAiReviewLayer({
     noProgressStreak: 0,
   };
 
-  const budget = evaluateBudget({
+  let budget = evaluateBudget({
     sessionSummary,
     maxCostUsd: parseNonNegativeNumber(maxCostUsd, "maxCostUsd"),
     maxOutputTokens: parseNonNegativeNumber(maxOutputTokens, "maxOutputTokens"),
@@ -718,6 +725,51 @@ export async function runAiReviewLayer({
     }
   }
 
+  let severityClassification = null;
+  if (severityClassifier === "typesafe") {
+    const historyOptions = { targetPath: normalizedTargetPath, outputDirOverride: outputDir };
+    severityClassification = await withSeverityEvaluationQueue(`${appendedCost.filePath}:${normalizedSessionId}`, async () => {
+      let reservation = false; const attemptId = crypto.randomUUID();
+      const event = (phase, metadata) => appendRunEvent(historyOptions, {
+        sessionId: normalizedSessionId, runId: normalizedRunId,
+        eventType: phase === "reserved" ? "tool_call" : "run_step",
+        metadata: { layer: "severity_classification_evaluation", version: 1, attemptId, phase, costKnown: false, outputTokensKnown: false, ...metadata },
+      });
+      let classifierBudget = budget;
+      try {
+        const [{ events }, current] = await Promise.all([loadRunEvents(historyOptions), loadCostHistory(historyOptions)]);
+        const baseline = summarizeCostHistory(current.history).sessions.find((r) => r.sessionId === normalizedSessionId) || sessionSummary;
+        const extra = severityResourceTotals(events, normalizedSessionId);
+        classifierBudget = evaluateBudget({ ...budget.limits, sessionSummary: { ...baseline, toolCalls: baseline.toolCalls + extra.toolCalls, durationMs: baseline.durationMs + extra.durationMs } });
+        if (extra.unknownRuntime && budget.limits.maxRuntimeMs > 0) return { version: 1, mode: "typesafe", authority: "evaluation_only", verification: "response_schema_only", status: "unverified", reason: "prior_runtime_unknown", requestedModel: TYPESAFE_SEVERITY_MODEL, dictionaryVersion: SEVERITY_DICTIONARY_VERSION, attempted: false, durationMs: 0, usage: null, findings: parsed.findings.map(() => ({ status: "unverified", reason: "prior_runtime_unknown", severity: null, category: null })) };
+      } catch {
+        return { version: 1, mode: "typesafe", authority: "evaluation_only", status: "unverified", reason: "accounting_unavailable", requestedModel: TYPESAFE_SEVERITY_MODEL, dictionaryVersion: SEVERITY_DICTIONARY_VERSION, attempted: false, durationMs: 0, usage: null, findings: parsed.findings.map(() => ({ status: "unverified", reason: "accounting_unavailable", severity: null, category: null })) };
+      }
+      let evaluated = await evaluateSeverityClassification({
+        mode: severityClassifier, findings: parsed.findings, env, dryRun,
+        requireUsageLedger: normalizedRequireUsageLedger, budget: classifierBudget,
+        beforeRequest: async () => { await event("reserved", { reservedRequests: 1 }); reservation = true; },
+      });
+      if (reservation) {
+        try { await event("completed", { actualRequests: evaluated.attempted ? 1 : 0, durationMs: evaluated.durationMs, status: evaluated.status, reason: evaluated.reason, costKnown: false, outputTokensKnown: Boolean(evaluated.usage), reportedUsage: evaluated.usage }); }
+        catch { evaluated = { ...evaluated, status: "unverified", reason: "accounting_unavailable" }; }
+      }
+      const resourcesAfter = evaluateBudget({ ...classifierBudget.limits, sessionSummary: {
+        costUsd: classifierBudget.usage.costUsd + (evaluated.usage?.listPriceEstimateUsd || 0),
+        outputTokens: classifierBudget.usage.outputTokens + (evaluated.usage?.outputTokens || 0),
+        durationMs: classifierBudget.usage.runtimeMs + (reservation ? evaluated.durationMs : 0),
+        toolCalls: classifierBudget.usage.toolCalls + (reservation ? 1 : 0),
+        noProgressStreak: classifierBudget.usage.noProgressStreak,
+      } });
+      if (evaluated.attempted && !evaluated.usage) resourcesAfter.classificationUsageUnknown = true;
+      return { ...evaluated, resourceAccounting: { reservedRequests: reservation ? 1 : 0, actualRequests: evaluated.attempted ? 1 : 0, durationMs: evaluated.durationMs, budgetAfter: resourcesAfter } };
+    });
+    if (severityClassification.resourceAccounting?.budgetAfter) budget = severityClassification.resourceAccounting.budgetAfter;
+    aiFindings.forEach((finding, index) => {
+      finding.severityClassification = { ...severityClassification.findings[index], authority: "evaluation_only", dictionaryVersion: severityClassification.dictionaryVersion, model: severityClassification.requestedModel };
+    });
+  }
+
   let stopTelemetry = null;
   if (budget.blocking) {
     stopTelemetry = await appendRunEvent(
@@ -786,6 +838,7 @@ export async function runAiReviewLayer({
     aiSummary,
     combinedSummary,
     findings: aiFindings,
+    ...(severityClassification ? { severityClassification } : {}),
   };
 
   const reportMarkdown = composeAiReviewMarkdown({
@@ -799,6 +852,7 @@ export async function runAiReviewLayer({
     dryRun: Boolean(dryRun),
     findings: aiFindings,
     usage,
+    severityClassification,
     combinedSummary,
   });
 
@@ -809,6 +863,7 @@ export async function runAiReviewLayer({
   return {
     parser: parsed.parser,
     summary: parsed.summary,
+    ...(severityClassification ? { severityClassification } : {}),
     findings: aiFindings,
     aiSummary,
     combinedSummary,

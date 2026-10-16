@@ -4066,3 +4066,24 @@ Review evidence:
 - Post-fix verification passes: focused admission/access suite `95/95`, static
   check `394 files`, and `git diff --check` has no content errors (only expected
   Windows line-ending notices). PR/release state is recorded by the release gate.
+
+
+## Sol: opt-in TypeSafe severity evaluation, 2026-10-16
+
+- [x] Freeze published base6f21 and current primary TypeSafe contracts; approved caller/scope.
+- [x] Create isolated H worktree and install existing locked dependencies without lifecycle scripts.
+- [x] Implement bounded builder/parser/transport with honest uncertainty and usage.
+- [x] Wire explicit deep CLI opt-in through actual review caller and render JSON/Markdown.
+- [x] Verify parser, transport, real caller, flags and existing review/orchestrator regressions with mocks only (130/130).
+- [x] Record source diff, tests and limitations for root review; no push or live provider call.
+
+
+### Review: TypeSafe evaluation slice
+
+- Mock-only focused and existing review/orchestrator/reporting/command/budget/telemetry
+  regression selection: 130/130 passed; new evaluation file contributes 49 tests.
+- No provider call, secret, default authority/policy change, or financial-cap bypass.
+  Positive monetary/output caps skip explicitly; opt-in explicit zero means no
+  monetary cap. Primary-generation accounting and gate severities remain original.
+- Classifier resource/usage metadata is separate from original cost history and
+  progress tracking. V1 independent protocol/budget review completed; coalesced fixes are in preserved successor v2. Final exact-source defect review pending.

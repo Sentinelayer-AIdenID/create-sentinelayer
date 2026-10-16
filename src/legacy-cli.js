@@ -1348,7 +1348,12 @@ async function runLocalOmarGateCommand(args) {
   const outputDirArg = getCommandOptionValue(args, "--output-dir") || "";
   const aiEnabled = !hasCommandOption(args, "--no-ai");
   const aiDryRun = hasCommandOption(args, "--ai-dry-run");
-  const maxCostUsd = parseFloat(getCommandOptionValue(args, "--max-cost") || "5.0") || 5.0;
+  const { normalizeSeverityClassifier, parseSeverityEvaluationMaxCost } = await import("./review/typesafe-severity.js");
+  const severityClassifier = normalizeSeverityClassifier(getCommandOptionValue(args, "--severity-classifier") || "off");
+  const maxCostFlag = getCommandOptionValue(args, "--max-cost");
+  const maxCostUsd = severityClassifier === "typesafe"
+    ? parseSeverityEvaluationMaxCost(maxCostFlag, 5)
+    : parseFloat(maxCostFlag || "5.0") || 5.0;
   const modelOverride = getCommandOptionValue(args, "--model") || "";
   const providerOverride = getCommandOptionValue(args, "--provider") || "";
   const notifySessionFlag = getCommandOptionValue(args, "--notify-session") || "";
@@ -1444,6 +1449,7 @@ async function runLocalOmarGateCommand(args) {
         provider: providerOverride || undefined,
         model: modelOverride || undefined,
         maxCostUsd,
+        ...(severityClassifier === "typesafe" ? { severityClassifier } : {}),
         dryRun: aiDryRun,
         outputDir: outputDirArg,
         deterministic: {
@@ -1479,6 +1485,7 @@ async function runLocalOmarGateCommand(args) {
         summary: aiOnlySummary,
         costUsd: orchestratorResult.totalCostUsd || 0,
         model: modelOverride || "multi-persona",
+        ...(severityClassifier === "typesafe" ? { severityClassification: orchestratorResult.severityClassification } : {}),
         provider: providerOverride || "sentinelayer",
         dryRun: aiDryRun,
         personas: (orchestratorResult.personas || []).map((p) => ({
@@ -1520,6 +1527,7 @@ async function runLocalOmarGateCommand(args) {
         model: modelOverride || undefined,
         sessionId: notifySession,
         maxCostUsd,
+        ...(severityClassifier === "typesafe" ? { severityClassifier } : {}),
         dryRun: aiDryRun,
         requireUsageLedger,
         sourceCommand: "omargate deep",
