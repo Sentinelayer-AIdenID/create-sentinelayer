@@ -262,9 +262,11 @@ export async function runCli(rawArgs = process.argv.slice(2)) {
   // Normalize slash commands (/omargate → omargate, /audit → audit, etc.)
   const normalizedArgs = normalizeSlashArgs(rawArgs);
 
-  // Auth gate — require login for all commands except auth/help/version/config
-  const { checkAuthGate, printAuthRequired } = await import("./auth/gate.js");
-  const authResult = await checkAuthGate(normalizedArgs);
+  // Auth gate — require login for all commands except auth/help/version/config. Help for a Commander command prints
+  // without login too: Commander prints it and runs nothing (a newcomer reads `sl session --help` first).
+  const { checkAuthGate, isHelpOnlyInvocation, printAuthRequired } = await import("./auth/gate.js");
+  const helpOnly = !shouldBypassCommander(normalizedArgs) && isHelpOnlyInvocation(normalizedArgs);
+  const authResult = helpOnly ? { authenticated: true } : await checkAuthGate(normalizedArgs);
   if (!authResult.authenticated) {
     printAuthRequired(authResult.failureReason);
     return;

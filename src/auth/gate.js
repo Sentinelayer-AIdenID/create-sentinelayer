@@ -332,6 +332,25 @@ function isAuthenticatedSessionValid(session) {
 }
 
 /**
+ * A help request a newcomer can make before signing in (`sl session --help`, `sl session say --help`): the help flag
+ * is the LAST argument and every argument before it is a plain word (command, subcommand, positional). Then no option
+ * can take "--help" as its value (`--message-file --help` stays gated), so Commander prints help and runs nothing.
+ * The caller applies it only to Commander-dispatched commands. Tokens are judged exactly as Commander will see them,
+ * never trimmed: `" --help"` is message text to Commander, so it must not skip the gate either.
+ *
+ * @param {string[]} args - CLI arguments (after normalization)
+ * @returns {boolean}
+ */
+export function isHelpOnlyInvocation(args = []) {
+  const list = Array.isArray(args) ? args : [];
+  const last = list[list.length - 1];
+  if (last !== "--help" && last !== "-h") {
+    return false;
+  }
+  return list.slice(0, -1).every((arg) => typeof arg === "string" && arg !== "" && !arg.startsWith("-"));
+}
+
+/**
  * Check if the current command requires authentication.
  * Returns true if auth is required but user is not logged in.
  *
