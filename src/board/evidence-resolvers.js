@@ -30,7 +30,7 @@
  * refused with an Error, which the gate reports as cannot-verify.
  */
 
-import { ghCommitSha, ghRefSegment, ghRepoSlug } from "../net/gh-api-path.js";
+import { ghCheckRunsApiPath, ghCompareApiPath, ghRepoSlug } from "../net/gh-api-path.js";
 
 /** Shape a resolver must return. Anything else is treated as indeterminate. */
 const YES = true;
@@ -74,8 +74,7 @@ export function createEvidenceResolver({ run, probeDeployedSha } = {}) {
   }
 
   async function shaOnBranch({ repo, sha, branch }) {
-    const basehead = `${ghRefSegment(branch, { label: "branch" })}...${ghCommitSha(sha)}`;
-    const res = await run(["api", `repos/${ghRepoSlug(repo)}/compare/${basehead}`, "--jq", ".status"]);
+    const res = await run(["api", ghCompareApiPath({ repo, branch, sha }), "--jq", ".status"]);
     if (!res || !res.ok) return UNKNOWN;
     const status = String(res.stdout ?? "").trim();
     // GitHub's compare status, base=branch head=sha:
@@ -87,7 +86,7 @@ export function createEvidenceResolver({ run, probeDeployedSha } = {}) {
   }
 
   async function checkConclusive({ repo, ref, check }) {
-    const res = await run(["api", `repos/${ghRepoSlug(repo)}/commits/${ghRefSegment(ref)}/check-runs`, "--jq", ".check_runs"]);
+    const res = await run(["api", ghCheckRunsApiPath({ repo, ref }), "--jq", ".check_runs"]);
     if (!res || !res.ok) return UNKNOWN;
     const runs = parseJson(res.stdout);
     if (!Array.isArray(runs)) return UNKNOWN;

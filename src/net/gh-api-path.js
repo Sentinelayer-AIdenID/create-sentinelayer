@@ -4,11 +4,12 @@
 // (repos/<owner>/<repo>/...) and passes --repo values that gh turns into paths of its own, so each
 // value is checked for its role before any gh process starts:
 //
-//   ghRepoSlug     exactly "owner/repo". The owner starts with a letter or digit, then letters,
-//                  digits, "-" or "_" (Enterprise Managed User names end in "_shortcode"), at most
-//                  39 characters. The repository is letters, digits, ".", "_" or "-", at most 100
-//                  characters, and not "." or "..".
-//   ghCommitSha    7 to 40 hexadecimal characters.
+//   ghRepoSlug     exactly "owner/repo" for gh's --repo option. The owner starts with a letter or
+//                  digit, then letters, digits, "-" or "_" (Enterprise Managed User names end in
+//                  "_shortcode"), at most 39 characters. The repository is letters, digits, ".",
+//                  "_" or "-", at most 100 characters, and not "." or "..".
+//   ghRepoApiPath  the structural repos/<owner>/<repo> path, with owner and repo encoded separately.
+//   ghCommitSha    7 to 64 hexadecimal characters, encoded as one path segment (SHA-1 or SHA-256).
 //   ghRefSegment   a git branch, tag or ref name under git's ref-name rules, not starting with "-",
 //                  percent-encoded as ONE path segment. A branch name may contain "/", and git also
 //                  allows "#", "%", "{" and other characters that mean something in a URL or to gh;
@@ -21,9 +22,17 @@
 
 const OWNER = /^[A-Za-z0-9][A-Za-z0-9_-]{0,38}$/;
 const REPO = /^[A-Za-z0-9._-]{1,100}$/;
-const COMMIT_SHA = /^[0-9A-Fa-f]{7,40}$/;
+const COMMIT_SHA = /^[0-9A-Fa-f]{7,64}$/;
 // Control characters, space, and the other characters git does not allow in a ref name.
 const REF_FORBIDDEN = /[\u0000-\u0020\u007f-\u009f~^:?*[\\]/;
+
+// encodeURIComponent intentionally leaves five RFC 3986 reserved characters alone.
+// Encode those too so a validated value is always an opaque path segment.
+function encodeGhPathSegment(value) {
+  return encodeURIComponent(value).replace(/[!'()*]/g, (character) =>
+    `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+}
 
 /** True when `value` is exactly "owner/repo" as GitHub names them. */
 export function isGhRepoSlug(value) {
@@ -51,12 +60,18 @@ export function ghRepoSlug(value, { label = "repo" } = {}) {
   return value;
 }
 
+/** A `repos/<owner>/<repo>` API path with only its structural separators left raw. */
+export function ghRepoApiPath(value, { label = "repo" } = {}) {
+  const [owner, repo] = ghRepoSlug(value, { label }).split("/");
+  return `repos/${encodeGhPathSegment(owner)}/${encodeGhPathSegment(repo)}`;
+}
+
 /** `value` as a commit SHA path segment, or throws. */
 export function ghCommitSha(value, { label = "sha" } = {}) {
   if (typeof value !== "string" || !COMMIT_SHA.test(value)) {
-    throw new Error(`${label} must be a commit SHA of 7 to 40 hexadecimal characters.`);
+    throw new Error(`${label} must be a commit SHA of 7 to 64 hexadecimal characters.`);
   }
-  return value;
+  return encodeGhPathSegment(value);
 }
 
 /** `value` (a git branch, tag or ref name) percent-encoded as one path segment, or throws. */
@@ -64,5 +79,16 @@ export function ghRefSegment(value, { label = "ref" } = {}) {
   if (!isGitRefName(value)) {
     throw new Error(`${label} must be a valid git branch, tag or ref name.`);
   }
-  return encodeURIComponent(value);
+  return encodeGhPathSegment(value);
+}
+
+/** GitHub compare endpoint with a raw structural `...` between encoded base and head values. */
+export function ghCompareApiPath({ repo, branch, sha }) {
+  const basehead = `${ghRefSegment(branch, { label: "branch" })}...${ghCommitSha(sha)}`;
+  return `${ghRepoApiPath(repo)}/compare/${basehead}`;
+}
+
+/** GitHub check-runs endpoint with `ref` encoded as exactly one path segment. */
+export function ghCheckRunsApiPath({ repo, ref }) {
+  return `${ghRepoApiPath(repo)}/commits/${ghRefSegment(ref)}/check-runs`;
 }

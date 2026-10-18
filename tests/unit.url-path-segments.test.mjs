@@ -466,7 +466,6 @@ const NON_PATH_LINES = [
   ["src/legacy-cli.js", "slash-interpolation", "${sshUrlMatch[1]}/${sshUrlMatch[2]}", "an owner/repo slug parsed from a git remote"],
   ["src/legacy-cli.js", "slash-interpolation", "${base}/${normalizeRepoSlug(repoSlug)}.git", "a git remote URL, not an API request"],
   ["src/legacy-cli.js", "slash-interpolation", "personaRouting.effectivePersonas.length}/${", "report text"],
-  ["src/legacy-cli.js", "slash-interpolation", "`repos/${repoSlug}`", "a gh CLI argument for a validated owner/repo slug, not a SentinelLayer API URL"],
   ["src/mcp/doctor.js", "slash-interpolation", "${normalizedBase}/${normalizedSuffix}", "joins a base URL and a fixed route; every caller passes a constant"],
   ["src/mcp/smoke.js", "slash-interpolation", "${normalizedBase}/${normalizedSuffix}", "joins a base URL and a fixed route; every caller passes a constant"],
   ["src/mcp/token-service.js", "slash-interpolation", "${base}/${suffix}", "joins a base URL and a fixed route; every caller passes a constant"],
