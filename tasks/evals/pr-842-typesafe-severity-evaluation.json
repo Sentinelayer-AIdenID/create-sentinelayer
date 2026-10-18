@@ -13,7 +13,7 @@
       "src/review/omargate-orchestrator.js": "90d6d8f61e6e3056e937f79f584725f6cbd9e47128d22e61d1bd600227f75725",
       "src/commands/omargate.js": "c59eee4a1bd833065e4cd6e136917adc42052c1e35e0089ef010115b6f1d83e4",
       "src/commands/legacy-args.js": "83772b6ccd5765d1a0bd1f3ee3eefcf5c1fdaf4e9fb1a301c0312b286dbc0d29",
-      "src/legacy-cli.js": "3bf9915403bf92e4edf8d1ab1120eb6e3657f4cfcfdb764ec07fee54452b11bc",
+      "src/legacy-cli.js": "2068189e38e67d71b195b2716ae873aa303b296b76cf4f046b99169a4f0b6490",
       "src/session/redact.js": "a92cd2e70b165e4e015edcbeff1d3119c3b1f091ef72654e776c0139ace663a2"
     },
     "testPath": "tests/unit.typesafe-severity.test.mjs",
@@ -38,6 +38,15 @@
       "currentLegacySha256": "3bf9915403bf92e4edf8d1ab1120eb6e3657f4cfcfdb764ec07fee54452b11bc",
       "scope": "Only printUsage help string literals changed in src/legacy-cli.js. All seven synthetic cases, shared input, mock responses, expected outcomes, invariants, other six implementation hashes and the unchanged test hash are retained.",
       "provenance": "Original implementation/privacy-correction revisions and prior mock observations are historical anchors, not fresh observations at the help revision. The current sourceSha256 map binds helpRevision with CRLF-to-LF normalization only; this is not model accuracy or live-provider evidence."
+    },
+    "pathHardeningMaintenance": {
+      "kind": "gh_api_path_hardening_source_binding_refresh",
+      "baseRevision": "6b817c3b43d6c8efb1450c3120761f5e0cc2da7d",
+      "sourceKind": "current_main_path_hardening_successor",
+      "priorLegacySha256": "3bf9915403bf92e4edf8d1ab1120eb6e3657f4cfcfdb764ec07fee54452b11bc",
+      "currentLegacySha256": "2068189e38e67d71b195b2716ae873aa303b296b76cf4f046b99169a4f0b6490",
+      "scope": "Only the GitHub API path-hardening import, fixed /user/repos endpoint binding, and repository endpoint builder call changed in src/legacy-cli.js. All seven synthetic cases, shared input, mock responses, expected outcomes, invariants, other six implementation hashes and the unchanged test hash are retained.",
+      "provenance": "Original implementation, privacy-correction, help-maintenance revisions, and prior mock observations remain historical anchors. This refresh binds the current path-hardening overlay after CRLF-to-LF normalization only; it is not model accuracy, live-provider, billing, default-gate, or new security-acceptance evidence."
     }
   },
   "baselineMeaning": "Published base generation-only contract, with candidate off mode exercised on identical synthetic inputs; no independent baseline model/provider run.",

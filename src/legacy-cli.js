@@ -28,7 +28,7 @@ import { normalizeAgentEvent } from "./events/schema.js";
 import { collectCodebaseIngest, formatIngestSummary } from "./ingest/engine.js";
 import { getExpressTemplate, getPackageJsonTemplate, buildReadmeContent } from "./scaffold/templates.js";
 import { generateScaffold } from "./scaffold/generator.js";
-import { isGhRepoSlug } from "./net/gh-api-path.js";
+import { ghRepoApiPath, isGhRepoSlug } from "./net/gh-api-path.js";
 import {
   getCoordinationEtiquetteItems,
   renderCoordinationNumberedList,
@@ -42,6 +42,7 @@ let DEFAULT_GITHUB_CLONE_BASE_URL =
 const DEFAULT_AUTH_TIMEOUT_MS = 10 * 60 * 1000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 20_000;
 const PACKAGE_JSON_PATH = new URL("../package.json", import.meta.url);
+const GH_REPOS_ENDPOINT = "/user/repos?per_page=100&sort=updated&affiliation=owner,collaborator,organization_member";
 
 function refreshRuntimeDefaults() {
   DEFAULT_API_URL = process.env.SENTINELAYER_API_URL || "https://api.sentinelayer.com";
@@ -680,14 +681,13 @@ function ensureGhAuthSession(ghCommand) {
 }
 
 function listReposViaGh(ghCommand) {
-  const endpoint = "/user/repos?per_page=100&sort=updated&affiliation=owner,collaborator,organization_member";
   const apiResult = spawnSync(
     ghCommand,
-    ["api", "--paginate", "--slurp", endpoint],
+    ["api", "--paginate", "--slurp", GH_REPOS_ENDPOINT],
     { encoding: "utf-8" }
   );
   if (apiResult.status !== 0) {
-    const fallback = spawnSync(ghCommand, ["api", endpoint], { encoding: "utf-8" });
+    const fallback = spawnSync(ghCommand, ["api", GH_REPOS_ENDPOINT], { encoding: "utf-8" });
     if (fallback.status !== 0) {
       throw new Error(
         String(
@@ -2802,7 +2802,7 @@ function confirmSecretsRepository(repoSlug) {
   } catch (error) {
     return { ok: false, reason: error instanceof Error ? error.message : String(error) };
   }
-  const view = spawnSync(ghCommand, ["api", `repos/${repoSlug}`], { encoding: "utf-8" });
+  const view = spawnSync(ghCommand, ["api", ghRepoApiPath(repoSlug)], { encoding: "utf-8" });
   if (view.status !== 0) {
     return { ok: false, reason: `gh could not read ${repoSlug}: ${String(view.stderr || view.stdout || "").trim()}` };
   }

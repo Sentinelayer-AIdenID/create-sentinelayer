@@ -8,21 +8,33 @@ import "./setup-env.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
+import fs from "node:fs";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { parse } from "@babel/parser";
 
 import { createGhSpy } from "./gh-spy.mjs";
-import { ghCommitSha, ghRefSegment, ghRepoSlug, isGhRepoSlug, isGitRefName } from "../src/net/gh-api-path.js";
+import {
+  ghCheckRunsApiPath,
+  ghCommitSha,
+  ghCompareApiPath,
+  ghRefSegment,
+  ghRepoApiPath,
+  ghRepoSlug,
+  isGhRepoSlug,
+  isGitRefName,
+} from "../src/net/gh-api-path.js";
 import { createEvidenceResolver, createGhRunner } from "../src/board/evidence-resolvers.js";
 import { VERDICTS, checkDone } from "../src/board/done-gate.js";
 import { setupSecrets } from "../src/scan/gh-secrets.js";
 import { writeStoredSession } from "../src/auth/session-store.js";
 
-const CLI = fileURLToPath(new URL("../bin/sl.js", import.meta.url));
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const CLI = path.join(ROOT, "bin", "sl.js");
 
 // ------------------------------------------------------------------------------- validators
 
@@ -82,12 +94,12 @@ test("repo slugs: exactly owner/repo as GitHub names them", () => {
   assert.throws(() => ghRepoSlug("me/..", { label: "evidence.repo" }), /^Error: evidence\.repo must be/);
 });
 
-test("commit SHAs: 7 to 40 hexadecimal characters", () => {
-  for (const sha of ["a6bb012", "A6BB012", "0123456789abcdef0123456789abcdef01234567"]) {
+test("commit SHAs: 7 to 64 hexadecimal characters", () => {
+  for (const sha of ["a6bb012", "A6BB012", "0123456789abcdef0123456789abcdef01234567", "a".repeat(64)]) {
     assert.equal(ghCommitSha(sha), sha);
   }
-  for (const sha of ["", "a6bb01", "0123456789abcdef0123456789abcdef012345678", "g6bb012", "HEAD", "main", "a6bb012/..", "a6bb012...main", "a6bb012\n", " a6bb012", "a6bb%30012", 1234567, null]) {
-    assert.throws(() => ghCommitSha(sha), /^Error: sha must be a commit SHA of 7 to 40 hexadecimal characters\.$/, JSON.stringify(sha));
+  for (const sha of ["", "a6bb01", "a".repeat(65), "g6bb012", "HEAD", "main", "a6bb012/..", "a6bb012...main", "a6bb012\n", " a6bb012", "a6bb%30012", 1234567, null]) {
+    assert.throws(() => ghCommitSha(sha), /^Error: sha must be a commit SHA of 7 to 64 hexadecimal characters\.$/, JSON.stringify(sha));
   }
 });
 
@@ -106,6 +118,7 @@ test("git ref names: git's rules, then percent-encoded as one path segment", () 
     "dev/ñ": "dev%2F%C3%B1",
     "v1.0-rc_1": "v1.0-rc_1",
     "a@b": "a%40b",
+    "fix!it's(ok)": "fix%21it%27s%28ok%29",
   };
   for (const [ref, segment] of Object.entries(encoded)) {
     assert.equal(isGitRefName(ref), true, JSON.stringify(ref));
@@ -152,6 +165,142 @@ test("git ref names: git's rules, then percent-encoded as one path segment", () 
   assert.throws(() => ghRefSegment("..", { label: "branch" }), /^Error: branch must be/);
 });
 
+test("GitHub API builders encode dynamic values by segment and keep only route separators structural", () => {
+  assert.equal(ghRepoApiPath("octo-org/.github"), "repos/octo-org/.github");
+  assert.equal(
+    ghCompareApiPath({ repo: "mrrCarter/x", branch: "feature/fix!it's(ok)", sha: "a".repeat(64) }),
+    `repos/mrrCarter/x/compare/feature%2Ffix%21it%27s%28ok%29...${"a".repeat(64)}`,
+  );
+  assert.equal(
+    ghCheckRunsApiPath({ repo: "mrrCarter/x", ref: "refs/heads/fix#12" }),
+    "repos/mrrCarter/x/commits/refs%2Fheads%2Ffix%2312/check-runs",
+  );
+  assert.deepEqual(
+    ghCompareApiPath({ repo: "mrrCarter/x", branch: "feature/board", sha: "a6bb012" }).split("/"),
+    ["repos", "mrrCarter", "x", "compare", "feature%2Fboard...a6bb012"],
+  );
+  assert.throws(() => ghRepoApiPath("me/.."), /^Error: repo must be/);
+  assert.throws(
+    () => ghCompareApiPath({ repo: "me/x", branch: "main/../admin", sha: "a6bb012" }),
+    /^Error: branch must be/,
+  );
+  assert.throws(
+    () => ghCompareApiPath({ repo: "me/x", branch: "main", sha: "a6bb012/../admin" }),
+    /^Error: sha must be/,
+  );
+});
+
+// ------------------------------------------------------------------------- source census
+//
+// `gh api` sends the signed-in user's GitHub token. The general URL census added by
+// PR #829 only inspects files that use the HTTP request helpers, so gh's argv arrays
+// need their own closed inventory. This parser-backed census deliberately scans every
+// array whose first statically-known value is "api", independent of line wrapping or
+// the name of the function that eventually executes it. Every catalogued dynamic path
+// must be assembled by a role-specific builder from src/net/gh-api-path.js.
+
+const EXPECTED_GH_API_SITES = [
+  'src/board/evidence-resolvers.js:["api", ghCheckRunsApiPath({ repo, ref }), "--jq", ".check_runs"]',
+  'src/board/evidence-resolvers.js:["api", ghCompareApiPath({ repo, branch, sha }), "--jq", ".status"]',
+  'src/legacy-cli.js:["api", "--paginate", "--slurp", GH_REPOS_ENDPOINT]',
+  'src/legacy-cli.js:["api", GH_REPOS_ENDPOINT]',
+  'src/legacy-cli.js:["api", ghRepoApiPath(repoSlug)]',
+].sort();
+
+const REVIEWED_NON_GH_API_ARRAYS = [
+  {
+    site: 'src/daemon/hybrid-mapper.js:["api", "v1", "v2", "err", "error", "svc", "service"]',
+    reason: "token stop words used by the deterministic path scorer; never process arguments",
+  },
+  {
+    site: 'src/daemon/scope-engine.js:[ "api", "v1", "v2", "v3", "error", "service", "route", "handler", "request", "response", "timeout", "failed", "failure", "unknown", ]',
+    reason: "generic scope tokens ignored by the deterministic scope engine; never process arguments",
+  },
+];
+
+const SOURCE_EXTENSIONS = new Set([".js", ".mjs", ".cjs"]);
+
+function sourceFiles(dir = path.join(ROOT, "src")) {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) return sourceFiles(full);
+    return SOURCE_EXTENSIONS.has(path.extname(entry.name)) ? [full] : [];
+  });
+}
+
+function staticString(node) {
+  if (!node || typeof node !== "object") return null;
+  if (node.type === "StringLiteral") return node.value;
+  if (node.type === "TemplateLiteral" && node.expressions.length === 0) {
+    return node.quasis.map((part) => part.value.cooked).join("");
+  }
+  if (node.type === "BinaryExpression" && node.operator === "+") {
+    const left = staticString(node.left);
+    const right = staticString(node.right);
+    return left === null || right === null ? null : left + right;
+  }
+  return null;
+}
+
+const compactSource = (value) => value.replace(/\s+/g, " ").trim();
+
+/** Return every statically-spelled `gh api` argv array in production source. */
+function ghApiSites(files) {
+  const sites = [];
+  for (const { file, text } of files) {
+    const ast = parse(text, { sourceType: "unambiguous" });
+    const visit = (node) => {
+      if (!node || typeof node !== "object") return;
+      if (node.type === "ArrayExpression" && staticString(node.elements[0]) === "api") {
+        sites.push(`${file}:${compactSource(text.slice(node.start, node.end))}`);
+      }
+      for (const [key, value] of Object.entries(node)) {
+        if (["loc", "start", "end", "extra"].includes(key)) continue;
+        if (Array.isArray(value)) value.forEach(visit);
+        else visit(value);
+      }
+    };
+    visit(ast);
+  }
+  return sites.sort();
+}
+
+const productionSources = () =>
+  sourceFiles().map((full) => ({
+    file: path.relative(ROOT, full).split(path.sep).join("/"),
+    text: fs.readFileSync(full, "utf8"),
+  }));
+
+test("gh api source census has no uncatalogued path builder", () => {
+  assert.deepEqual(
+    ghApiSites(productionSources()),
+    [...EXPECTED_GH_API_SITES, ...REVIEWED_NON_GH_API_ARRAYS.map(({ site }) => site)].sort(),
+    "catalog every gh api argv array and build each dynamic endpoint with src/net/gh-api-path.js",
+  );
+  assert.match(
+    fs.readFileSync(path.join(ROOT, "src", "legacy-cli.js"), "utf8"),
+    /const GH_REPOS_ENDPOINT = "\/user\/repos\?per_page=100&sort=updated&affiliation=owner,collaborator,organization_member";/,
+    "the catalogued repository-list endpoint must remain a fixed path",
+  );
+});
+
+test("gh api source census catches multiline, indirect and split-literal call sites", () => {
+  const text = [
+    'const direct = ["api", `repos/${repo}/commits/${ref}`];',
+    "const indirect = [",
+    '  "api",',
+    "  endpoint,",
+    "];",
+    'run(["a" + "pi", path]);',
+    'const providers = ["local", "api"];',
+  ].join("\n");
+  assert.deepEqual(ghApiSites([{ file: "src/board/evidence-resolvers.js", text }]), [
+    'src/board/evidence-resolvers.js:[ "api", endpoint, ]',
+    'src/board/evidence-resolvers.js:["a" + "pi", path]',
+    'src/board/evidence-resolvers.js:["api", `repos/${repo}/commits/${ref}`]',
+  ]);
+});
+
 // ------------------------------------------------------------------- call sites: board resolver
 
 const REPO = "mrrCarter/x";
@@ -181,7 +330,7 @@ const REFUSED_EVIDENCE = [
     { ...PR, number },
     /^number must be a pull request number\.$/,
   ]),
-  ...["a6bb012/..", "a6bb012...main", "HEAD", "abc12", "g6bb012"].map((sha) => [{ ...SHA, sha }, /^sha must be/]),
+  ...["a6bb012/..", "a6bb012...main", "HEAD", "abc12", "g6bb012", "a".repeat(65)].map((sha) => [{ ...SHA, sha }, /^sha must be/]),
   ...["../main", "main/..", "a..b", "main/", "-main", "ma in", "main\n", "feat//x", ".hidden", "x/.lock"].flatMap((name) => [
     [{ ...SHA, branch: name }, /^branch must be a valid git branch, tag or ref name\.$/],
     [{ ...CHK, ref: name }, /^ref must be a valid git branch, tag or ref name\.$/],
@@ -203,6 +352,7 @@ test("board resolver: valid values produce exactly the expected gh arguments", a
     [{ ...PR, number: "17" }, ["pr", "view", "17", "--repo", REPO, "--json", "state,mergedAt"]],
     [SHA, ["api", "repos/mrrCarter/x/compare/feature%2Fboard...a6bb012", "--jq", ".status"]],
     [{ ...SHA, branch: "main", sha: "0123456789abcdef0123456789abcdef01234567" }, ["api", "repos/mrrCarter/x/compare/main...0123456789abcdef0123456789abcdef01234567", "--jq", ".status"]],
+    [{ ...SHA, branch: "main", sha: "a".repeat(64) }, ["api", `repos/mrrCarter/x/compare/main...${"a".repeat(64)}`, "--jq", ".status"]],
     [{ ...SHA, repo: "octo-org/.github", branch: "fix#12" }, ["api", "repos/octo-org/.github/compare/fix%2312...a6bb012", "--jq", ".status"]],
     [CHK, ["api", "repos/mrrCarter/x/commits/release%2Fv1.2/check-runs", "--jq", ".check_runs"]],
     [{ ...CHK, ref: "a6bb012" }, ["api", "repos/mrrCarter/x/commits/a6bb012/check-runs", "--jq", ".check_runs"]],
@@ -343,7 +493,7 @@ test("CLI sl board check: refused evidence values never reach gh; valid ones rea
         "  - pr-merged: cannot-verify (resolver failed: repo must be a GitHub repository in owner/repo form.)",
         "  - pr-merged: cannot-verify (resolver failed: number must be a pull request number.)",
         "  - sha-on-branch: cannot-verify (resolver failed: repo must be a GitHub repository in owner/repo form.)",
-        "  - sha-on-branch: cannot-verify (resolver failed: sha must be a commit SHA of 7 to 40 hexadecimal characters.)",
+        "  - sha-on-branch: cannot-verify (resolver failed: sha must be a commit SHA of 7 to 64 hexadecimal characters.)",
         "  - sha-on-branch: cannot-verify (resolver failed: branch must be a valid git branch, tag or ref name.)",
         "  - check-conclusive: cannot-verify (resolver failed: ref must be a valid git branch, tag or ref name.)",
       ],
