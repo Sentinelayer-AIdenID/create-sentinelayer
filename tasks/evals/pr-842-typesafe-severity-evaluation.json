@@ -13,7 +13,7 @@
       "src/review/omargate-orchestrator.js": "90d6d8f61e6e3056e937f79f584725f6cbd9e47128d22e61d1bd600227f75725",
       "src/commands/omargate.js": "c59eee4a1bd833065e4cd6e136917adc42052c1e35e0089ef010115b6f1d83e4",
       "src/commands/legacy-args.js": "83772b6ccd5765d1a0bd1f3ee3eefcf5c1fdaf4e9fb1a301c0312b286dbc0d29",
-      "src/legacy-cli.js": "5b5de479485cc2144b60b615697577912913f40b3052387ecf6bd51fe78a6bd7",
+      "src/legacy-cli.js": "3bf9915403bf92e4edf8d1ab1120eb6e3657f4cfcfdb764ec07fee54452b11bc",
       "src/session/redact.js": "a92cd2e70b165e4e015edcbeff1d3119c3b1f091ef72654e776c0139ace663a2"
     },
     "testPath": "tests/unit.typesafe-severity.test.mjs",
@@ -27,7 +27,18 @@
     "originalImplementationRevision": "3e12b628b6a64c69aee643d327c4df0f03a9dbac",
     "originalImplementationTree": "a7710cb9f81018fb483ae72a98fd574f2d99269b",
     "originalImplementationAiReviewBlob": "8bc830a8dbb50543ac46b05fb8018a9e34c9ace3",
-    "privacyCorrectionBaseRevision": "22b8553073bb72cfccd71fb1c06217c3e6844ff4"
+    "privacyCorrectionBaseRevision": "22b8553073bb72cfccd71fb1c06217c3e6844ff4",
+    "maintenance": {
+      "kind": "help_only_source_binding_refresh",
+      "baselineRevision": "04682399e20091628de4528acd6d90b8745f8b78",
+      "helpRevision": "95b38af420aeaa3efc8699fdfeabb9b2c5a1e1e0",
+      "baselineEvidencePath": "tasks/evals/pr-842-typesafe-severity-maintenance/baseline-04682399.json",
+      "baselineEvidenceSha256": "a4c2e9a10c873e080acc44339e479430640bbc1ce12ad18952132fc5891eb43a",
+      "historicalLegacySha256": "5b5de479485cc2144b60b615697577912913f40b3052387ecf6bd51fe78a6bd7",
+      "currentLegacySha256": "3bf9915403bf92e4edf8d1ab1120eb6e3657f4cfcfdb764ec07fee54452b11bc",
+      "scope": "Only printUsage help string literals changed in src/legacy-cli.js. All seven synthetic cases, shared input, mock responses, expected outcomes, invariants, other six implementation hashes and the unchanged test hash are retained.",
+      "provenance": "Original implementation/privacy-correction revisions and prior mock observations are historical anchors, not fresh observations at the help revision. The current sourceSha256 map binds helpRevision with CRLF-to-LF normalization only; this is not model accuracy or live-provider evidence."
+    }
   },
   "baselineMeaning": "Published base generation-only contract, with candidate off mode exercised on identical synthetic inputs; no independent baseline model/provider run.",
   "providerLabels": {
