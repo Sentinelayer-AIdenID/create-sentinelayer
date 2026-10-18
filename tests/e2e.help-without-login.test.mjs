@@ -48,7 +48,7 @@ test("CLI help prints without login for a command and its subcommands; a runnabl
 
     // Controls: an option before the flag, the bare command, and a word Commander does not dispatch (the legacy path,
     // which could act on its arguments) meet the gate.
-    for (const args of [["session", "say", "room-1", "--message-file", "--help"], ["session", "say", "room-1", "hello"], ["my-new-project", "--help"]]) {
+    for (const args of [["session", "say", "room-1", "--message-file", "--help"], ["session", "say", "room-1", "hello"], ["my-new-project", "--help"], ["session", "say", "room-1", " --help"], ["session", "say", "room-1", "\t-h"], ["session", "say", "room-1", "\n--help"]]) {
       const result = await runUnauthenticated(tempRoot, args);
       assert.notEqual(result.code, 0, args.join(" "));
       assert.match(result.stderr, /Authentication required/, args.join(" "));

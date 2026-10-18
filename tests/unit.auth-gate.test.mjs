@@ -459,6 +459,12 @@ test("Unit auth gate: a help request is help-only only when the flag is last and
   assert.equal(isHelpOnlyInvocation(["session", "--help", "say"]), false);
   assert.equal(isHelpOnlyInvocation(["session", "say"]), false);
   assert.equal(isHelpOnlyInvocation(["session", "", "--help"]), false);
+  // Judged exactly as Commander sees each token: a padded flag is message text to Commander, so it is not help here.
+  assert.equal(isHelpOnlyInvocation(["session", "say", "room-1", " --help"]), false);
+  assert.equal(isHelpOnlyInvocation(["session", "say", "room-1", "\t-h"]), false);
+  assert.equal(isHelpOnlyInvocation(["session", "say", "room-1", "\n--help"]), false);
+  assert.equal(isHelpOnlyInvocation(["session", "say", "room-1", "--help "]), false);
+  assert.equal(isHelpOnlyInvocation(["session", 7, "--help"]), false);
   assert.equal(isHelpOnlyInvocation([]), false);
   assert.equal(isHelpOnlyInvocation(undefined), false);
 });
