@@ -7691,7 +7691,7 @@ export function registerSessionCommand(program) {
 
   session
     .command("status <sessionId>")
-    .description("Show session status, agents, and health")
+    .description("Show workspace session status, agents, and file-lock health")
     .option("--path <path>", "Workspace path for the session", ".")
     .option("--json", "Emit machine-readable output")
     .action(async (sessionId, options, command) => {

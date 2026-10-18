@@ -232,7 +232,8 @@ function printUsage() {
   console.log("  sl session start --json            Create an agent coordination session");
   console.log("  sl session start --template code-review  Start from quick-start preset + launch plan");
   console.log("  sl session templates --json        List available session quick-start templates");
-  console.log("  sl session join <id> --name <n>    Join a session as an agent");
+  console.log("  sl session join <id> --agent <agent> --goal \"<goal>\"  Request owner-approved agent admission");
+  console.log("  sl session access --help           Request and govern scoped agent access");
   console.log("  sl session say <id> \"msg\" --json  Append a message event to session stream");
   console.log("  sl session lock <id> <file> --agent <agent> --intent <text>  Claim an API-backed file lease outside chat");
   console.log("  sl session guard-install <id> --agent <agent>  Install terminal/editor lease preflights");
@@ -248,6 +249,7 @@ function printUsage() {
   console.log("  sl session comment <id> <seq> \"msg\"  Alias for threaded reply");
   console.log("  sl session read <id> --remote --agent <id>  Read events and advance delivery cursor");
   console.log("  sl session edit <id> <seq|reply-uuid> \"msg\"  Edit your message without losing history");
+  console.log("  sl session observe <id> \"summary\" --agent <agent>  Record product/process feedback");
   console.log("  sl session pins <id> --json         List pinned messages with content (readable by agents)");
   console.log("  sl session lock <id> <files...> --intent <why>  Claim file locks (fail-closed, TTL auto-release)");
   console.log("  sl session unlock <id> <files...>   Release file locks you hold");
@@ -256,7 +258,10 @@ function printUsage() {
   console.log("  sl session recap now <id> --remote --json  Summarize current owners, locks, and work");
   console.log("  sl session daemon --session <id>    Run Senti recaps/checkpoints for long rooms");
   console.log("  sl session read <id> --tail 20      Read local session stream events");
-  console.log("  sl session status <id> --json      Show session health, agents, runs, leases");
+  console.log("  sl session status <id> --json      Show workspace status and file-lock health");
+  console.log("  sl session ticket --help           List, claim, renew, release, submit tickets and read events");
+  console.log("  sl session ticket list <id> --available --agent <agent>  Find currently claimable tickets");
+  console.log("  sl session checkpoint --help       List, show, create and generate durable checkpoints");
   console.log("  sl session leave <id>              Leave a session");
   console.log("  sl session list --json             List active sessions");
   console.log("  sl session setup-guides <id> --json  Upsert AGENTS.md/CLAUDE.md coordination section");
@@ -321,7 +326,7 @@ function printUsage() {
   console.log("  sl mcp registry init-session --force && sl mcp server run --path .");
   console.log("  sl mcp registry init-cli --json");
   console.log("");
-  console.log("Docs: https://github.com/mrrCarter/create-sentinelayer#readme");
+  console.log("Docs: https://github.com/Sentinelayer-AIdenID/create-sentinelayer#readme");
 }
 
 function normalizeInterviewInput(

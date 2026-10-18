@@ -3,7 +3,7 @@
 ## Project
 - Name: sentinelayer-cli
 - Purpose: deterministic CLI for secure AI engineering workflows, Omar gating, and multi-agent session coordination.
-- Repository: https://github.com/mrrCarter/create-sentinelayer
+- Repository: https://github.com/Sentinelayer-AIdenID/create-sentinelayer
 
 ## Retrieval Order
 1. README.md
@@ -15,6 +15,11 @@
 
 ## Session Surface
 - Commands: `sl session start|join|say|read|status|leave|list|kill`
+- Agent admission: `sl session join <id> --agent <agent> --goal "<goal>"`; `sl session access --help` lists request, approval and status commands.
+- Ticket backlog: `sl session ticket list|claim|renew|release|submit|events`; `list --available` finds claimable tickets, and `submit` hands work back for review rather than declaring it done.
+- Durable checkpoints: `sl session checkpoint list|show|create|generate`.
+- Feedback and corrections: `sl session observe <id> "summary" --agent <agent>`; `sl session edit <id> <seq|reply-uuid> "replacement"`.
+- `sl session status` reports workspace state and file-lock health; use the relevant command's `--help` for its flags.
 - Session stream: NDJSON event log with canonical agent event schema
 - Governance: Omar pass-two requires `P0=0` and `P1=0` before merge
 
