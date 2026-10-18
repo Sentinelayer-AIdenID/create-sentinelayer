@@ -6,7 +6,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { mkdtemp, rename, rm, unlink, writeFile } from "node:fs/promises";
 
-import { checkAuthGate, printAuthRequired } from "../src/auth/gate.js";
+import { checkAuthGate, isHelpOnlyInvocation, printAuthRequired } from "../src/auth/gate.js";
 import { writeStoredSession } from "../src/auth/session-store.js";
 import { bearerOf } from "./credential-probe.mjs";
 
@@ -445,4 +445,20 @@ test("Unit auth gate: missing encryption key is unavailable storage, not absent 
     }
     await rm(tempHome, { recursive: true, force: true });
   }
+});
+
+test("Unit auth gate: a help request is help-only only when the flag is last and every earlier argument is a plain word", () => {
+  assert.equal(isHelpOnlyInvocation(["session", "--help"]), true);
+  assert.equal(isHelpOnlyInvocation(["session", "-h"]), true);
+  assert.equal(isHelpOnlyInvocation(["session", "say", "--help"]), true);
+  assert.equal(isHelpOnlyInvocation(["session", "say", "room-1", "hello", "--help"]), true);
+  // An option before the flag could take "--help" as its value: the command might run, so it stays gated.
+  assert.equal(isHelpOnlyInvocation(["session", "say", "room-1", "--message-file", "--help"]), false);
+  assert.equal(isHelpOnlyInvocation(["session", "say", "room-1", "--json", "--help"]), false);
+  // Not last: the command runs with its arguments.
+  assert.equal(isHelpOnlyInvocation(["session", "--help", "say"]), false);
+  assert.equal(isHelpOnlyInvocation(["session", "say"]), false);
+  assert.equal(isHelpOnlyInvocation(["session", "", "--help"]), false);
+  assert.equal(isHelpOnlyInvocation([]), false);
+  assert.equal(isHelpOnlyInvocation(undefined), false);
 });
