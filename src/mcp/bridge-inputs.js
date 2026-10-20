@@ -152,6 +152,7 @@ export const BRIDGE_ALLOWED_INPUTS = Object.freeze({
   "session.sync": "sessionId since path json",
   "session.templates": "json",
   "session.ticket.claim": "sessionId ticketId expectedVersion agent path json",
+  "session.ticket.create": "sessionId title body agent assignee sourceSequence idempotencyKey path json",
   "session.ticket.events": "sessionId after agent path json",
   "session.ticket.list": "sessionId available agent path json",
   "session.ticket.release": "sessionId ticketId reason agent path json",

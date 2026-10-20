@@ -119,6 +119,7 @@ import {
 } from "../session/reactions.js";
 import {
   claimTicket,
+  createTicket,
   listTickets,
   releaseTicketLease,
   renewTicketLease,
@@ -7362,6 +7363,29 @@ Guide: https://sentinelayer.com/docs/senti/overview/
     }
     console.log(line);
   }
+
+  ticket
+    .command("create <sessionId>")
+    .description("Create a ticket with server-authorized creator and source attribution")
+    .requiredOption("--title <text>", "Ticket title")
+    .option("--body <text>", "Ticket description", "")
+    .option("--agent <id>", "Acting agent identity, authorized by the server")
+    .option("--assignee <id>", "Who should own the work")
+    .option("--source-sequence <n>", "Source message in this room")
+    .option("--idempotency-key <key>", "Reuse the key after an uncertain response")
+    .option("--path <path>", "Workspace path for the session", ".")
+    .option("--json", "Emit machine-readable output")
+    .action(async (sessionId, options, command) => {
+      const sid = normalizeString(sessionId), targetPath = path.resolve(process.cwd(), String(options.path || "."));
+      const identity = await resolveSessionSayIdentity({ sessionId: sid, agentId: options.agent, targetPath });
+      const agentId = normalizeString(identity.agentId);
+      const result = await createTicket(sid, { title: options.title, body: options.body, assignee: options.assignee,
+        agentId: agentId === "cli-user" ? "" : agentId, targetPath,
+        sourceSequenceId: options.sourceSequence === undefined ? null : parsePositiveInteger(options.sourceSequence, "source-sequence", 1),
+        ...(options.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : {}),
+      });
+      ticketOutput(options, command, { command: "session ticket create", ...result }, `Created ${result.ticket.id}.`);
+    });
 
   ticket
     .command("list <sessionId>")

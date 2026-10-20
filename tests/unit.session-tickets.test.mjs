@@ -62,6 +62,10 @@ function fakeApi({ loseClaimResponses = 0, decoyCursor = false, brokenContinuati
     if (u.origin !== API) throw new Error(`left the fixture API: ${u.origin}`);
     if (bearer !== ADMISSION_TOKEN) return json({ error: { code: "INVALID_TOKEN" } }, 401);
     const p = u.pathname;
+    if (method === "POST" && p.endsWith("/tickets")) {
+      state.createBody = JSON.parse(init.body || "{}");
+      return json({ id: "created-ticket", createdBy: AGENT, creator: { kind: "agent", id: AGENT, credentialBound: true } });
+    }
     if (method === "GET" && p.endsWith("/tickets")) {
       // The bounded board page: NOT a baseline, and it would miss work. The list must not use it.
       return json({ items: [{ id: "board-decoy", title: "board page only", status: "open", version: 1, lease: null }] });
@@ -322,6 +326,21 @@ test("ticket work as an agent with NO admission is refused before any request", 
   const ran = await sl(["session", "ticket", "claim", SID, "t-open", "--agent", "not-admitted", "--json"]);
   assert.match(String(ran.error?.message), /"not-admitted" has no live admission.*would act as you/s);
   assert.deepEqual(api.requests, []);
+});
+
+test("ticket create carries explicit agent and source while the request uses its admission credential", async () => {
+  await reset();
+  await storeAdmission();
+  const api = fakeApi();
+  const ran = await sl(["session", "ticket", "create", SID, "--title", "file once", "--body", "details",
+    "--agent", AGENT, "--source-sequence", "52041", "--idempotency-key", "create-10000000-0000-4000-8000-000000000001", "--json"]);
+  assert.equal(ran.error, null, String(ran.error?.stack || ran.error));
+  assert.deepEqual(api.createBody, { title: "file once", body: "details", agentId: AGENT, sourceSequenceId: 52041 });
+  assert.equal(ran.json.ticket.createdBy, AGENT);
+  assert.equal(ran.json.idempotencyKey, "create-10000000-0000-4000-8000-000000000001");
+  const request = api.requests.find(r => r.method === "POST" && r.path.endsWith("/tickets"));
+  assert.equal(request.bearer, ADMISSION_TOKEN);
+  assert.equal(request.key, "create-10000000-0000-4000-8000-000000000001");
 });
 
 test("a claim the server records for someone else is not recorded as ours", async () => {

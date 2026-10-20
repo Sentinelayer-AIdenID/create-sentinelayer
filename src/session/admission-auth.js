@@ -154,6 +154,7 @@ export const SESSION_AGENT_PRINCIPAL = Object.freeze({
   "checkpoint create": "actor",
   "checkpoint generate": "actor",
   "ticket list": "actor",
+  "ticket create": "actor",
   "ticket claim": "actor",
   "ticket renew": "actor",
   "ticket release": "actor",
