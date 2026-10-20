@@ -927,7 +927,7 @@ export async function isAgentContext({ env = process.env } = {}) {
  */
 export async function runInSessionToolContext(name, input = {}, run, { env = process.env } = {}) {
   const routeClass = sessionRouteClass(`mcp:${name}`);
-  if (routeClass === "exempt-local") return run(input);
+  if (routeClass === "exempt-local" || routeClass === "self-provisioning") return run(input);
   if (!(await isAgentContext({ env }))) return run(input);
   if (routeClass === "owner") refuseOutsideAdmission("owner actions are not available to agents");
   const sessionId = normalizeString(input.sessionId || input.session_id || input.session);

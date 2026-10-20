@@ -167,9 +167,9 @@ export const SESSION_AGENT_PRINCIPAL = Object.freeze({
   "access revoke": "control",
   kill: "target",
   "stop-listener": "target",
-  leave: "target",
+  leave: "self-provisioning",
   "guard-uninstall": "target",
-  join: "control",
+  join: "self-provisioning",
 });
 const SESSION_COMMAND_GROUPS = new Set(["access", "checkpoint", "ticket"]);
 
@@ -219,6 +219,7 @@ export async function resolveAgentAdmissionTarget(args = [], { env = process.env
   }
   const principal = SESSION_AGENT_PRINCIPAL[command];
   if (principal === "target" || principal === "control") return null;
+  if (principal === "self-provisioning") return null;
   const flagAgent = optionValue(args, "--agent");
   // A subcommand outside the table that names NO agent is a human command (archive,
   // members, ...): it is not agent-attributed, whatever SENTINELAYER_AGENT_ID says.
@@ -288,7 +289,7 @@ async function assertBridgedRoute(action, { env, homeDir }) {
       { reason: "bridged_route_refused" },
     );
   };
-  if (routeClass === "exempt-local") return;
+  if (routeClass === "exempt-local" || routeClass === "self-provisioning") return;
   if (routeClass === "owner") refuse("owner actions are not available to agents");
   const named = [action.opts.session, action.opts.id, ...action.operands]
     .map((value) => String(value ?? "").trim())

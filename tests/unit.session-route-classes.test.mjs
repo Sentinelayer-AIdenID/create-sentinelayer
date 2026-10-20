@@ -13,12 +13,12 @@ import path from "node:path";
 import { buildCliCommandMcpTools } from "../src/mcp/cli-command-tools.js";
 import { createSessionMcpToolHandlers } from "../src/mcp/session-stdio-server.js";
 import { buildCliProgram } from "../src/cli.js";
-import { LEGACY_DATA_PLANE_TOOLS, SESSION_ROUTE_CLASSES } from "../src/session/route-classes.js";
+import { LEGACY_DATA_PLANE_TOOLS, SESSION_ROUTE_CLASSES, sessionRouteClass } from "../src/session/route-classes.js";
 import { admittedAgentScope } from "../src/auth/admission-scope.js";
 import { assertDispatchMatchesScope, resolveAgentAdmissionTarget } from "../src/session/admission-auth.js";
 import { admissionCredentialPath } from "../src/session/admission.js";
 
-const CLASSES = new Set(["legacy-data-plane", "control", "owner", "exempt-local"]);
+const CLASSES = new Set(["legacy-data-plane", "control", "owner", "exempt-local", "self-provisioning"]);
 
 async function realRoutes() {
   const mcp = Object.keys(createSessionMcpToolHandlers({ targetPath: os.tmpdir() })).map((name) => `mcp:${name}`);
@@ -173,10 +173,30 @@ test("a bridged command counts every session it will use: --session or --id, giv
   });
 });
 
-test("bridged join, leave and stop-listener are refused in an agent context, with or without a stored admission", async () => {
+test("bridged join and leave are allowed in an agent context even without a stored admission", async () => {
   const cases = [
     [["session", "join"], ["session", "join", SID, "--agent", "bridge-agent"], { args: [SID], opts: { agent: "bridge-agent" } }],
     [["session", "leave"], ["session", "leave", SID, "--agent", "bridge-agent"], { args: [SID], opts: { agent: "bridge-agent" } }],
+  ];
+  const sources = { agent: "cli", session: "cli" };
+  await withEmptyHome(async (homeDir) => {
+    for (const [names, , parsed] of cases) {
+      // join and leave are self-provisioning: allowed without a stored admission
+      await guard(parsedAction(names, { ...parsed, sources }), homeDir);
+    }
+  });
+  await withStoredAdmission(async (homeDir) => {
+    for (const [names, argv, parsed] of cases) {
+      // runCli does not bind them to an admission: they establish or tear it down
+      assert.equal(await resolveAgentAdmissionTarget(argv, { env: BRIDGE_ENV, homeDir }), null);
+      // In the bridge guard they pass through because self-provisioning is exempt
+      await guard(parsedAction(names, { ...parsed, sources }), homeDir);
+    }
+  });
+});
+
+test("bridged stop-listener is refused in an agent context, with or without a stored admission", async () => {
+  const cases = [
     [
       ["session", "stop-listener"],
       ["session", "stop-listener", "--session", SID, "--agent", "bridge-agent"],
@@ -191,10 +211,24 @@ test("bridged join, leave and stop-listener are refused in an agent context, wit
   });
   await withStoredAdmission(async (homeDir) => {
     for (const [names, argv, parsed] of cases) {
-      // runCli never binds them to an admission: they act on an agent, not as one
       assert.equal(await resolveAgentAdmissionTarget(argv, { env: BRIDGE_ENV, homeDir }), null);
       await assert.rejects(guard(parsedAction(names, { ...parsed, sources }), homeDir), /not bound to it/);
     }
+  });
+});
+
+
+test("session join through the bridge in an agent context with no stored admission must succeed (deadlock fix)", async () => {
+  // This is the exact deadlock: an agent with SENTINELAYER_AGENT_ID set, trying to join
+  // a session that has NO stored admission yet. In the old code this was refused as a
+  // control operation, preventing the agent from ever establishing admission.
+  await withEmptyHome(async (homeDir) => {
+    const joinAction = parsedAction(
+      ["session", "join"],
+      { args: ["new-session-id"], opts: { agent: "bridge-agent", goal: "test", scope: "session.read", ttl: "2h" } },
+    );
+    // Must NOT throw — join is self-provisioning and must be allowed
+    await guard(joinAction, homeDir);
   });
 });
 
@@ -204,4 +238,101 @@ test("outside the bridge, or with no agent signal, the guard does not apply", as
     await guard(lock, homeDir, {});
     await guard(lock, homeDir, { SENTINELAYER_MCP_BRIDGE: "1" });
   });
+});
+
+// ===========================================================================
+// sol-max review additions: closed allowlist, identity vs permission, casing/alias guards
+// ===========================================================================
+
+test("self-provisioning is EXACTLY join and leave — no other tool, alias, or casing variant", async () => {
+  const { mcp, allSession } = await realRoutes();
+  const allRoutes = [...mcp, ...allSession];
+  const selfProvisioning = allRoutes.filter(
+    (route) => SESSION_ROUTE_CLASSES[route] === "self-provisioning"
+  );
+  // Only join and leave, exactly as spelled.
+  assert.deepEqual(
+    [...selfProvisioning].sort(),
+    ["cli:session join", "cli:session leave"],
+    "only join and leave are self-provisioning"
+  );
+
+  // No route with a different case or alias reaches self-provisioning.
+  const variants = allRoutes.filter((route) => {
+    const lower = route.toLowerCase();
+    return (
+      (lower.includes("join") || lower.includes("leave")) &&
+      route !== "cli:session join" &&
+      route !== "cli:session leave"
+    );
+  });
+  assert.deepEqual(variants, [], "no casing/alias variant of join/leave is classified");
+
+  // Every control/owner tool must NOT be self-provisioning.
+  const controlTools = allRoutes.filter(
+    (route) =>
+      SESSION_ROUTE_CLASSES[route] === "control" ||
+      SESSION_ROUTE_CLASSES[route] === "owner"
+  );
+  for (const route of controlTools) {
+    assert.notEqual(
+      SESSION_ROUTE_CLASSES[route],
+      "self-provisioning",
+      `${route} is control/owner, never self-provisioning`
+    );
+  }
+});
+
+test("no invite, grant, revoke, or send tool is classified self-provisioning", async () => {
+  const { allSession } = await realRoutes();
+  const forbiddenPatterns = ["invite", "grant", "revoke", "send"];
+  for (const route of allSession) {
+    const lower = route.toLowerCase();
+    for (const pattern of forbiddenPatterns) {
+      if (lower.includes(pattern)) {
+        assert.notEqual(
+          SESSION_ROUTE_CLASSES[route],
+          "self-provisioning",
+          `${route} matches "${pattern}" — must not be self-provisioning`
+        );
+      }
+    }
+  }
+});
+
+test("self-provisioning tools are not in the legacy data-plane list", () => {
+  for (const route of LEGACY_DATA_PLANE_TOOLS) {
+    assert.notEqual(
+      SESSION_ROUTE_CLASSES[route],
+      "self-provisioning",
+      `${route} is legacy-data-plane, not self-provisioning`
+    );
+  }
+});
+
+test("join and leave classification cannot be bypassed through malformed agent identity inference", async () => {
+  // The identity inference (src/session/agent-identity.js) never changes the route class.
+  const { inferSessionAgentIdentity } = await import("../src/session/agent-identity.js");
+
+  // Identity inference fills in display/model/provider but never grants permissions.
+  // The agentId is preserved as-is; agent identity attribution is separate from permission.
+  const explicit = inferSessionAgentIdentity({ agentId: "carter", model: "cli" });
+  assert.equal(explicit.agentId, "carter");
+  assert.equal(explicit.model, "cli");
+  assert.equal(explicit.clientKind, "cli");
+
+  // Empty/null agentId does not produce a fallback privileged identity
+  const empty = inferSessionAgentIdentity({ agentId: "", model: "cli" });
+  assert.equal(empty.agentId || "", "");
+  assert.notEqual(String(empty.agentId || "").toLowerCase(), "carter");
+
+  const nil = inferSessionAgentIdentity(null);
+  assert.notEqual(String(nil.agentId || "").toLowerCase(), "carter");
+
+  // Route class is invariant under identity — join/leave are always self-provisioning
+  assert.equal(sessionRouteClass("cli:session join"), "self-provisioning");
+  assert.equal(sessionRouteClass("cli:session leave"), "self-provisioning");
+  // Casing variants do not match (exact lookup)
+  assert.equal(sessionRouteClass("CLI:SESSION JOIN"), "unclassified");
+  assert.equal(sessionRouteClass("cli:SESSION join"), "unclassified");
 });
