@@ -44,6 +44,32 @@ function buildBudgetEnvelope() {
   };
 }
 
+test("runtime reply declaration stops composing on manual and budget exit; generic work never declares it", async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-runtime-composing-"));
+  try {
+    await seedWorkspace(tempRoot);
+    const session = await createSession({ targetPath: tempRoot, ttlSeconds: 120 });
+    const shared = { sessionId: session.sessionId, targetPath: tempRoot, scopeEnvelope: buildScopeEnvelope(), budgetEnvelope: buildBudgetEnvelope() };
+    const generic = await createRuntimeRun({ ...shared, workItemId: "generic", composingStarter: () => assert.fail("generic work is not composing") });
+    await stopRuntimeRun(session.sessionId, generic.runId, { targetPath: tempRoot });
+    for (const budgetExit of [false, true]) {
+      let stops = 0;
+      let declaration;
+      const run = await createRuntimeRun({ ...shared, workItemId: budgetExit ? "budget" : "manual",
+        replyTarget: { agentId: "sol-max", kind: "message", id: "10000000-0000-4000-8000-000000000001" },
+        composingStarter: async (_session, options) => { declaration = options; options.onStatus({ ok: true }); return { stop: async () => { stops++; } }; } });
+      assert.equal(declaration.runId, run.runId);
+      assert.equal(declaration.agentId, "sol-max");
+      assert.deepEqual(run.composingStatus, { ok: true, reason: null });
+      if (budgetExit) await heartbeatRuntimeRun(session.sessionId, run.runId, { targetPath: tempRoot, usage: { tokensUsed: 1000 } });
+      await stopRuntimeRun(session.sessionId, run.runId, { targetPath: tempRoot });
+      assert.equal(stops, 1);
+    }
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test("Unit session runtime bridge: validates scope + budget contract envelopes", async () => {
   assert.equal(validateScopeEnvelope(buildScopeEnvelope()), true);
   assert.equal(validateBudgetEnvelope(buildBudgetEnvelope()), true);

@@ -6,6 +6,7 @@ import process from "node:process";
 import { createAgentEvent } from "../events/schema.js";
 import { resolveSessionPaths } from "./paths.js";
 import { appendToStream } from "./stream.js";
+import { startSessionComposing } from "./composing.js";
 
 const RUNTIME_BRIDGE_AGENT_ID = "runtime-bridge";
 const DEFAULT_HEARTBEAT_MS = 30_000;
@@ -357,6 +358,7 @@ function toRuntimeSnapshot(runtimeState) {
     budgetEnvelope: runtimeState.budgetEnvelope,
     usage: copyUsage(runtimeState.usage, runtimeState.startedAt),
     runtimePath: runtimeState.runtimePath,
+    ...(runtimeState.replyTarget ? { replyTarget: runtimeState.replyTarget, composingStatus: runtimeState.composingStatus } : {}),
   };
 }
 
@@ -395,6 +397,14 @@ function clearHeartbeatTimer(runtimeState) {
     clearInterval(runtimeState.heartbeatTimer);
     runtimeState.heartbeatTimer = null;
   }
+}
+
+async function clearComposing(runtimeState) {
+  if (!runtimeState.composingHandle) return;
+  const handle = runtimeState.composingHandle;
+  runtimeState.composingHandle = null;
+  try { await handle.stop(); }
+  catch { runtimeState.composingStatus = { ok: false, reason: "composing_cleanup_failed" }; }
 }
 
 function resolveRuntimeState(sessionId, runId, targetPath) {
@@ -451,6 +461,8 @@ export async function createRuntimeRun({
   runId = "",
   autoHeartbeat = false,
   heartbeatMs = DEFAULT_HEARTBEAT_MS,
+  replyTarget = null,
+  composingStarter = startSessionComposing,
 } = {}) {
   const normalizedSessionId = normalizeString(sessionId);
   const normalizedWorkItemId = normalizeString(workItemId);
@@ -491,11 +503,24 @@ export async function createRuntimeRun({
     budgetEnvelope: normalizedBudget,
     runtimePath,
     heartbeatTimer: null,
+    replyTarget: replyTarget ? { agentId: replyTarget.agentId, kind: replyTarget.kind, id: replyTarget.id } : null,
+    composingHandle: null,
+    composingStatus: null,
   };
 
+  if (replyTarget) {
+    // An explicit reply target is mandatory. Generic jobs, reads, presence
+    // and listener wakes never imply that a model is preparing a reply.
+    runtimeState.composingHandle = await composingStarter(normalizedSessionId, {
+      agentId: replyTarget.agentId, targetKind: replyTarget.kind, targetId: replyTarget.id,
+      runId: normalizedRunId, targetPath: normalizedTargetPath,
+      onStatus: (result) => { runtimeState.composingStatus = { ok: result.ok, reason: result.reason || null }; },
+    });
+  }
   ACTIVE_RUNTIME_RUNS.set(runtimeKey, runtimeState);
-  await persistRuntimeState(runtimeState);
-  await emitRuntimeEvent(
+  try {
+    await persistRuntimeState(runtimeState);
+    await emitRuntimeEvent(
     normalizedSessionId,
     "runtime_run_started",
     {
@@ -511,7 +536,12 @@ export async function createRuntimeRun({
       workItemId: normalizedWorkItemId,
       nowIso,
     }
-  );
+    );
+  } catch (error) {
+    await clearComposing(runtimeState);
+    ACTIVE_RUNTIME_RUNS.delete(runtimeKey);
+    throw error;
+  }
 
   if (autoHeartbeat) {
     const intervalMs = normalizePositiveInteger(heartbeatMs, DEFAULT_HEARTBEAT_MS);
@@ -571,6 +601,7 @@ export async function heartbeatRuntimeRun(
     runtimeState.stopCode = normalizeString(predicate.stopCode) || "STOP_TRIGGERED";
     runtimeState.stopReason = normalizeString(predicate.reason) || "Runtime stop predicate triggered.";
     clearHeartbeatTimer(runtimeState);
+    await clearComposing(runtimeState);
     await persistRuntimeState(runtimeState);
     await emitRuntimeEvent(
       normalizedSessionId,
@@ -638,6 +669,7 @@ export async function stopRuntimeRun(
   runtimeState.stopCode = "MANUAL_STOP";
   runtimeState.stopReason = normalizeString(reason) || "Runtime run manually stopped.";
   clearHeartbeatTimer(runtimeState);
+  await clearComposing(runtimeState);
   await persistRuntimeState(runtimeState);
   await emitRuntimeEvent(
     normalizedSessionId,

@@ -2825,6 +2825,42 @@ export async function fetchSessionPinnedMessages(
   };
 }
 
+/** Explicit ephemeral reply lifecycle; no event-ingest or presence fallback. */
+export async function updateSessionComposing(sessionId, {
+  operation, runId, targetKind, targetId, agentId = "", targetPath = process.cwd(),
+  timeoutMs = 1_000, signal, resolveAuthSession = resolveActiveAuthSession,
+  fetchImpl = fetchWithTimeout,
+} = {}) {
+  const sid = normalizeString(sessionId);
+  if (!isUrlPathSegment(sid) || !["start", "heartbeat", "stop"].includes(operation) ||
+      !/^[A-Za-z0-9_-]{1,80}$/.test(runId || "") || !["message", "reply"].includes(targetKind) ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetId || "") ||
+      !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(agentId)) return { ok: false, reason: "invalid_input" };
+  if (String(process.env.SENTINELAYER_SKIP_REMOTE_SYNC || "").trim() === "1") return { ok: false, reason: "remote_sync_disabled_env" };
+  let auth;
+  try { auth = await resolveAuthSession({ cwd: targetPath, env: process.env, autoRotate: false }); }
+  catch { return { ok: false, reason: "no_session" }; }
+  if (!isAuthenticated(auth)) return { ok: false, reason: "not_authenticated" };
+  const credential = await credentialFor(auth);
+  const key = `sl-compose-${randomUUID()}`;
+  const url = `${resolveApiBaseUrl(auth)}/api/v1/sessions/${urlPathSegment(sid, { label: "sessionId" })}/composing`;
+  try {
+    const { response, payload } = await fetchJsonWithFullTimeout(url, {
+      method: "PUT", credential, signal,
+      headers: { "Content-Type": "application/json", "Idempotency-Key": key,
+        ...createSessionMutationHeaders({ credential, sessionId: sid,
+          routeId: "PUT /api/v1/sessions/{session_id}/composing", idempotencyKey: key }) },
+      body: JSON.stringify({ operation, runId, targetKind, targetId, agentId }),
+    }, Math.max(50, Math.min(5_000, Number(timeoutMs) || 1_000)), fetchImpl, { readErrorBody: true });
+    if (!response?.ok) return { ok: false, status: response?.status || null,
+      reason: normalizeString(payload?.detail?.error?.code || payload?.detail?.code || payload?.error?.code) || "composing_refused" };
+    if (payload?.status !== "ok" || !Array.isArray(payload?.active)) return { ok: false, reason: "composing_unavailable" };
+    return { ok: true, ...payload };
+  } catch {
+    return { ok: false, reason: "composing_transport_failed" };
+  }
+}
+
 // Native edits never fall back to POST /events or mutate an optimistic local row.
 export async function editSessionMessage(sessionId, {
   targetSequenceId = null,

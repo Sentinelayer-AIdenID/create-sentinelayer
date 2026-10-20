@@ -42,6 +42,7 @@ import {
   writeDaemonPidRecord,
 } from "../session/daemon-spawn.js";
 import { listRuntimeRuns } from "../session/runtime-bridge.js";
+import { updateSessionComposing } from "../session/sync.js";
 import {
   guardFileLeases,
   listFileLocks,
@@ -4695,6 +4696,28 @@ export function registerSessionCommand(program) {
         if (shouldEmitJson(options, command)) console.log(JSON.stringify(payload, null, 2));
         else console.log(`${result.changed ? "Edited" : "Confirmed"} ${sequence ? `#${sequence}` : `reply ${target}`} at revision ${messageRevision(result.reply || result.event)}.${localAppend.failed ? " Remote edit succeeded; local cache needs sync." : ""}`);
         return payload;
+      });
+    });
+
+  session
+    .command("composing <sessionId> <operation>")
+    .description("Explicit runtime reply preparation: start, heartbeat, or stop (expires after 45 seconds)")
+    .requiredOption("--agent <id>", "Joined agent declaring its own reply lifecycle")
+    .requiredOption("--run-id <id>", "Unique runtime run identifier; reuse only for its heartbeat/stop")
+    .requiredOption("--target-id <uuid>", "Canonical message or reply UUID")
+    .option("--target-kind <kind>", "Target kind: message or reply", "message")
+    .option("--path <path>", "Workspace path for the session", ".")
+    .option("--json", "Emit machine-readable output")
+    .action(async (sessionId, operation, options, command) => {
+      const targetPath = path.resolve(process.cwd(), String(options.path || "."));
+      const agentId = normalizeString(options.agent);
+      return withAgentAdmission(sessionId, agentId, async () => {
+        const result = await updateSessionComposing(sessionId, { operation, runId: options.runId,
+          targetKind: options.targetKind, targetId: options.targetId, agentId, targetPath });
+        if (!result.ok) throw new Error(`Composing ${operation} failed (${result.reason || "unknown"}).`);
+        if (shouldEmitJson(options, command)) console.log(JSON.stringify(result));
+        else console.log(`Composing ${operation} confirmed for ${agentId}.`);
+        return result;
       });
     });
 
