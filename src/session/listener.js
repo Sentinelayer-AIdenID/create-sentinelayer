@@ -5,7 +5,9 @@ import {
   pollSessionEventsBefore,
   streamSessionEvents,
   updateSessionReadCursor,
+  recordSessionMessageViews,
 } from "./sync.js";
+import { displayedMessageViewTargets } from "./message-views.js";
 import { cursorAdvances, readSyncCursor, writeSyncCursor } from "./sync-cursor.js";
 import { isSessionListenerLifecycleEvent } from "./control-events.js";
 import { sessionMessageRoutingEvent } from "./message-edits.js";
@@ -341,6 +343,7 @@ export async function listenSessionEvents({
   _pollLatest = pollSessionEventsBefore,
   _stream = streamSessionEvents,
   _updateReadCursor = updateSessionReadCursor,
+  _recordMessageViews = recordSessionMessageViews,
   _readCursor = readSyncCursor,
   _writeCursor = writeSyncCursor,
   _sleep = defaultSleep,
@@ -382,6 +385,8 @@ export async function listenSessionEvents({
   let consecutivePollFailures = 0;
   let readCursorUpdates = 0;
   let readCursorReason = "";
+  let messageViewsRecorded = 0;
+  let messageViewsReason = "";
   let deliveredControls = 0;
   let ignoredControls = 0;
   let catchupNotified = false;
@@ -452,6 +457,8 @@ export async function listenSessionEvents({
     consecutivePollFailures,
     readCursorUpdates,
     readCursorReason,
+    messageViewsRecorded,
+    messageViewsReason,
     deliveredControls,
     ignoredControls,
     reason: lastReason,
@@ -547,6 +554,7 @@ export async function listenSessionEvents({
     }
 
     const shouldEmitBatch = primed || Boolean(replay);
+    const deliveredEvents = [];
     for (const event of visibleEvents) {
       const key = eventIdentityKey(event);
       if (emittedKeys.has(key)) continue;
@@ -556,10 +564,30 @@ export async function listenSessionEvents({
       try {
         await onEvent(event);
         emitted += 1;
+        deliveredEvents.push(event);
       } catch (error) {
         emittedKeys.delete(key);
         throw error;
       }
+    }
+
+    // Only events successfully delivered to this listener count as views.
+    // Priming, filtered recipients and control frames never produce receipts.
+    const viewTargets = displayedMessageViewTargets(deliveredEvents);
+    const viewDeadline = Date.now() + 1000;
+    for (let offset = 0; offset < viewTargets.length; offset += 100) {
+      const remaining = viewDeadline - Date.now();
+      if (remaining <= 0) { messageViewsReason = "view_receipts_timeout"; break; }
+      const result = await _recordMessageViews(normalizedSessionId, {
+        targetPath, agentId: normalizedAgentId, targets: viewTargets.slice(offset, offset + 100),
+        timeoutMs: remaining, signal: AbortSignal.timeout(remaining),
+      }).catch(() => ({ ok: false, reason: "view_receipts_unavailable" }));
+      if (!result?.ok) { messageViewsReason = result?.reason || "view_receipts_unavailable"; break; }
+      messageViewsRecorded += result.recorded;
+      messageViewsReason = "";
+    }
+    if (viewTargets.length && messageViewsReason) {
+      await onError({ ok: false, reason: messageViewsReason, operation: "message_views", cursor: cursor || null });
     }
 
     if (nextCursor && nextCursor !== cursor) {

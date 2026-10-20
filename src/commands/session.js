@@ -139,6 +139,7 @@ import { readSessionPreview } from "../session/preview.js";
 import {
   createSessionMessageAction,
   editSessionMessage,
+  recordSessionMessageViews,
   fetchJsonWithFullTimeout,
   fetchSessionUsageLedger,
   fetchSessionPinnedMessages,
@@ -156,6 +157,7 @@ import {
   updateSessionReadCursor,
 } from "../session/sync.js";
 import { hydrateSessionFromRemote } from "../session/remote-hydrate.js";
+import { displayedMessageViewTargets } from "../session/message-views.js";
 import { messageRevision, replyRevisionEvent, sessionMessageRoutingEvent } from "../session/message-edits.js";
 import { runSessionRecall } from "../session/recall/index.js";
 import { mergeLiveSources } from "../session/live-source.js";
@@ -1008,130 +1010,40 @@ function defaultActionIdempotencyKey({
   return `cli:${normalizeString(actionType).toLowerCase()}:${target}:${actor}:${noteHash}`;
 }
 
-function sessionReadViewTarget(event = {}) {
-  const eventType = normalizeString(event.event || event.type).toLowerCase();
-  if (eventType !== "session_message" || isSessionControlEvent(event)) {
-    return null;
-  }
-  const targetSequenceId = eventSequenceNumber(event);
-  const targetCursor = normalizeString(event.cursor);
-  if (!targetSequenceId && !targetCursor) {
-    return null;
-  }
-  return {
-    key: targetSequenceId ? `seq:${targetSequenceId}` : `cursor:${targetCursor}`,
-    targetSequenceId: targetSequenceId || null,
-    targetCursor,
-  };
-}
-
-function normalizeAutoViewTimeoutMs(value) {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return SESSION_READ_AUTO_VIEW_TIMEOUT_MS;
-  }
-  return Math.max(50, Math.min(5_000, Math.floor(parsed)));
-}
-
-async function writeSessionReadCursor(sessionId, target = null, {
-  targetPath,
-  agentId,
-  timeoutMs = SESSION_READ_AUTO_VIEW_TIMEOUT_MS,
+async function recordDisplayedSessionViews(sessionId, events = [], {
+  targetPath, agentId, enabled = false, timeoutMs = SESSION_READ_AUTO_VIEW_TIMEOUT_MS,
 } = {}) {
-  if (!target) {
-    return;
-  }
-  const totalTimeoutMs = normalizeAutoViewTimeoutMs(timeoutMs);
+  const targets = displayedMessageViewTargets(events);
+  const summary = { enabled: Boolean(enabled), agentId: normalizeString(agentId) || "cli-user",
+    targetCount: enabled ? targets.length : 0, attempted: 0, recorded: 0, duplicates: 0,
+    failed: 0, skipped: 0, queued: 0, background: false, reason: enabled ? "no_targets" : "disabled" };
+  if (!enabled || !targets.length) return summary;
   const controller = new AbortController();
-  const startedAt = Date.now();
-  const timeoutHandle = setTimeout(() => {
-    try {
-      controller.abort();
-    } catch {
-      // ignore
-    }
-  }, totalTimeoutMs);
-  if (typeof timeoutHandle.unref === "function") {
-    timeoutHandle.unref();
-  }
-
+  const budget = Math.max(50, Math.min(5000, Number(timeoutMs) || SESSION_READ_AUTO_VIEW_TIMEOUT_MS));
+  const timer = setTimeout(() => controller.abort(), budget);
+  const started = Date.now();
   try {
-    const elapsedMs = Math.max(0, Date.now() - startedAt);
-    const remainingMs = Math.max(1, totalTimeoutMs - elapsedMs);
-    await updateSessionReadCursor(sessionId, {
-      targetPath,
-      targetSequenceId: target.targetSequenceId,
-      targetCursor: target.targetCursor,
-      agentId,
-      timeoutMs: remainingMs,
-      signal: controller.signal,
-    });
-  } finally {
-    clearTimeout(timeoutHandle);
-  }
-}
-
-function recordSessionReadCursor(sessionId, events = [], {
-  targetPath,
-  agentId,
-  enabled = false,
-  timeoutMs = SESSION_READ_AUTO_VIEW_TIMEOUT_MS,
-} = {}) {
-  const normalizedAgentId = normalizeString(agentId);
-  const summary = {
-    enabled: Boolean(enabled),
-    agentId: normalizedAgentId || "cli-user",
-    targetCount: 0,
-    attempted: 0,
-    recorded: 0,
-    duplicates: 0,
-    failed: 0,
-    skipped: 0,
-    queued: 0,
-    background: false,
-    reason: "",
-  };
-  if (!summary.enabled) {
-    summary.reason = "disabled";
-    return summary;
-  }
-
-  let target = null;
-  for (const event of Array.isArray(events) ? events : []) {
-    const candidate = sessionReadViewTarget(event);
-    if (!candidate) continue;
-    summary.targetCount += 1;
-    if (
-      !target ||
-      Number(candidate.targetSequenceId || 0) >= Number(target.targetSequenceId || 0)
-    ) {
-      target = candidate;
+    for (let offset = 0; offset < targets.length; offset += 100) {
+      const batch = targets.slice(offset, offset + 100);
+      summary.attempted += batch.length;
+      const result = await recordSessionMessageViews(sessionId, { targetPath, agentId: normalizeString(agentId), targets: batch,
+        signal: controller.signal, timeoutMs: Math.max(1, budget - (Date.now() - started)) });
+      if (!result.ok) { summary.failed += batch.length; summary.reason = result.reason; break; }
+      summary.recorded += result.recorded;
     }
-  }
-  summary.skipped = Math.max(0, summary.targetCount - (target ? 1 : 0));
-  summary.queued = target ? 1 : 0;
-
-  if (!target) {
-    if (!summary.reason) {
-      summary.reason = "no_targets";
+    if (!summary.failed) summary.reason = "view_receipts_recorded";
+    summary.skipped = targets.length - summary.attempted;
+    // Progress is a separate high-water mark, never evidence that every
+    // message below it was returned or consumed by a model.
+    const latest = events.filter(event => event?.event === "session_message" && Number.isSafeInteger(event.sequenceId))
+      .sort((a, b) => b.sequenceId - a.sequenceId)[0];
+    if (latest && !controller.signal.aborted) {
+      summary.readProgress = await updateSessionReadCursor(sessionId, { targetPath, agentId: normalizeString(agentId),
+        targetSequenceId: latest.sequenceId, targetCursor: latest.cursor || "", signal: controller.signal,
+        timeoutMs: Math.max(1, budget - (Date.now() - started)) });
     }
     return summary;
-  }
-
-  summary.background = true;
-  summary.reason = "queued_monotonic_upsert";
-
-  void writeSessionReadCursor(sessionId, target, {
-    targetPath,
-    // Omit a placeholder identity so the server can bind human reads to the
-    // authenticated principal. Explicit agent reads still carry their grant.
-    agentId: normalizedAgentId,
-    timeoutMs,
-  }).catch(() => {
-    // Best-effort view receipts must never affect transcript rendering.
-  });
-
-  return summary;
+  } finally { clearTimeout(timer); }
 }
 
 function compareIsoDesc(left = "", right = "") {
@@ -6381,7 +6293,7 @@ export function registerSessionCommand(program) {
           remoteAppend = await appendMissingRemoteEvents(normalizedSessionId, remoteTail.events, {
             targetPath,
           });
-          readCursor = recordSessionReadCursor(normalizedSessionId, remoteTail.events, {
+          readCursor = await recordDisplayedSessionViews(normalizedSessionId, remoteTail.events, {
             targetPath,
             agentId,
             enabled: true,
@@ -6647,7 +6559,7 @@ export function registerSessionCommand(program) {
           ? filterSessionActionEventsForTranscriptWindow(visibleActionEvents, transcriptEvents)
           : visibleActionEvents;
         const events = mergeSessionActionEvents(transcriptEvents, actionEvents).slice(-tail);
-        const autoView = recordSessionReadCursor(normalizedSessionId, events, {
+        const autoView = await recordDisplayedSessionViews(normalizedSessionId, events, {
           targetPath,
           agentId: readAgentId,
           enabled: Boolean(options.remote && options.view !== false),
