@@ -12,6 +12,7 @@ import { listFileLocks, lockFile, unlockFile } from "../session/file-locks.js";
 import { resolveSessionDir } from "../session/paths.js";
 import { eventMatchesAgent } from "../session/listener.js";
 import { isSessionControlEvent } from "../session/control-events.js";
+import { displayedMessageViewTargets } from "../session/message-views.js";
 import { buildObservations } from "../session/recall/observations.js";
 import { createMemoryService } from "../engram/index.js";
 import {
@@ -32,6 +33,7 @@ import {
   listSessionMessageActions,
   pollSessionEvents,
   pollSessionEventsBefore,
+  recordSessionMessageViews,
   syncSessionEventToApi,
   updateSessionReadCursor,
 } from "../session/sync.js";
@@ -185,6 +187,9 @@ function safePayload(payload = {}) {
 
 function summarizeSessionEvent(event = {}) {
   return cleanObject({
+    id: normalizeString(event.id) || undefined,
+    messageRevision: Number.isSafeInteger(event.messageRevision ?? event.message_revision)
+      ? (event.messageRevision ?? event.message_revision) : undefined,
     cursor: normalizeString(event.cursor) || null,
     sequenceId: normalizePositiveInteger(event.sequenceId ?? event.sequence_id, null),
     event: normalizeString(event.event || event.type),
@@ -467,6 +472,8 @@ function summarizeMessageActionActivity(action = {}) {
     actorId: normalizeString(action.actorId || action.actor_id),
     actorRole: normalizeString(action.actorRole || action.actor_role),
     note: truncateText(action.note || action.message || "").text,
+    messageRevision: Number.isSafeInteger(action.messageRevision ?? action.message_revision)
+      ? (action.messageRevision ?? action.message_revision) : undefined,
     createdAt: normalizeString(action.createdAt || action.created_at || action.ts || action.timestamp),
     activityType: normalizeString(action.activityType || action.activity_type) || "message_action",
     isHumanActivity: isHumanMessageAction(action),
@@ -485,7 +492,12 @@ function recentHumanActivityFromActions(remoteActions = null, { limit = DEFAULT_
           return normalizeString(right.id).localeCompare(normalizeString(left.id));
         })
         .slice(0, normalizeLimit(limit))
-        .map((action) => summarizeMessageActionActivity(action))
+        .map((action) => {
+          const current = (remoteActions?.actions || []).find((row) => row.id === action.id &&
+            normalizeString(row.note || row.message) === normalizeString(action.note || action.message));
+          return summarizeMessageActionActivity({ ...action,
+            messageRevision: current?.messageRevision ?? current?.message_revision ?? action.messageRevision ?? action.message_revision });
+        })
     : [];
 }
 
@@ -965,6 +977,8 @@ export function createSessionMcpToolHandlers({
   listSessionMessageActionsFn = listSessionMessageActions,
   createSessionMessageActionFn = createSessionMessageAction,
   updateSessionReadCursorFn = updateSessionReadCursor,
+  recordSessionMessageViewsFn = recordSessionMessageViews,
+  viewReceiptTimeoutMs = 1_000,
   lockFileFn = lockFile,
   unlockFileFn = unlockFile,
   listFileLocksFn = listFileLocks,
@@ -974,6 +988,49 @@ export function createSessionMcpToolHandlers({
   uuidFn = randomUUID,
   now = () => new Date().toISOString(),
 } = {}) {
+  async function recordReturnedViews(sessionId, events, activities, agentId) {
+    const replyRows = activities.filter((row) => row.actionType === "reply");
+    const knownReplies = replyRows.filter((row) => Number.isSafeInteger(row.messageRevision) && row.messageRevision > 0);
+    const candidates = [...events, ...knownReplies.map((row) => ({ event: "session_reply",
+      messageRevision: row.messageRevision, payload: { actionId: row.id } }))];
+    const targets = displayedMessageViewTargets(candidates);
+    const unresolved = replyRows.length - knownReplies.length + candidates.filter((row) =>
+      ["session_message", "session_reply"].includes(row.event) && !displayedMessageViewTargets([row]).length).length;
+    const summary = { enabled: Boolean(agentId), agentId: agentId || null, targetCount: targets.length,
+      attempted: 0, recorded: 0, failed: 0, skipped: 0, unresolved, complete: false, background: false,
+      reason: agentId ? "no_targets" : "agent_identity_required" };
+    if (!agentId || !targets.length) {
+      summary.complete = Boolean(agentId) && !unresolved;
+      if (agentId && unresolved) summary.reason = "view_receipts_unresolved";
+      return summary;
+    }
+    const controller = new AbortController();
+    const budget = Math.max(50, Math.min(5_000, Number(viewReceiptTimeoutMs) || 1_000));
+    let timer;
+    const expired = new Promise((resolve) => { timer = setTimeout(() => {
+      controller.abort(); resolve({ ok: false, reason: "view_receipts_timeout" });
+    }, budget); });
+    const started = Date.now();
+    try {
+      for (let offset = 0; offset < targets.length; offset += 100) {
+        const batch = targets.slice(offset, offset + 100);
+        summary.attempted += batch.length;
+        const result = await Promise.race([expired, Promise.resolve().then(() => recordSessionMessageViewsFn(sessionId,
+          { targets: batch, agentId, targetPath, signal: controller.signal, timeoutMs: Math.max(1, budget - (Date.now() - started)) }))
+          .catch(() => ({ ok: false, reason: "view_receipts_unavailable" }))]);
+        if (!result?.ok || !Number.isSafeInteger(result.recorded) || result.recorded < 0 || result.recorded > batch.length) {
+          summary.failed += batch.length;
+          summary.reason = result?.reason || "view_receipts_invalid_response";
+          break;
+        }
+        summary.recorded += result.recorded;
+      }
+      summary.skipped = targets.length - summary.attempted;
+      summary.complete = summary.recorded === targets.length && !unresolved;
+      if (!summary.failed) summary.reason = summary.complete ? "view_receipts_recorded" : "view_receipts_partial";
+      return summary;
+    } finally { clearTimeout(timer); }
+  }
   // ENGRAM §2 (Memory-as-a-Service): session is namespace #1. The SL-specific
   // session adapter maps a session's events to the generic observation model,
   // which keeps the detachable engram core (src/engram/*) free of any
@@ -1052,6 +1109,8 @@ export function createSessionMcpToolHandlers({
           })
         : null;
 
+      const viewReceipts = await recordReturnedViews(sessionId, events, recentHumanActivity, agentId);
+
       return {
         ok: true,
         reason: "",
@@ -1063,6 +1122,7 @@ export function createSessionMcpToolHandlers({
         recentHumanActivityCount: recentHumanActivity.length,
         recentHumanActivity,
         readCursor,
+        viewReceipts,
         actionProjection: actionResult
           ? {
               ok: Boolean(actionResult.ok),
@@ -1143,6 +1203,8 @@ export function createSessionMcpToolHandlers({
           })
         : null;
 
+      const viewReceipts = await recordReturnedViews(sessionId, events, recentHumanActivity, readAgentId);
+
       return {
         ok: true,
         reason: "",
@@ -1156,6 +1218,7 @@ export function createSessionMcpToolHandlers({
         recentHumanActivityCount: recentHumanActivity.length,
         recentHumanActivity,
         readCursor,
+        viewReceipts,
         actionProjection: actionResult
           ? {
               ok: Boolean(actionResult.ok),
