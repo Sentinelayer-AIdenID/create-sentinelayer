@@ -47,6 +47,8 @@ async function startActionMockApi({
       sessionId: "sess-actions",
       cursor: "cursor-41",
       sequenceId: 41,
+      id: "10000000-0000-4000-8000-000000000001",
+      messageRevision: 1,
       ts: "2026-05-22T01:59:00.000Z",
       timestamp: "2026-05-22T01:59:00.000Z",
     },
@@ -58,12 +60,16 @@ async function startActionMockApi({
       sessionId: "sess-actions",
       cursor: "cursor-42",
       sequenceId: 42,
+      id: "10000000-0000-4000-8000-000000000002",
+      messageRevision: 2,
       ts: "2026-05-22T02:00:00.000Z",
       timestamp: "2026-05-22T02:00:00.000Z",
     },
   ];
   const state = {
     eventsProbeCount: 0,
+    viewPayloads: [],
+    viewCommitted: false,
     actionPayload: null,
     actionPayloads: [],
     actionAuthHeader: "",
@@ -155,6 +161,19 @@ async function startActionMockApi({
             idempotencyKey: state.actionPayload.idempotencyKey || "",
           },
         });
+      }
+      if (req.method === "POST" && req.url === "/api/v1/sessions/sess-actions/view-receipts") {
+        const body = await readJsonBody(req);
+        state.viewPayloads.push(body);
+        if (hangActionResponseBody) {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.write('{"ok":true,');
+          return;
+        }
+        // The real child must await the delayed write before exiting.
+        await new Promise(resolve => setTimeout(resolve, 15));
+        state.viewCommitted = true;
+        return jsonResponse(res, 200, { ok: true, recorded: body.targets.length });
       }
       if (req.method === "PUT" && req.url === "/api/v1/sessions/sess-actions/read-cursor") {
         state.readCursorAuthHeader = String(req.headers.authorization || "");
@@ -392,7 +411,7 @@ test("Unit legacy session action view: advances delivery cursor without claiming
   }
 });
 
-test("Unit session read --remote: performs one read-cursor upsert for the displayed window", async () => {
+test("Unit session read --remote: persists exact displayed views before child exit and separately advances progress", async () => {
   const tmp = await mkdtemp(path.join(os.tmpdir(), "sl-read-auto-view-"));
   const mock = await startActionMockApi();
   try {
@@ -429,17 +448,23 @@ test("Unit session read --remote: performs one read-cursor upsert for the displa
       enabled: true,
       agentId: "codex",
       targetCount: 2,
-      attempted: 0,
-      recorded: 0,
+      attempted: 2,
+      recorded: 2,
       duplicates: 0,
       failed: 0,
-      skipped: 1,
-      queued: 1,
-      background: true,
-      reason: "queued_monotonic_upsert",
+      skipped: 0,
+      queued: 0,
+      background: false,
+      reason: "view_receipts_recorded",
+      readProgress: { ok: true, reason: "", updated: true, lastReadSequenceId: 42 },
     });
 
     assert.equal(mock.state.actionPayloads.length, 0);
+    assert.equal(mock.state.viewCommitted, true);
+    assert.deepEqual(mock.state.viewPayloads, [{ agentId: "codex", targets: [
+      { kind: "message", id: "10000000-0000-4000-8000-000000000001", targetRevision: 1 },
+      { kind: "message", id: "10000000-0000-4000-8000-000000000002", targetRevision: 2 },
+    ] }]);
     assert.equal(mock.state.readCursorPayloads.length, 1);
     assert.deepEqual(mock.state.readCursorPayloads[0], {
       targetSequenceId: 42,
@@ -491,7 +516,7 @@ test("Unit session read --remote: --no-view suppresses automatic view receipts",
   }
 });
 
-test("Unit session read --remote: collapses all displayed messages into one cursor write", async () => {
+test("Unit session read --remote: sends exact ids and revisions in one bounded view batch", async () => {
   const tmp = await mkdtemp(path.join(os.tmpdir(), "sl-read-auto-view-cap-"));
   const mock = await startActionMockApi();
   try {
@@ -525,16 +550,22 @@ test("Unit session read --remote: collapses all displayed messages into one curs
       enabled: true,
       agentId: "codex",
       targetCount: 2,
-      attempted: 0,
-      recorded: 0,
+      attempted: 2,
+      recorded: 2,
       duplicates: 0,
       failed: 0,
-      skipped: 1,
-      queued: 1,
-      background: true,
-      reason: "queued_monotonic_upsert",
+      skipped: 0,
+      queued: 0,
+      background: false,
+      reason: "view_receipts_recorded",
+      readProgress: { ok: true, reason: "", updated: true, lastReadSequenceId: 42 },
     });
     assert.equal(mock.state.actionPayloads.length, 0);
+    assert.equal(mock.state.viewCommitted, true);
+    assert.deepEqual(mock.state.viewPayloads, [{ agentId: "codex", targets: [
+      { kind: "message", id: "10000000-0000-4000-8000-000000000001", targetRevision: 1 },
+      { kind: "message", id: "10000000-0000-4000-8000-000000000002", targetRevision: 2 },
+    ] }]);
     assert.equal(mock.state.readCursorPayloads.length, 1);
     assert.equal(mock.state.readCursorPayloads[0].targetSequenceId, 42);
   } finally {
@@ -589,17 +620,19 @@ test("Unit session read --remote: hanging auto-view action body does not block o
       enabled: true,
       agentId: "codex",
       targetCount: 2,
-      attempted: 0,
+      attempted: 2,
       recorded: 0,
       duplicates: 0,
-      failed: 0,
-      skipped: 1,
-      queued: 1,
-      background: true,
-      reason: "queued_monotonic_upsert",
+      failed: 2,
+      skipped: 0,
+      queued: 0,
+      background: false,
+      reason: "view_receipts_timeout",
     });
     assert.equal(mock.state.actionPayloads.length, 0);
-    assert.equal(mock.state.readCursorPayloads.length, 1);
+    assert.equal(mock.state.readCursorPayloads.length, 0);
+    assert.equal(mock.state.viewPayloads.length, 1);
+    assert.equal(mock.state.viewCommitted, false);
   } finally {
     await mock.close();
     await rm(tmp, { recursive: true, force: true });

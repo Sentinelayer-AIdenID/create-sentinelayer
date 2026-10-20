@@ -2853,6 +2853,39 @@ export async function fetchSessionPinnedMessages(
   };
 }
 
+/** Persist exact client-reported views before a short-lived CLI process exits. */
+export async function recordSessionMessageViews(sessionId, {
+  targets = [], agentId = "", targetPath = process.cwd(), timeoutMs = DEFAULT_SYNC_TIMEOUT_MS,
+  signal, resolveAuthSession = resolveActiveAuthSession, fetchImpl = fetchWithTimeout,
+} = {}) {
+  const sid = normalizeString(sessionId);
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!isUrlPathSegment(sid) || !Array.isArray(targets) || !targets.length || targets.length > 100 || targets.some(t =>
+    !["message", "reply"].includes(t?.kind) || !uuid.test(String(t?.id || "")) || !Number.isSafeInteger(t.targetRevision) || t.targetRevision < 1)) return { ok: false, reason: "invalid_input", recorded: 0 };
+  if (String(process.env.SENTINELAYER_SKIP_REMOTE_SYNC || "").trim() === "1") return { ok: false, reason: "remote_sync_disabled_env", recorded: 0 };
+  let auth;
+  try { auth = await resolveAuthSession({ cwd: targetPath, env: process.env, autoRotate: false }); }
+  catch { return { ok: false, reason: "no_session", recorded: 0 }; }
+  if (!isAuthenticated(auth)) return { ok: false, reason: "not_authenticated", recorded: 0 };
+  const key = `sl-message-views-${randomUUID()}`;
+  try {
+    const credential = await credentialFor(auth);
+    const { response, payload } = await fetchJsonWithFullTimeout(
+      `${resolveApiBaseUrl(auth)}/api/v1/sessions/${urlPathSegment(sid)}/view-receipts`, {
+        method: "POST", credential, signal,
+        headers: { ...createSessionMutationHeaders({ credential, sessionId: sid,
+          routeId: "POST /api/v1/sessions/{session_id}/view-receipts", idempotencyKey: key }),
+          "Content-Type": "application/json", "Idempotency-Key": key },
+        body: JSON.stringify({ targets, ...(normalizeString(agentId) ? { agentId: normalizeString(agentId) } : {}) }),
+      }, timeoutMs, fetchImpl, { readErrorBody: true });
+    if (!response?.ok || payload?.ok !== true || !Number.isSafeInteger(payload.recorded) || payload.recorded < 0 || payload.recorded > targets.length) {
+      const reason = signal?.aborted ? "view_receipts_timeout" : response?.ok ? "view_receipts_invalid_response" : `view_receipts_api_${response?.status || "unavailable"}`;
+      return { ok: false, reason, recorded: 0, status: response?.status || null };
+    }
+    return { ok: true, reason: "", recorded: payload.recorded };
+  } catch { return { ok: false, reason: "view_receipts_unavailable", recorded: 0 }; }
+}
+
 // Native edits never fall back to POST /events or mutate an optimistic local row.
 export async function editSessionMessage(sessionId, {
   targetSequenceId = null,
