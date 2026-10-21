@@ -4145,3 +4145,25 @@ Review evidence:
 - [x] Focused proof: 81/81 deterministic tests; exact old runtime fails all 16 selected refusal controls; syntax 405/405; Git diff check clean. No network/provider/real-key reads.
 - [ ] Independent/root review of the frozen correction overlay before commit/push.
 - [ ] Final ship requirements: npm run verify; required Omar/audit and hosted gates under root custody. No live TypeSafe activation or spending in correction preparation.
+
+## Codex-warden: complete deep-review coverage, 2026-10-21
+
+- [x] Freeze actual origin/main 628f96c and isolate roadmap/pr-856-deep-coverage.
+- [x] Split coverage correctness from unproven monetary admission guarantees.
+- [x] Require every requested persona/partition to finish with call evidence; fail partial/error/budget-stopped coverage closed while preserving findings.
+- [x] Add synthetic zero-provider-call eval fixtures, old-source negative controls and complete-run compatibility controls.
+- [x] Run focused checks and required local commands to the extent safe; retain incomplete live-deep and unrelated baseline gate results explicitly.
+- [x] Prepare a draft PR and exact evidence for independent review; publication and hosted checks are tracked in the delivery receipt. Do not merge.
+
+Scope: result/coverage gating only. No token/price guarantee, model routing, provider retries, paid calls, PR854 changes, or partial-coverage waiver.
+
+### Review
+
+- Focused 178/178; all eight defect regressions fail against untouched main source.
+- Full unit coverage: 2539 passed, 3 skipped, 0 failed; thresholds pass.
+- Literal /audit: PASS (848 files, 0 P1 / 3 P2).
+- npm verify remains failed at the two unchanged E2E fixtures (134/136); required paid deep is not run. Deterministic-only full deep is partial evidence and remains blocking (4 P1 / 13 P2).
+- No model calls, permissions, provider routing/retries or PR854 edits. Hard-dollar admission remains separate work.
+
+- Independent review corrections: invalid/empty requested rosters refuse before dispatch; primary structured-review validity prevents token-bearing error/malformed output from proving coverage.
+- Eighteen new controls fail against held81784e5 and pass on the successor; valid empty findings/legacy arrays/fenced JSON and explicit no-ai remain compatible.

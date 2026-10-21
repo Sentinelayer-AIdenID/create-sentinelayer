@@ -389,6 +389,13 @@ function resolveAiResultCostUsd(result = {}) {
   );
 }
 
+function incompleteReviewReason(result = {}) {
+  if (result.reviewValidity?.valid === false || result.parser === "fallback_text" || !Array.isArray(result.findings)) {
+    return "invalid_review_response";
+  }
+  return result.budget?.blocking === true ? "budget_blocked" : null;
+}
+
 function buildAiCallEvidence(result = {}, { dryRun = false } = {}) {
   if (dryRun) {
     return {
@@ -463,11 +470,15 @@ function buildPersonaHealthFindings(personaHealth = {}) {
   const aiCallEvidence = personaHealth.aiCallEvidence || {};
   const okCount = Number(personaHealth.ok || 0);
   const unverifiedOkCount = Number(personaHealth.unverifiedOk || 0);
+  const skippedCount = Number(personaHealth.skipped || 0);
+  const incompleteCount = Number(personaHealth.incomplete || 0);
   const allPersonasFailed = total > 0 && errorCount === total;
   const severity = allPersonasFailed ? "P0" : "P1";
   let message = `Omar AI coverage degraded: ${errorCount}/${total} dispatched personas errored (${Math.round(errorRatio * 100)}%).`;
   if (allPersonasFailed) {
     message = `Omar AI coverage failed closed: all ${total} dispatched personas errored before producing findings.`;
+  } else if (skippedCount > 0 || incompleteCount > 0) {
+    message = `Omar AI coverage incomplete: ${skippedCount}/${total} requested personas were skipped and ${incompleteCount}/${total} returned incomplete partition, budget, or structured-response coverage.`;
   } else if (errorCount === 0 && unverifiedOkCount > 0) {
     message = `Omar AI coverage failed closed: ${unverifiedOkCount}/${okCount} successful personas lacked token-bearing usage, billing-ledger, or priced-call evidence.`;
   }
@@ -485,12 +496,13 @@ function buildPersonaHealthFindings(personaHealth = {}) {
       confidenceFloor: 0,
       sources: ["orchestrator"],
       remediation:
-        "Fix SentinelLayer managed LLM proxy/provider credentials or run with --no-ai when deterministic-only coverage is intentional.",
+        "Resolve the reported provider, budget, or usage-evidence failure and rerun every requested persona and partition. Partial coverage cannot satisfy a full AI review gate.",
       evidence: warnings,
       personaHealth: {
         ok: Number(personaHealth.ok || 0),
         error: errorCount,
-        skipped: Number(personaHealth.skipped || 0),
+        skipped: skippedCount,
+        incomplete: incompleteCount,
         total,
         errorRatio,
         totalCostUsd,
@@ -720,6 +732,7 @@ async function runOmarPersonaSwarm({
         });
         const costUsd = resolveAiResultCostUsd(result);
         const aiCallEvidence = buildAiCallEvidence(result, { dryRun });
+        const incompleteReason = incompleteReviewReason(result);
 
         if (onEvent) {
           for (const finding of findings) {
@@ -742,6 +755,7 @@ async function runOmarPersonaSwarm({
               partitionCount: partitions.length,
               fileCount: scopedFiles.length,
               findings: findings.length,
+              status: incompleteReason ? "incomplete" : "ok",
               summary: result?.summary || summarizeFindings(findings),
               costUsd,
               durationMs: Date.now() - subagentStart,
@@ -756,7 +770,7 @@ async function runOmarPersonaSwarm({
         }
 
         return {
-          status: "ok",
+          status: incompleteReason ? "incomplete" : "ok",
           subagentIndex,
           agentId: subagentIdentity.id,
           files: scopedFiles,
@@ -764,6 +778,8 @@ async function runOmarPersonaSwarm({
           summary: result?.summary || summarizeFindings(findings),
           costUsd,
           aiCallEvidence,
+          reason: incompleteReason,
+          reviewValidity: result.reviewValidity || null,
           model: result?.model || model || null,
           billing: result?.billing || null,
           ...(severityClassifier === "typesafe" ? { severityClassification: result?.severityClassification || null } : {}),
@@ -831,6 +847,14 @@ async function runOmarPersonaSwarm({
   const summary = summarizeFindings(findings);
   const okCount = settledSubagents.filter((result) => result.status === "ok").length;
   const errorCount = settledSubagents.filter((result) => result.status === "error").length;
+  const completedCount = settledSubagents.filter((result) =>
+    result.status === "ok" && (dryRun || Number(result.aiCallEvidence?.confirmedCalls || 0) > 0)
+  ).length;
+  const coverage = {
+    requested: partitions.length,
+    completed: completedCount,
+    incomplete: partitions.length - completedCount,
+  };
   const usageLedgerErrors = settledSubagents.filter((result) =>
     result.status === "error" && isUsageLedgerFailure(result.error)
   );
@@ -879,6 +903,7 @@ async function runOmarPersonaSwarm({
         subagentCount: settledSubagents.length,
         ok: okCount,
         error: errorCount,
+        coverage,
         findings: findings.length,
         summary,
         totalCostUsd,
@@ -897,20 +922,21 @@ async function runOmarPersonaSwarm({
   return {
     personaId,
     ...(severityClassifier === "typesafe" ? { severityClassification: summarizeSeverityEvaluations(settledSubagents) } : {}),
-    status: okCount > 0 ? "ok" : "error",
+    status: coverage.incomplete === 0 ? "ok" : errorCount === partitions.length ? "error" : "incomplete",
     findings,
     summary,
     costUsd: totalCostUsd,
     aiCallEvidence,
     model: model || null,
     durationMs: Date.now() - startedAt,
-    error: okCount > 0 ? null : settledSubagents.find((result) => result.error)?.error || null,
+    error: coverage.incomplete === 0 ? null : settledSubagents.find((result) => result.error)?.error || "Requested partition coverage is incomplete.",
     swarm: {
       runId: swarmRunId,
       decision,
       subagentCount: settledSubagents.length,
       ok: okCount,
       error: errorCount,
+      coverage,
       partitionSizes: partitions.map((files) => files.length),
       blackboardEntries: blackboard.length,
       subagents: settledSubagents.map((result) => ({
@@ -924,6 +950,9 @@ async function runOmarPersonaSwarm({
         billing: result.billing || null,
         durationMs: result.durationMs || 0,
         error: result.error || null,
+        reason: result.reason || null,
+        reviewValidity: result.reviewValidity || null,
+        verified: dryRun ? null : Number(result.aiCallEvidence?.confirmedCalls || 0) > 0,
         artifacts: result.artifacts || null,
       })),
     },
@@ -939,7 +968,7 @@ async function runOmarPersonaSwarm({
  * @param {number} [options.maxParallel] - Max concurrent persona calls (default 4)
  * @param {string} [options.provider] - LLM provider override
  * @param {string} [options.model] - LLM model override
- * @param {number} [options.maxCostUsd] - Global cost ceiling (default 5.0)
+ * @param {number} [options.maxCostUsd] - Completed-persona cost stop threshold (default 5.0), not a pre-dispatch spending cap
  * @param {boolean} [options.dryRun] - Dry-run mode (no LLM calls)
  * @param {string} [options.outputDir] - Output directory override
  * @param {object} [options.deterministic] - Deterministic scan results
@@ -988,6 +1017,12 @@ export async function runOmarGateOrchestrator({
   const { mode, personas: basePersonas } = resolved;
   const droppedPersonas = resolved.dropped || [];
   const unknownPersonas = resolved.unknown || [];
+  if (unknownPersonas.length > 0) {
+    throw new Error("Unknown requested Omar persona IDs; the requested review cannot be completed.");
+  }
+  if (basePersonas.length === 0) {
+    throw new Error("Requested Omar persona roster is empty; AI coverage cannot be completed.");
+  }
 
   if (onEvent && (droppedPersonas.length > 0 || unknownPersonas.length > 0)) {
     onEvent(createAgentEvent({
@@ -1011,6 +1046,9 @@ export async function runOmarGateOrchestrator({
     manualInclude: Array.isArray(includeOnly) && includeOnly.length > 0,
   });
   const personas = personaRouting.effectivePersonas;
+  if (personas.length === 0) {
+    throw new Error("Effective Omar persona roster is empty; AI coverage cannot be completed.");
+  }
 
   if (onEvent && personaRouting.enabled) {
     onEvent(createAgentEvent({
@@ -1161,6 +1199,7 @@ export async function runOmarGateOrchestrator({
                 identity,
                 error: swarmResult.error || "all subagents failed",
                 swarm: swarmResult.swarm,
+                status: swarmResult.status,
               },
               runId,
             }));
@@ -1173,6 +1212,7 @@ export async function runOmarGateOrchestrator({
                 identity,
                 findings: swarmResult.findings.length,
                 summary: swarmResult.summary,
+                status: swarmResult.status,
                 costUsd: personaCost,
                 durationMs: Date.now() - personaStart,
                 swarm: swarmResult.swarm,
@@ -1242,6 +1282,7 @@ export async function runOmarGateOrchestrator({
       }));
       const personaCost = resolveAiResultCostUsd(result);
       const aiCallEvidence = buildAiCallEvidence(result, { dryRun });
+      const incompleteReason = incompleteReviewReason(result);
 
       if (onEvent) {
         for (const finding of findings) {
@@ -1273,6 +1314,7 @@ export async function runOmarGateOrchestrator({
             personaId,
             identity,
             findings: findings.length,
+            status: incompleteReason ? "incomplete" : "ok",
             summary: result?.summary || {},
             costUsd: personaCost,
             durationMs: Date.now() - personaStart,
@@ -1285,11 +1327,13 @@ export async function runOmarGateOrchestrator({
 
       return {
         personaId,
-        status: "ok",
+        status: incompleteReason ? "incomplete" : "ok",
         findings,
         summary: result?.summary || { P0: 0, P1: 0, P2: 0, P3: 0 },
         costUsd: personaCost,
         aiCallEvidence,
+        reason: incompleteReason,
+        reviewValidity: result.reviewValidity || null,
         model: result?.model || model || null,
         billing: result?.billing || null,
         ...(severityClassifier === "typesafe" ? { severityClassification: result?.severityClassification || null } : {}),
@@ -1378,6 +1422,7 @@ export async function runOmarGateOrchestrator({
   // billing can still carry token-bearing usage and provider-cost receipts.
   const personaErrorCount = settled.filter((r) => r.status === "error").length;
   const personaSkippedCount = settled.filter((r) => r.status === "skipped").length;
+  const personaIncompleteCount = settled.filter((r) => r.status === "incomplete").length;
   const personaOkCount = settled.filter((r) => r.status === "ok").length;
   const personaVerifiedOkCount = settled.filter(
     (r) => r.status === "ok" && Number(r.aiCallEvidence?.confirmedCalls || 0) > 0
@@ -1385,34 +1430,44 @@ export async function runOmarGateOrchestrator({
   const personaUnverifiedOkCount = personaOkCount - personaVerifiedOkCount;
   const totalPersonas = settled.length;
   const errorRatio = totalPersonas > 0 ? personaErrorCount / totalPersonas : 0;
-  const aiCoverageHealthy =
-    totalPersonas === 0 ||
-    (personaOkCount > 0 && personaUnverifiedOkCount === 0 && errorRatio < 0.5 && !dryRun);
+  const aiCoverageHealthy = personaOkCount === totalPersonas &&
+    (dryRun || personaUnverifiedOkCount === 0);
+  const coverage = {
+    status: aiCoverageHealthy ? (dryRun ? "simulated" : "complete") : "incomplete",
+    requestedPersonas: totalPersonas,
+    completedPersonas: dryRun ? personaOkCount : personaVerifiedOkCount,
+  };
 
   const personaHealth = {
     ok: personaOkCount,
     error: personaErrorCount,
     skipped: personaSkippedCount,
+    incomplete: personaIncompleteCount,
     total: totalPersonas,
     verifiedOk: personaVerifiedOkCount,
     unverifiedOk: personaUnverifiedOkCount,
     errorRatio,
     totalCostUsd: totalCost,
     aiCallEvidence,
-    healthy: aiCoverageHealthy || dryRun,
+    healthy: aiCoverageHealthy,
     warnings: [],
   };
-  if (!dryRun && totalPersonas > 0) {
-    if (personaOkCount === 0 && personaErrorCount > 0) {
+  if (totalPersonas > 0) {
+    if (personaErrorCount === totalPersonas) {
       personaHealth.warnings.push(
         `ALL ${totalPersonas} personas errored. AI coverage is ZERO. Re-check auth (sl auth login) or LLM proxy config.`
       );
-    } else if (errorRatio >= 0.5) {
+    } else if (personaErrorCount > 0) {
       personaHealth.warnings.push(
         `${personaErrorCount}/${totalPersonas} personas errored (${Math.round(errorRatio * 100)}%). AI coverage is degraded.`
       );
     }
-    if (personaUnverifiedOkCount > 0) {
+    if (personaSkippedCount > 0 || personaIncompleteCount > 0) {
+      personaHealth.warnings.push(
+        `${personaSkippedCount} requested personas skipped; ${personaIncompleteCount} returned incomplete partition, budget, or structured-response coverage. Full AI coverage is incomplete.`
+      );
+    }
+    if (!dryRun && personaUnverifiedOkCount > 0) {
       personaHealth.warnings.push(
         `${personaUnverifiedOkCount}/${personaOkCount} successful personas lacked token-bearing usage, billing-ledger, or priced-call evidence.`
       );
@@ -1445,10 +1500,13 @@ export async function runOmarGateOrchestrator({
       billing: r.billing || null,
       ...(severityClassifier === "typesafe" ? { severityClassification: r.severityClassification || null } : {}),
       error: r.error || null,
+      reason: r.reason || null,
+      reviewValidity: r.reviewValidity || null,
       swarm: r.swarm || null,
       artifacts: r.artifacts || null,
     })),
     personaHealth,
+    coverage,
     findings: reconciledFindings,
     findingsBySource: {
       deterministic: detFindings.length,
