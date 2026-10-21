@@ -603,18 +603,25 @@ function ensureCleanWorktree() {
 function localTagType(tag) {
   const exists = tryRun("git", ["rev-parse", "-q", "--verify", `refs/tags/${tag}`]);
   if (!exists) return "";
-  return run("git", ["cat-file", "-t", tag], { capture: true }).trim();
+  return run("git", ["cat-file", "-t", `refs/tags/${tag}`], { capture: true }).trim();
 }
 
-function ensureLocalSignedTag(tag) {
+function ensureLocalSignedTag(tag, expectedTargetSha) {
+  if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(expectedTargetSha || "")) {
+    throw new Error("Expected release commit must be a full Git object SHA before creating or pushing a tag.");
+  }
   const type = localTagType(tag);
   if (type && type !== "tag") {
     throw new Error(`Local tag '${tag}' is '${type}', not an annotated tag.`);
   }
   if (!type) {
-    run("git", ["tag", "-s", tag, "-m", `sentinelayer-cli ${tag}`]);
+    run("git", ["tag", "-s", tag, expectedTargetSha, "-m", `sentinelayer-cli ${tag}`]);
   }
   run("git", ["tag", "-v", tag]);
+  const targetSha = run("git", ["rev-parse", "--verify", "--end-of-options", `refs/tags/${tag}^{commit}`], { capture: true }).trim();
+  if (targetSha !== expectedTargetSha) {
+    throw new Error(`Local tag '${tag}' points at '${targetSha}', not expected release commit '${expectedTargetSha}'.`);
+  }
 }
 
 function printUsage() {
@@ -671,8 +678,8 @@ export function main(argv = process.argv.slice(2)) {
     );
   } else {
     assertGitHubCanVerifyConfiguredSigningKey(viewer);
-    ensureLocalSignedTag(tag);
-    run("git", ["push", "origin", tag]);
+    ensureLocalSignedTag(tag, expectedTargetSha);
+    run("git", ["push", "origin", `refs/tags/${tag}:refs/tags/${tag}`]);
 
     const pushedRef = waitForRemoteTagRef(repository, tag);
     if (!pushedRef) {

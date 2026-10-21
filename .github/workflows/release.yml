@@ -51,7 +51,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          EVENT_CREATED: ${{ github.event.created || 'true' }}
+          EVENT_CREATED: ${{ toJSON(github.event.created) }}
           EVENT_DELETED: ${{ github.event.deleted || 'false' }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
@@ -151,7 +151,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           STALE_RUN_MAX_MINUTES: ${{ vars.RELEASE_STALE_RUN_MAX_MINUTES || '90' }}
-          EVENT_CREATED: ${{ github.event.created || 'true' }}
+          EVENT_CREATED: ${{ toJSON(github.event.created) }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail

@@ -1152,6 +1152,8 @@ Release flow:
 
 Do not run `gh release create v0.1.1` before pushing the signed tag. GitHub release creation creates a lightweight tag when the tag does not already exist, and the Release workflow intentionally fails closed for lightweight tags. If a remote tag already exists as a lightweight tag, `npm run release:publish` refuses to create the GitHub release.
 
+New signed tags are created at the captured release commit. An existing local tag must verify and peel to that same commit before it can be pushed. The Release workflow requires a true tag-creation event; false or missing event values do not default to approval.
+
 Release publish now enforces tarball checksum-manifest validation and attestation verification bound to `.github/workflows/release.yml` before `npm publish`.
 
 Release guardrails now require successful upstream checks on the target commit:
