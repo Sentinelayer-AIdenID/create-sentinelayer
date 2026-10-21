@@ -10,10 +10,10 @@
     "sourceSha256": {
       "src/review/typesafe-severity.js": "82a628b1c7b06756ba71c98df8e7b9b0e96f62c774ca713a1658fca754aebc5a",
       "src/review/ai-review.js": "d6dfc3bda0988e8bd7d62c871859cbbeac54bf39ad36830bcbebd7ea22faed01",
-      "src/review/omargate-orchestrator.js": "90d6d8f61e6e3056e937f79f584725f6cbd9e47128d22e61d1bd600227f75725",
-      "src/commands/omargate.js": "c59eee4a1bd833065e4cd6e136917adc42052c1e35e0089ef010115b6f1d83e4",
+      "src/review/omargate-orchestrator.js": "9416d38783a1b498f1f5f218fefe37b1d5f0557d78635fa6989aac771d808c5c",
+      "src/commands/omargate.js": "5ccbf2f1bb3f2f1e9ed5e35a8a8197bfc2b1cb699365987a2a979caf834c3567",
       "src/commands/legacy-args.js": "83772b6ccd5765d1a0bd1f3ee3eefcf5c1fdaf4e9fb1a301c0312b286dbc0d29",
-      "src/legacy-cli.js": "2068189e38e67d71b195b2716ae873aa303b296b76cf4f046b99169a4f0b6490",
+      "src/legacy-cli.js": "bba2ea2547e1862b17811596af44dc17c2d08164bd23083ba458d6d235b8f350",
       "src/session/redact.js": "a92cd2e70b165e4e015edcbeff1d3119c3b1f091ef72654e776c0139ace663a2"
     },
     "testPath": "tests/unit.typesafe-severity.test.mjs",
@@ -47,6 +47,18 @@
       "currentLegacySha256": "2068189e38e67d71b195b2716ae873aa303b296b76cf4f046b99169a4f0b6490",
       "scope": "Only the GitHub API path-hardening import, fixed /user/repos endpoint binding, and repository endpoint builder call changed in src/legacy-cli.js. All seven synthetic cases, shared input, mock responses, expected outcomes, invariants, other six implementation hashes and the unchanged test hash are retained.",
       "provenance": "Original implementation, privacy-correction, help-maintenance revisions, and prior mock observations remain historical anchors. This refresh binds the current path-hardening overlay after CRLF-to-LF normalization only; it is not model accuracy, live-provider, billing, default-gate, or new security-acceptance evidence."
+    },
+    "coverageGateMaintenance": {
+      "kind": "complete_requested_coverage_source_binding_refresh",
+      "baseRevision": "628f96c191640b03b4f6a167f0a5dc5299a8f338",
+      "priorSha256": {
+        "src/review/omargate-orchestrator.js": "90d6d8f61e6e3056e937f79f584725f6cbd9e47128d22e61d1bd600227f75725",
+        "src/legacy-cli.js": "2068189e38e67d71b195b2716ae873aa303b296b76cf4f046b99169a4f0b6490",
+        "src/commands/omargate.js": "c59eee4a1bd833065e4cd6e136917adc42052c1e35e0089ef010115b6f1d83e4"
+      },
+      "scope": "Only ordinary Omar coverage aggregation, CLI incomplete-result reporting, and cost-threshold help changed. The TypeSafe transport/classifier, all seven synthetic scenarios, input, responses, expectations, invariants and test bytes remain unchanged. The full TypeSafe contract suite is rerun against these current bindings.",
+      "evaluation": "tests/evals/omargate-coverage-cases.json",
+      "limitation": "Synthetic contract evidence only; no model accuracy, live provider, hard dollar ceiling or completed release-gate claim."
     }
   },
   "baselineMeaning": "Published base generation-only contract, with candidate off mode exercised on identical synthetic inputs; no independent baseline model/provider run.",

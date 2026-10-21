@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "kind": "synthetic-no-provider-calls",
+  "baseline": "628f96c191640b03b4f6a167f0a5dc5299a8f338",
+  "contract": "Every requested persona and partition must complete; omitted, failed, unverified or budget-stopped coverage blocks the full AI gate.",
+  "cases": [
+    { "id": "budget-skips-personas", "files": 1, "personas": ["security", "backend", "testing"], "maxCostUsd": 0.01, "behavior": "spend-budget", "baselineBlocking": false, "candidateBlocking": true },
+    { "id": "minority-persona-failure", "files": 1, "personas": ["security", "backend", "testing"], "behavior": "fail-security", "baselineBlocking": false, "candidateBlocking": true },
+    { "id": "partial-partition-failure", "files": 16, "personas": ["security"], "behavior": "fail-second-partition", "baselineBlocking": false, "candidateBlocking": true },
+    { "id": "partition-without-evidence", "files": 16, "personas": ["security"], "behavior": "unverified-second-partition", "baselineBlocking": false, "candidateBlocking": true },
+    { "id": "single-call-budget-stop", "files": 1, "personas": ["security"], "behavior": "budget-stop", "baselineBlocking": false, "candidateBlocking": true },
+    { "id": "partition-budget-stop", "files": 16, "personas": ["security"], "behavior": "budget-stop", "baselineBlocking": false, "candidateBlocking": true },
+    { "id": "complete-zero-priced-token-evidence", "files": 16, "personas": ["security", "testing"], "behavior": "complete", "baselineBlocking": false, "candidateBlocking": false },
+    { "id": "explicit-dry-run", "files": 16, "personas": ["security"], "behavior": "complete", "dryRun": true, "baselineBlocking": false, "candidateBlocking": false }
+  ],
+  "regressionNotes": [
+    "Amounts and provider responses are synthetic; this is coverage evaluation, not model-quality or spend evidence.",
+    "Complete runs and explicitly labeled dry runs keep their existing result behavior.",
+    "The change does not enforce a pre-dispatch dollar ceiling or change provider, model, retry or price behavior."
+  ]
+}

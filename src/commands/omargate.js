@@ -19,7 +19,7 @@ export function registerOmarGateCommand(program, invokeLegacy) {
     .option("--max-parallel <n>", "Max concurrent persona calls (default: 4)")
     .option("--model <id>", "LLM model override (default: gpt-5.3-codex)")
     .option("--provider <name>", "LLM provider: sentinelayer, openai, anthropic")
-    .option("--max-cost <usd>", "Maximum AI layer cost in USD (default: 5.0); with TypeSafe evaluation only, explicit 0 means NO monetary cap")
+    .option("--max-cost <usd>", "Reported AI cost stop threshold in USD (default: 5.0), not a pre-dispatch spending cap; with TypeSafe evaluation only, explicit 0 means NO monetary cap")
     .option("--severity-classifier <mode>", "Opt-in classification evaluation: off|typesafe; sends generated finding evidence to TypeSafe, never changes gate severities (positive cost caps skip)", "off")
     .option("--notify-session <session-id>", "Write Omar Deep billing-grade usage entries into this Senti session (default: auto-detect active Senti session)")
     .option("--require-usage-ledger", "Fail if Omar Deep AI calls cannot write billing-grade session_usage")
