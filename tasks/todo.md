@@ -4145,3 +4145,18 @@ Review evidence:
 - [x] Focused proof: 81/81 deterministic tests; exact old runtime fails all 16 selected refusal controls; syntax 405/405; Git diff check clean. No network/provider/real-key reads.
 - [ ] Independent/root review of the frozen correction overlay before commit/push.
 - [ ] Final ship requirements: npm run verify; required Omar/audit and hosted gates under root custody. No live TypeSafe activation or spending in correction preparation.
+
+## Windows auth-store contention — isolated repair
+
+- [x] Fetch origin/main and isolate roadmap/pr-auth-store-contention at 628f96c; keep CLI854 acef418 immutable.
+- [x] Read auth/session-store persistence, encryption, migration and concurrency contracts.
+- [x] Reproduce natural EPERM on unchanged main with batches of 16 real writers; retain separate baseline and candidate receipts.
+- [x] Serialize complete in-process store operations, including migrating reads; preserve encryption, bounded filesystem retries and error semantics.
+- [x] Verify 15 focused tests, real encrypted round-trips, persisted key consistency, failure recovery and existing independent-process key creation.
+- [ ] Obtain independent exact-head review, finish broad verification and prepare a separate draft PR with incomplete gates visible.
+
+### Review
+- Unchanged main reproduced EPERM replacement failure in batch 30; the fix completed 64 batches / 1,024 writes with decryptable results.
+- Five deterministic regressions pass on the fix; unchanged main fails four ordering controls and passes the failure-recovery control.
+- The queue is scoped to one module instance. Other processes and duplicate module instances retain existing key publication and bounded filesystem retry behavior.
+- Full verification, hosted checks and required full deep scan are not yet claimed green. The deep scan's missing pre-dispatch spending bound is a separately tracked blocker.
