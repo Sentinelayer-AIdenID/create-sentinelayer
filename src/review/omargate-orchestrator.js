@@ -1595,8 +1595,10 @@ export async function runOmarGateOrchestrator({
     }));
   }
 
-  // Fire-and-forget telemetry sync to dashboard
-  syncRunToDashboard({
+  // Bounded BYOK evidence stays local: this dashboard schema has no exposure
+  // provenance contract, just as the billing recorder has no non-billable one.
+  // Preserve the existing fire-and-forget sync for ordinary review runs.
+  if (!boundedReview) syncRunToDashboard({
     command: `omargate deep --scan-mode ${mode}`,
     persona: "omar-orchestrator",
     usage: {

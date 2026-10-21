@@ -4187,3 +4187,12 @@ Review: operational limit remains $5. Synthetic controls are scheduling/contract
 - Literal /audit: PASS (856 files, 0 P1 / 3 P2); package dry run passes. `npm run verify` still fails at the two existing E2E fixtures (134/136). An earlier broad run also exposed the existing auth-store EPERM contention; auth source remains untouched.
 - Corrected OpenAI policy uses its entire documented 400,000-token context as conservative input allowance; one reservation is $0.757344. Actual Commander forwarding and raw equals/duplicate/unsupported-mode controls are required evidence.
 - Known provider violations invalidate assurance with sanitized usage evidence. Bounded BYOK accounting is local only, preserves cache counters and provenance, and never invokes the remote billing recorder.
+
+### Independent review correction: remote dashboard reporting
+
+- [x] Preserve ce5f7c7 and the independent actual-entry telemetry negative receipt.
+- [x] Skip the dashboard sync in bounded mode; enumerate remaining output sinks and preserve uncapped behavior.
+- [x] Prove actual bin/sl.js authenticated synthetic runs send only mocked provider requests, including incomplete runs; rerun old-source negatives and applicable gates.
+- [x] Freeze a separately reviewable successor; publication, independent controls and final E2E result remain tracked in the external delivery receipt. No merge or provider calls.
+
+Correction review: 131 focused tests and 2,589 full unit tests pass (3 skipped); configured coverage thresholds pass. Actual-bin controls remove the remote-sync skip flag and preserve the ordinary session-event/dashboard behavior. Audit PASS (858 files, 0 P1 / 3 P2); package dry run passes. Final verify is running at freeze; check/docs passed and the known help-URL E2E failure is retained. Required live full deep remains unrun.
