@@ -367,3 +367,9 @@
 - A provider-call estimate computed after dispatch is not a hard spending cap.
   Keep cost-bound claims separate from coverage evidence, and require a proved
   shared reservation plus complete request/attempt bound before advertising one.
+- Validate the requested roster before deriving completion from the effective
+  roster. Dropping unknown IDs or accepting an empty roster can turn a typo into
+  a zero-call "complete" review.
+- Token-bearing output proves a call occurred, not that a review completed.
+  Preserve permissive diagnostic parsing separately from strict structured-review
+  validity; error envelopes and fabricated field defaults cannot prove coverage.

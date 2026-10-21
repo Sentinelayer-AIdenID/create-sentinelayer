@@ -2,6 +2,7 @@
   "schemaVersion": 1,
   "kind": "synthetic-no-provider-calls",
   "baseline": "628f96c191640b03b4f6a167f0a5dc5299a8f338",
+  "reviewHeldRevision": "81784e527cfc01e324fbfb7e7be15d4bbb3ec0a8",
   "contract": "Every requested persona and partition must complete; omitted, failed, unverified or budget-stopped coverage blocks the full AI gate.",
   "cases": [
     { "id": "budget-skips-personas", "files": 1, "personas": ["security", "backend", "testing"], "maxCostUsd": 0.01, "behavior": "spend-budget", "baselineBlocking": false, "candidateBlocking": true },
@@ -12,6 +13,28 @@
     { "id": "partition-budget-stop", "files": 16, "personas": ["security"], "behavior": "budget-stop", "baselineBlocking": false, "candidateBlocking": true },
     { "id": "complete-zero-priced-token-evidence", "files": 16, "personas": ["security", "testing"], "behavior": "complete", "baselineBlocking": false, "candidateBlocking": false },
     { "id": "explicit-dry-run", "files": 16, "personas": ["security"], "behavior": "complete", "dryRun": true, "baselineBlocking": false, "candidateBlocking": false }
+  ],
+  "invalidRosters": [
+    { "id": "typo-only", "includeOnly": ["securty"], "skipPersonas": [] },
+    { "id": "mixed-valid-and-typo", "includeOnly": ["security", "securty"], "skipPersonas": [] },
+    { "id": "all-skipped", "includeOnly": ["security"], "skipPersonas": ["security"] }
+  ],
+  "providerResponses": [
+    { "id": "plain-error-text", "text": "Upstream service unavailable. No review completed.", "valid": false },
+    { "id": "error-only-json", "text": "{\"error\":\"unavailable\"}", "valid": false },
+    { "id": "missing-findings", "text": "{\"summary\":\"unfinished\"}", "valid": false },
+    { "id": "invalid-findings-container", "text": "{\"findings\":null}", "valid": false },
+    { "id": "invalid-findings-entry", "text": "{\"findings\":[null]}", "valid": false },
+    { "id": "empty-findings-object", "text": "{\"findings\":[{}]}", "valid": false },
+    { "id": "invalid-finding-fields", "text": "{\"findings\":[{\"severity\":\"unknown\",\"file\":\"a.js\",\"line\":1,\"title\":\"synthetic\"}]}", "valid": false },
+    { "id": "declared-error-with-empty-findings", "text": "{\"error\":\"unavailable\",\"findings\":[]}", "valid": false },
+    { "id": "declared-failure-with-empty-findings", "text": "{\"ok\":false,\"findings\":[]}", "valid": false },
+    { "id": "declared-refusal-with-empty-findings", "text": "{\"refusal\":\"unavailable\",\"findings\":[]}", "valid": false },
+    { "id": "unknown-status-with-empty-findings", "text": "{\"status\":\"aborted\",\"findings\":[]}", "valid": false },
+    { "id": "json-fragment-inside-error-text", "text": "Incomplete review: {\"findings\":[]} retry later", "valid": false },
+    { "id": "valid-empty-findings", "text": "{\"findings\":[]}", "valid": true },
+    { "id": "valid-legacy-empty-array", "text": "[]", "valid": true },
+    { "id": "valid-fenced-empty-findings", "text": "```json\n{\"findings\":[]}\n```", "valid": true }
   ],
   "regressionNotes": [
     "Amounts and provider responses are synthetic; this is coverage evaluation, not model-quality or spend evidence.",

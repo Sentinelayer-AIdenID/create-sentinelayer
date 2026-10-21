@@ -1,11 +1,22 @@
 # Omar deep coverage and budget limits
 
 A requested AI review is complete only when every requested persona and every
-partition finishes with call evidence. A failed partition, missing call evidence,
+partition finishes with call evidence and a valid structured review. A failed partition, missing call evidence,
 budget-stopped result, skipped persona, or failed orchestrator makes coverage
 `incomplete`. The CLI preserves available findings, adds an orchestrator coverage
 finding and exits nonzero. A minority of failed personas cannot be accepted as a
 healthy full review.
+
+Unknown explicitly requested personas, a mixture of valid and unknown requests,
+and empty effective rosters are refused before model dispatch. A token-bearing
+response alone is insufficient: plain error text, error/refusal envelopes,
+missing findings, malformed findings and a JSON fragment inside surrounding error
+text remain incomplete. Normalized legacy findings and diagnostic artifacts are
+retained; a separate `reviewValidity` signal records whether the provider returned
+a complete structured review. Valid empty findings, top-level legacy arrays and
+fenced JSON remain supported.
+This checks dispatch coverage and response structure; it does not establish the
+accuracy of a model's judgment.
 
 JSON and review artifacts expose `coverage.status` and completed/requested persona
 counts. Partition details include completed/requested counts. Explicit persona

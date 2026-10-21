@@ -389,6 +389,13 @@ function resolveAiResultCostUsd(result = {}) {
   );
 }
 
+function incompleteReviewReason(result = {}) {
+  if (result.reviewValidity?.valid === false || result.parser === "fallback_text" || !Array.isArray(result.findings)) {
+    return "invalid_review_response";
+  }
+  return result.budget?.blocking === true ? "budget_blocked" : null;
+}
+
 function buildAiCallEvidence(result = {}, { dryRun = false } = {}) {
   if (dryRun) {
     return {
@@ -471,7 +478,7 @@ function buildPersonaHealthFindings(personaHealth = {}) {
   if (allPersonasFailed) {
     message = `Omar AI coverage failed closed: all ${total} dispatched personas errored before producing findings.`;
   } else if (skippedCount > 0 || incompleteCount > 0) {
-    message = `Omar AI coverage incomplete: ${skippedCount}/${total} requested personas were skipped and ${incompleteCount}/${total} returned incomplete partition or budget coverage.`;
+    message = `Omar AI coverage incomplete: ${skippedCount}/${total} requested personas were skipped and ${incompleteCount}/${total} returned incomplete partition, budget, or structured-response coverage.`;
   } else if (errorCount === 0 && unverifiedOkCount > 0) {
     message = `Omar AI coverage failed closed: ${unverifiedOkCount}/${okCount} successful personas lacked token-bearing usage, billing-ledger, or priced-call evidence.`;
   }
@@ -725,7 +732,7 @@ async function runOmarPersonaSwarm({
         });
         const costUsd = resolveAiResultCostUsd(result);
         const aiCallEvidence = buildAiCallEvidence(result, { dryRun });
-        const budgetBlocked = result?.budget?.blocking === true;
+        const incompleteReason = incompleteReviewReason(result);
 
         if (onEvent) {
           for (const finding of findings) {
@@ -748,7 +755,7 @@ async function runOmarPersonaSwarm({
               partitionCount: partitions.length,
               fileCount: scopedFiles.length,
               findings: findings.length,
-              status: budgetBlocked ? "incomplete" : "ok",
+              status: incompleteReason ? "incomplete" : "ok",
               summary: result?.summary || summarizeFindings(findings),
               costUsd,
               durationMs: Date.now() - subagentStart,
@@ -763,7 +770,7 @@ async function runOmarPersonaSwarm({
         }
 
         return {
-          status: budgetBlocked ? "incomplete" : "ok",
+          status: incompleteReason ? "incomplete" : "ok",
           subagentIndex,
           agentId: subagentIdentity.id,
           files: scopedFiles,
@@ -771,7 +778,8 @@ async function runOmarPersonaSwarm({
           summary: result?.summary || summarizeFindings(findings),
           costUsd,
           aiCallEvidence,
-          reason: budgetBlocked ? "budget_blocked" : null,
+          reason: incompleteReason,
+          reviewValidity: result.reviewValidity || null,
           model: result?.model || model || null,
           billing: result?.billing || null,
           ...(severityClassifier === "typesafe" ? { severityClassification: result?.severityClassification || null } : {}),
@@ -943,6 +951,7 @@ async function runOmarPersonaSwarm({
         durationMs: result.durationMs || 0,
         error: result.error || null,
         reason: result.reason || null,
+        reviewValidity: result.reviewValidity || null,
         verified: dryRun ? null : Number(result.aiCallEvidence?.confirmedCalls || 0) > 0,
         artifacts: result.artifacts || null,
       })),
@@ -1008,6 +1017,12 @@ export async function runOmarGateOrchestrator({
   const { mode, personas: basePersonas } = resolved;
   const droppedPersonas = resolved.dropped || [];
   const unknownPersonas = resolved.unknown || [];
+  if (unknownPersonas.length > 0) {
+    throw new Error("Unknown requested Omar persona IDs; the requested review cannot be completed.");
+  }
+  if (basePersonas.length === 0) {
+    throw new Error("Requested Omar persona roster is empty; AI coverage cannot be completed.");
+  }
 
   if (onEvent && (droppedPersonas.length > 0 || unknownPersonas.length > 0)) {
     onEvent(createAgentEvent({
@@ -1031,6 +1046,9 @@ export async function runOmarGateOrchestrator({
     manualInclude: Array.isArray(includeOnly) && includeOnly.length > 0,
   });
   const personas = personaRouting.effectivePersonas;
+  if (personas.length === 0) {
+    throw new Error("Effective Omar persona roster is empty; AI coverage cannot be completed.");
+  }
 
   if (onEvent && personaRouting.enabled) {
     onEvent(createAgentEvent({
@@ -1264,7 +1282,7 @@ export async function runOmarGateOrchestrator({
       }));
       const personaCost = resolveAiResultCostUsd(result);
       const aiCallEvidence = buildAiCallEvidence(result, { dryRun });
-      const budgetBlocked = result?.budget?.blocking === true;
+      const incompleteReason = incompleteReviewReason(result);
 
       if (onEvent) {
         for (const finding of findings) {
@@ -1296,7 +1314,7 @@ export async function runOmarGateOrchestrator({
             personaId,
             identity,
             findings: findings.length,
-            status: budgetBlocked ? "incomplete" : "ok",
+            status: incompleteReason ? "incomplete" : "ok",
             summary: result?.summary || {},
             costUsd: personaCost,
             durationMs: Date.now() - personaStart,
@@ -1309,12 +1327,13 @@ export async function runOmarGateOrchestrator({
 
       return {
         personaId,
-        status: budgetBlocked ? "incomplete" : "ok",
+        status: incompleteReason ? "incomplete" : "ok",
         findings,
         summary: result?.summary || { P0: 0, P1: 0, P2: 0, P3: 0 },
         costUsd: personaCost,
         aiCallEvidence,
-        reason: budgetBlocked ? "budget_blocked" : null,
+        reason: incompleteReason,
+        reviewValidity: result.reviewValidity || null,
         model: result?.model || model || null,
         billing: result?.billing || null,
         ...(severityClassifier === "typesafe" ? { severityClassification: result?.severityClassification || null } : {}),
@@ -1445,7 +1464,7 @@ export async function runOmarGateOrchestrator({
     }
     if (personaSkippedCount > 0 || personaIncompleteCount > 0) {
       personaHealth.warnings.push(
-        `${personaSkippedCount} requested personas skipped; ${personaIncompleteCount} returned incomplete partition or budget coverage. Full AI coverage is incomplete.`
+        `${personaSkippedCount} requested personas skipped; ${personaIncompleteCount} returned incomplete partition, budget, or structured-response coverage. Full AI coverage is incomplete.`
       );
     }
     if (!dryRun && personaUnverifiedOkCount > 0) {
@@ -1482,6 +1501,7 @@ export async function runOmarGateOrchestrator({
       ...(severityClassifier === "typesafe" ? { severityClassification: r.severityClassification || null } : {}),
       error: r.error || null,
       reason: r.reason || null,
+      reviewValidity: r.reviewValidity || null,
       swarm: r.swarm || null,
       artifacts: r.artifacts || null,
     })),

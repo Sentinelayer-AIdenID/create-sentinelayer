@@ -4159,8 +4159,11 @@ Scope: result/coverage gating only. No token/price guarantee, model routing, pro
 
 ### Review
 
-- Focused 156/156; all eight defect regressions fail against untouched main source.
-- Full unit coverage: 2517 passed, 3 skipped, 0 failed; thresholds pass.
+- Focused 178/178; all eight defect regressions fail against untouched main source.
+- Full unit coverage: 2539 passed, 3 skipped, 0 failed; thresholds pass.
 - Literal /audit: PASS (848 files, 0 P1 / 3 P2).
 - npm verify remains failed at the two unchanged E2E fixtures (134/136); required paid deep is not run. Deterministic-only full deep is partial evidence and remains blocking (4 P1 / 13 P2).
 - No model calls, permissions, provider routing/retries or PR854 edits. Hard-dollar admission remains separate work.
+
+- Independent review corrections: invalid/empty requested rosters refuse before dispatch; primary structured-review validity prevents token-bearing error/malformed output from proving coverage.
+- Eighteen new controls fail against held81784e5 and pass on the successor; valid empty findings/legacy arrays/fenced JSON and explicit no-ai remain compatible.

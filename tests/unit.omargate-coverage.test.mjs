@@ -111,3 +111,86 @@ test("Omar coverage CLI: an orchestrator exception cannot become a clean fallbac
     assert.match(await fs.readFile(report.reportPath, "utf8"), /requested AI review did not complete/);
   } finally { process.exitCode = previousExit; }
 });
+
+for (const fixture of fixtures.invalidRosters) {
+  test(`Omar coverage admission: ${fixture.id} refuses before any runner call`, async () => {
+    const targetPath = await makeRoot();
+    let calls = 0;
+    await assert.rejects(runOmarGateOrchestrator({
+      targetPath, includeOnly: fixture.includeOnly, skipPersonas: fixture.skipPersonas,
+      deterministic: { summary, findings: [], scope: { scannedRelativeFiles: ["index.js"] } },
+      aiReviewRunner: async () => { calls++; return { findings: [], usage: { inputTokens: 10, outputTokens: 5 } }; },
+    }), /requested.*persona|persona roster is empty/i);
+    assert.equal(calls, 0);
+  });
+  test(`Omar coverage CLI roster: ${fixture.id} is blocking with zero provider calls`, async (t) => {
+    const targetPath = await makeRoot();
+    await fs.writeFile(path.join(targetPath, "index.js"), "export const value = 1;\n");
+    const output = [];
+    const previousExit = process.exitCode;
+    let calls = 0;
+    t.mock.method(console, "log", (text) => output.push(String(text)));
+    t.mock.method(MultiProviderApiClient.prototype, "invoke", async () => { calls++; return { text: '{"findings":[]}' }; });
+    try {
+      process.exitCode = 0;
+      await runLegacyCli(["/omargate", "deep", "--path", targetPath, "--provider", "openai", "--persona", fixture.includeOnly.join(","),
+        ...(fixture.skipPersonas.length ? ["--skip-persona", fixture.skipPersonas.join(",")] : []), "--json"]);
+      const report = JSON.parse(output.at(-1));
+      assert.equal(report.blocking, true);
+      assert.equal(report.coverage.status, "incomplete");
+      assert.equal(calls, 0);
+      assert.equal(process.exitCode, 2);
+    } finally { process.exitCode = previousExit; }
+  });
+}
+
+for (const fixture of fixtures.providerResponses) {
+  test(`Omar coverage CLI response: ${fixture.id}`, async (t) => {
+    const targetPath = await makeRoot();
+    await fs.writeFile(path.join(targetPath, "index.js"), "export const value = 1;\n");
+    const output = [];
+    const previousExit = process.exitCode;
+    let calls = 0;
+    t.mock.method(console, "log", (text) => output.push(String(text)));
+    t.mock.method(MultiProviderApiClient.prototype, "invoke", async () => {
+      calls++;
+      return { text: fixture.text, usage: { inputTokens: 10, outputTokens: 5 } };
+    });
+    try {
+      process.exitCode = 0;
+      await runLegacyCli(["/omargate", "deep", "--path", targetPath, "--provider", "openai", "--persona", "security", "--json"]);
+      const report = JSON.parse(output.at(-1));
+      assert.equal(report.blocking, !fixture.valid);
+      assert.equal(report.coverage.status, fixture.valid ? "complete" : "incomplete");
+      assert.equal(calls, 1);
+      assert.equal(process.exitCode, fixture.valid ? 0 : 2);
+      const personas = JSON.parse(await fs.readFile(report.artifacts.personas, "utf8"));
+      const persona = personas.personas[0];
+      assert.equal(persona.reviewValidity.valid, fixture.valid);
+      if (!fixture.valid) assert.equal(persona.reason, "invalid_review_response");
+      const responseArtifact = JSON.parse(await fs.readFile(persona.artifacts.reportJsonPath, "utf8"));
+      assert.equal(responseArtifact.reviewValidity.valid, fixture.valid);
+      assert.ok(responseArtifact.usage.inputTokens > 0, "a token-bearing error is still incomplete");
+    } finally { process.exitCode = previousExit; }
+  });
+}
+
+test("Omar coverage CLI: explicit no-ai remains deterministic-only with no provider calls", async (t) => {
+  const targetPath = await makeRoot();
+  await fs.writeFile(path.join(targetPath, "index.js"), "export const value = 1;\n");
+  const output = [];
+  const previousExit = process.exitCode;
+  let calls = 0;
+  t.mock.method(console, "log", (text) => output.push(String(text)));
+  t.mock.method(MultiProviderApiClient.prototype, "invoke", async () => { calls++; throw new Error("No call expected"); });
+  try {
+    process.exitCode = 0;
+    await runLegacyCli(["/omargate", "deep", "--path", targetPath, "--no-ai", "--json"]);
+    const report = JSON.parse(output.at(-1));
+    assert.equal(report.ai, null);
+    assert.equal(report.coverage, null);
+    assert.equal(report.blocking, false);
+    assert.equal(calls, 0);
+    assert.equal(process.exitCode, 0);
+  } finally { process.exitCode = previousExit; }
+});

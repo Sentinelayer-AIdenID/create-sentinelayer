@@ -15,6 +15,9 @@ without call evidence. The CLI's exception fallback could report a clean run
 after the entire requested orchestrator failed.
 
 After the change, each of these conditions yields incomplete/blocking coverage.
+Invalid or empty requested rosters also refuse before dispatch. Structured-review
+validity is separate from legacy normalization: token-bearing error prose,
+error/refusal envelopes and malformed findings cannot count as a complete review.
 Successful partial findings survive normal aggregation. Complete runs retain
 zero-priced token-bearing evidence compatibility, and explicit dry runs remain
 usable while labeled simulated. Requested filters and existing monetary-limit
@@ -22,13 +25,19 @@ parsing remain unchanged.
 
 ## Observed evidence
 
-- Ten new controls pass: six orchestrator failure/budget cases, two complete or
-  simulated compatibility cases, and two real legacy CLI JSON/report/exit cases.
+- The original ten controls cover six orchestrator failure/budget cases, two
+  complete or simulated compatibility cases, and two real legacy CLI cases.
+- Successor controls exercise invalid/empty rosters at both the orchestrator and
+  actual CLI boundaries, and actual CLI provider responses for error prose,
+  malformed envelopes/findings, valid empty findings, legacy arrays and fenced
+  JSON. Explicit no-ai remains deterministic-only.
 - The eight defect-specific controls fail against untouched base production
   source, using the same new tests and fixture. Every failure is the old clean
   `blocking=false` result where the requested contract requires `true`.
-- The focused new/existing review, orchestrator, TypeSafe, command and reporting
-  selection passes 156 tests. Existing TypeSafe input, responses, expected
+- Eighteen additional roster/response controls fail against held revision
+  `81784e527cfc01e324fbfb7e7be15d4bbb3ec0a8`: rejected requests were accepted or
+  malformed responses were marked clean. The successor focused selection passes
+  178 tests. Existing TypeSafe input, responses, expected
   outcomes and test bytes remain unchanged; its source bindings are refreshed
   with explicit maintenance provenance for the changed CLI/orchestrator/help.
 - Full repository verification and required live deep scan are separate gates;

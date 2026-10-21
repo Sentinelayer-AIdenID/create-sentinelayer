@@ -9,8 +9,8 @@
     "canonicalization": "UTF-8; CRLF converted to LF only for Git-canonical source comparison",
     "sourceSha256": {
       "src/review/typesafe-severity.js": "82a628b1c7b06756ba71c98df8e7b9b0e96f62c774ca713a1658fca754aebc5a",
-      "src/review/ai-review.js": "d6dfc3bda0988e8bd7d62c871859cbbeac54bf39ad36830bcbebd7ea22faed01",
-      "src/review/omargate-orchestrator.js": "9416d38783a1b498f1f5f218fefe37b1d5f0557d78635fa6989aac771d808c5c",
+      "src/review/ai-review.js": "95a9c7b9a7ed90039affd7023a204a650b2e43e08ddd5a2a6ecb8740cc850afd",
+      "src/review/omargate-orchestrator.js": "80bb2c8e57f8784cd0ccb52191be548df269c030a8eb854b5f8958dd7c3152e0",
       "src/commands/omargate.js": "5ccbf2f1bb3f2f1e9ed5e35a8a8197bfc2b1cb699365987a2a979caf834c3567",
       "src/commands/legacy-args.js": "83772b6ccd5765d1a0bd1f3ee3eefcf5c1fdaf4e9fb1a301c0312b286dbc0d29",
       "src/legacy-cli.js": "bba2ea2547e1862b17811596af44dc17c2d08164bd23083ba458d6d235b8f350",
@@ -54,9 +54,10 @@
       "priorSha256": {
         "src/review/omargate-orchestrator.js": "90d6d8f61e6e3056e937f79f584725f6cbd9e47128d22e61d1bd600227f75725",
         "src/legacy-cli.js": "2068189e38e67d71b195b2716ae873aa303b296b76cf4f046b99169a4f0b6490",
-        "src/commands/omargate.js": "c59eee4a1bd833065e4cd6e136917adc42052c1e35e0089ef010115b6f1d83e4"
+        "src/commands/omargate.js": "c59eee4a1bd833065e4cd6e136917adc42052c1e35e0089ef010115b6f1d83e4",
+        "src/review/ai-review.js": "d6dfc3bda0988e8bd7d62c871859cbbeac54bf39ad36830bcbebd7ea22faed01"
       },
-      "scope": "Only ordinary Omar coverage aggregation, CLI incomplete-result reporting, and cost-threshold help changed. The TypeSafe transport/classifier, all seven synthetic scenarios, input, responses, expectations, invariants and test bytes remain unchanged. The full TypeSafe contract suite is rerun against these current bindings.",
+      "scope": "Primary structured-response validity, complete requested-roster/partition aggregation, CLI incomplete-result reporting and cost-threshold help changed. Legacy finding normalization and the TypeSafe transport/classifier, all seven synthetic scenarios, input, responses, expectations, invariants and test bytes remain unchanged. The full TypeSafe contract suite is rerun against these current bindings.",
       "evaluation": "tests/evals/omargate-coverage-cases.json",
       "limitation": "Synthetic contract evidence only; no model accuracy, live provider, hard dollar ceiling or completed release-gate claim."
     }
