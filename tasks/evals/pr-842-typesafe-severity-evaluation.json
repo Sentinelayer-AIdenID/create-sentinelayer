@@ -9,11 +9,11 @@
     "canonicalization": "UTF-8; CRLF converted to LF only for Git-canonical source comparison",
     "sourceSha256": {
       "src/review/typesafe-severity.js": "82a628b1c7b06756ba71c98df8e7b9b0e96f62c774ca713a1658fca754aebc5a",
-      "src/review/ai-review.js": "95a9c7b9a7ed90039affd7023a204a650b2e43e08ddd5a2a6ecb8740cc850afd",
-      "src/review/omargate-orchestrator.js": "80bb2c8e57f8784cd0ccb52191be548df269c030a8eb854b5f8958dd7c3152e0",
-      "src/commands/omargate.js": "5ccbf2f1bb3f2f1e9ed5e35a8a8197bfc2b1cb699365987a2a979caf834c3567",
-      "src/commands/legacy-args.js": "83772b6ccd5765d1a0bd1f3ee3eefcf5c1fdaf4e9fb1a301c0312b286dbc0d29",
-      "src/legacy-cli.js": "bba2ea2547e1862b17811596af44dc17c2d08164bd23083ba458d6d235b8f350",
+      "src/review/ai-review.js": "a7e1fc61b87829a9b1fc982a7b0d39fffe8c2f7dedfac59a74b34ad9d13f6000",
+      "src/review/omargate-orchestrator.js": "2e34d99f142673476e8491d646ec582ac2d9b0112d3b8852afb82ba3685a6638",
+      "src/commands/omargate.js": "1d15e41c492eb6b26015fd264fe4cbae4a2c11fa28cbd6c17db83d0aef594b9c",
+      "src/commands/legacy-args.js": "8052912dd70a33b781cd9113cb3245f774bf4848e3e14095ac494e995f1ebdf8",
+      "src/legacy-cli.js": "6944a3e7d1db49f3de9aff719b5638eacf1b4033d6187d8ae4fefe1bf55d5a0d",
       "src/session/redact.js": "a92cd2e70b165e4e015edcbeff1d3119c3b1f091ef72654e776c0139ace663a2"
     },
     "testPath": "tests/unit.typesafe-severity.test.mjs",
@@ -60,6 +60,19 @@
       "scope": "Primary structured-response validity, complete requested-roster/partition aggregation, CLI incomplete-result reporting and cost-threshold help changed. Legacy finding normalization and the TypeSafe transport/classifier, all seven synthetic scenarios, input, responses, expectations, invariants and test bytes remain unchanged. The full TypeSafe contract suite is rerun against these current bindings.",
       "evaluation": "tests/evals/omargate-coverage-cases.json",
       "limitation": "Synthetic contract evidence only; no model accuracy, live provider, hard dollar ceiling or completed release-gate claim."
+    },
+    "exposureMaintenance": {
+      "baselineRevision": "0c42c4c590f63608afe248124b8bc743bfa37138",
+      "baselineSourceSha256": {
+        "src/review/ai-review.js": "95a9c7b9a7ed90039affd7023a204a650b2e43e08ddd5a2a6ecb8740cc850afd",
+        "src/review/omargate-orchestrator.js": "80bb2c8e57f8784cd0ccb52191be548df269c030a8eb854b5f8958dd7c3152e0",
+        "src/commands/omargate.js": "5ccbf2f1bb3f2f1e9ed5e35a8a8197bfc2b1cb699365987a2a979caf834c3567",
+        "src/legacy-cli.js": "bba2ea2547e1862b17811596af44dc17c2d08164bd23083ba458d6d235b8f350",
+        "src/commands/legacy-args.js": "83772b6ccd5765d1a0bd1f3ee3eefcf5c1fdaf4e9fb1a301c0312b286dbc0d29"
+      },
+      "scope": "Opt-in bounded model-token exposure adds a separate direct transport and shared reservation controller. TypeSafe classifier code, seven scenario inputs/expectations and test bytes are unchanged; exposure mode refuses TypeSafe before generation. Existing TypeSafe contracts are rerun.",
+      "evaluation": "tasks/evals/bounded-review-exposure.md",
+      "limitation": "Synthetic contract tests only; no provider/model calls or final-invoice guarantee."
     }
   },
   "baselineMeaning": "Published base generation-only contract, with candidate off mode exercised on identical synthetic inputs; no independent baseline model/provider run.",

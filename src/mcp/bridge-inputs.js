@@ -200,6 +200,7 @@ export const BRIDGE_DENIED_INPUTS = Object.freeze({
     apiUrl: "the API that receives the user's token",
   },
   "omargate.deep": {
+    maxModelTokenExposure: "direct-provider exposure control is operator CLI opt-in only; never enabled by an MCP caller",
     severityClassifier: "external-provider evidence evaluation is operator CLI opt-in only; never enabled by an MCP caller",
   },
   "ring-owner": {

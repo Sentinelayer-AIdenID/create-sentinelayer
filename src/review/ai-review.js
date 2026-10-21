@@ -439,7 +439,8 @@ function composeAiReviewMarkdown({
     `- ${summary || "No summary provided."}`,
     `- Combined findings: P0=${combinedSummary.P0} P1=${combinedSummary.P1} P2=${combinedSummary.P2} P3=${combinedSummary.P3}`,
     `- Blocking: ${combinedSummary.blocking ? "yes" : "no"}`,
-    `- ${severityClassification ? "Generation usage" : "Usage"}: input_tokens=${usage.inputTokens} output_tokens=${usage.outputTokens} cost_usd=${usage.costUsd.toFixed(6)} duration_ms=${usage.durationMs}`,
+    `- ${severityClassification ? "Generation usage" : "Usage"}: input_tokens=${usage.inputTokens} output_tokens=${usage.outputTokens} ${usage.accounting ? "exposure_usd" : "cost_usd"}=${usage.costUsd.toFixed(6)} duration_ms=${usage.durationMs}`,
+    ...(usage.accounting ? [`- Accounting: tokens=${usage.accounting.tokenBasis}, cost=${usage.accounting.costBasis}, policy=${usage.accounting.policySha256}; local only, not an invoice or remote billing entry.`] : []),
     "",
     "AI Findings:",
     findingLines,
@@ -524,6 +525,7 @@ export async function runAiReviewLayer({
   sessionId,
   maxFindings = DEFAULT_AI_MAX_FINDINGS,
   maxCostUsd = 1.0,
+  boundedReview = null,
   maxOutputTokens = 0,
   maxRuntimeMs = 0,
   maxToolCalls = 0,
@@ -553,6 +555,7 @@ export async function runAiReviewLayer({
   );
   const normalizedRunId = normalizeString(runId) || "review-ai";
   const normalizedRequireUsageLedger = Boolean(requireUsageLedger);
+  if (boundedReview && normalizedRequireUsageLedger) throw new Error("cost_bound_unavailable: bounded direct usage does not support the remote billing ledger");
   const normalizedSourceCommand = normalizeString(sourceCommand) || "review";
   const normalizedBillingAgentId = normalizeString(billingAgentId) || "audit-orchestrator";
   const normalizedBillingAction = normalizeString(billingAction) || "audit_run";
@@ -581,6 +584,9 @@ export async function runAiReviewLayer({
     model,
     configModel: config.resolved.defaultModelId || DEFAULT_REVIEW_AI_MODEL,
   });
+  if (boundedReview && (resolvedProvider !== boundedReview.provider || resolvedModel !== boundedReview.model || dryRun || severityClassifier !== "off")) {
+    throw new Error("cost_bound_unavailable: bounded review route changed");
+  }
   const explicitApiKey = normalizeString(apiKey);
   const configuredApiKey = resolveConfiguredApiKey(resolvedProvider, userConfigValues(config));
 
@@ -597,7 +603,8 @@ export async function runAiReviewLayer({
 
   const startedAt = Date.now();
   const startedAtIso = new Date(startedAt).toISOString();
-  const responseText = dryRun
+  const boundedResponse = boundedReview ? await boundedReview.invoke(prompt) : null;
+  const responseText = boundedResponse ? boundedResponse.text : dryRun
     ? buildDryRunResponse({
         deterministicSummary: deterministic?.summary || {},
         maxFindings: normalizedMaxFindings,
@@ -618,6 +625,7 @@ export async function runAiReviewLayer({
     text: responseText,
     maxFindings: normalizedMaxFindings,
   });
+  if (boundedResponse && !boundedResponse.completed) parsed.reviewValidity = { valid: false, reason: "provider_response_incomplete" };
   const aiFindings = parsed.findings.map((finding, index) => toReviewFinding(finding, index));
   const aiSummary = summarizeFindings(aiFindings);
   const deterministicSummary = deterministic?.summary || { P0: 0, P1: 0, P2: 0, P3: 0 };
@@ -629,9 +637,12 @@ export async function runAiReviewLayer({
   };
   combinedSummary.blocking = combinedSummary.P0 > 0 || combinedSummary.P1 > 0;
 
-  const inputTokens = estimateTokens(prompt, { model: resolvedModel });
-  const outputTokens = estimateTokens(responseText, { model: resolvedModel });
-  const modelCost = maybeEstimateModelCost({
+  const inputTokens = boundedResponse?.usage.inputTokens ?? estimateTokens(prompt, { model: resolvedModel });
+  const outputTokens = boundedResponse?.usage.outputTokens ?? estimateTokens(responseText, { model: resolvedModel });
+  const accounting = boundedResponse ? { tokenBasis: "provider_reported", costBasis: "pinned_rate_conservative_exposure", policySha256: boundedResponse.exposure.policySha256 } : null;
+  const cacheReadTokens = boundedResponse ? (boundedResponse.providerUsage.input_tokens_details?.cached_tokens ?? boundedResponse.providerUsage.cache_read_input_tokens ?? 0) : 0;
+  const cacheWriteTokens = boundedResponse ? (boundedResponse.providerUsage.input_tokens_details?.cache_write_tokens ?? boundedResponse.providerUsage.cache_creation_input_tokens ?? 0) : 0;
+  const modelCost = boundedResponse ? { costUsd: boundedResponse.usage.costUsd, pricingFound: true } : maybeEstimateModelCost({
     modelId: resolvedModel,
     inputTokens,
     outputTokens,
@@ -650,12 +661,13 @@ export async function runAiReviewLayer({
       model: resolvedModel,
       inputTokens,
       outputTokens,
-      cacheReadTokens: 0,
-      cacheWriteTokens: 0,
+      cacheReadTokens,
+      cacheWriteTokens,
       durationMs,
       toolCalls: 1,
       costUsd: modelCost.costUsd,
       progressScore: aiFindings.length > 0 ? 1 : 0,
+      ...(accounting ? { accounting } : {}),
     }
   );
   const costSummary = summarizeCostHistory(appendedCost.history);
@@ -674,7 +686,7 @@ export async function runAiReviewLayer({
 
   let budget = evaluateBudget({
     sessionSummary,
-    maxCostUsd: parseNonNegativeNumber(maxCostUsd, "maxCostUsd"),
+    maxCostUsd: boundedReview ? 0 : parseNonNegativeNumber(maxCostUsd, "maxCostUsd"),
     maxOutputTokens: parseNonNegativeNumber(maxOutputTokens, "maxOutputTokens"),
     maxNoProgress: parseNonNegativeNumber(maxNoProgress, "maxNoProgress"),
     maxRuntimeMs: parseNonNegativeNumber(maxRuntimeMs, "maxRuntimeMs"),
@@ -694,8 +706,8 @@ export async function runAiReviewLayer({
       usage: {
         inputTokens,
         outputTokens,
-        cacheReadTokens: 0,
-        cacheWriteTokens: 0,
+        cacheReadTokens,
+        cacheWriteTokens,
         costUsd: modelCost.costUsd,
         durationMs,
         toolCalls: 1,
@@ -707,11 +719,12 @@ export async function runAiReviewLayer({
         model: resolvedModel,
         invocationId: appendedCost.entry.invocationId,
         dryRun: Boolean(dryRun),
+        ...(accounting ? { accounting } : {}),
       },
     }
   );
 
-  let sessionUsageLedger = null;
+  let sessionUsageLedger = boundedResponse ? { ok: false, skipped: true, reason: "bounded_direct_usage_local_only", accounting } : null;
   try {
     const billingRunId = buildBillingRunId({
       sessionId: normalizedSessionId,
@@ -728,7 +741,7 @@ export async function runAiReviewLayer({
         billingAction: normalizedBillingAction,
       }),
     });
-    sessionUsageLedger = await usageRecorder(
+    if (!boundedResponse) sessionUsageLedger = await usageRecorder(
       normalizedSessionId,
       {
         agentId: normalizedBillingAgentId,
@@ -843,6 +856,7 @@ export async function runAiReviewLayer({
           model: resolvedModel,
           invocationId: appendedCost.entry.invocationId,
           dryRun: Boolean(dryRun),
+          ...(accounting ? { accounting } : {}),
         },
       }
     );
@@ -856,6 +870,7 @@ export async function runAiReviewLayer({
   const usage = {
     inputTokens,
     outputTokens,
+    ...(accounting ? { cacheReadTokens, cacheWriteTokens, accounting } : {}),
     costUsd: modelCost.costUsd,
     durationMs,
     toolCalls: 1,
@@ -867,6 +882,7 @@ export async function runAiReviewLayer({
     mode: normalizedMode,
     parser: parsed.parser,
     reviewValidity: parsed.reviewValidity,
+    ...(boundedResponse ? { modelTokenExposure: boundedResponse.exposure, providerCompletion: { completed: boundedResponse.completed, finish: boundedResponse.finish }, providerUsage: boundedResponse.providerUsage } : {}),
     summary: parsed.summary,
     provider: resolvedProvider,
     model: resolvedModel,
@@ -905,6 +921,7 @@ export async function runAiReviewLayer({
 
   return {
     parser: parsed.parser,
+    ...(boundedResponse ? { modelTokenExposure: boundedResponse.exposure, providerCompletion: { completed: boundedResponse.completed, finish: boundedResponse.finish }, providerUsage: boundedResponse.providerUsage } : {}),
     reviewValidity: parsed.reviewValidity,
     summary: parsed.summary,
     ...(severityClassification ? { severityClassification } : {}),

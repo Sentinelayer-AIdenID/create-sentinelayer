@@ -4167,3 +4167,23 @@ Scope: result/coverage gating only. No token/price guarantee, model routing, pro
 
 - Independent review corrections: invalid/empty requested rosters refuse before dispatch; primary structured-review validity prevents token-bearing error/malformed output from proving coverage.
 - Eighteen new controls fail against held81784e5 and pass on the successor; valid empty findings/legacy arrays/fenced JSON and explicit no-ai remain compatible.
+
+## Codex-warden: opt-in model-token exposure, 2026-10-21
+
+Approved design: `H:/codex-warden-worktrees/tasks/strict-review-budget-plan/design.md`, reviewed by root before implementation. Separate branch explicitly stacked on frozen PR856 `0c42c4c`; no edits to PR854/855/856.
+
+- [x] Preserve legacy provider/model paths absent the new option; name and document the narrow rate-policy assurance.
+- [x] Share exact-money pre-send reservations across all nested workers; one attempt, no replay of uncertain sends.
+- [x] Add coarse documented bounds and pinned/fresh exact provider/model/tier/endpoint policies; fail unsupported routes before calls.
+- [x] Retain authoritative usage and provider completion; truncated/error responses remain incomplete/blocking.
+- [x] Add actual CLI concurrent/uncertain controls plus a synthetic 923-call scheduling case.
+- [x] Run old-source negative controls, focused/full coverage and required safe gates; keep live deep explicitly unrun.
+- [x] Prepare draft review material and negative-control receipts; publication and independent review remain tracked in the delivery receipt. No merge or paid use before root review.
+
+Review: operational limit remains $5. Synthetic controls are scheduling/contract evidence only and never substitute for a full live review. No complete run at $5 or final-invoice guarantee is promised.
+
+- Final full unit coverage: 2,584 passed, 3 skipped, 0 failed; configured thresholds pass. Focused exposure/entry/TypeSafe: 126 passed.
+- Five unchanged-interface regressions fail against frozen PR856; ten additional entry/help controls fail against held intermediate source `60a2def71ff70dcada3e4132cc3181aa3893374e` and pass corrected source.
+- Literal /audit: PASS (856 files, 0 P1 / 3 P2); package dry run passes. `npm run verify` still fails at the two existing E2E fixtures (134/136). An earlier broad run also exposed the existing auth-store EPERM contention; auth source remains untouched.
+- Corrected OpenAI policy uses its entire documented 400,000-token context as conservative input allowance; one reservation is $0.757344. Actual Commander forwarding and raw equals/duplicate/unsupported-mode controls are required evidence.
+- Known provider violations invalidate assurance with sanitized usage evidence. Bounded BYOK accounting is local only, preserves cache counters and provenance, and never invokes the remote billing recorder.

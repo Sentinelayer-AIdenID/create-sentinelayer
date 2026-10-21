@@ -1,4 +1,5 @@
 import { buildLegacyArgs } from "./legacy-args.js";
+import { parseExposureOption } from "./exposure-option.js";
 
 export function registerOmarGateCommand(program, invokeLegacy) {
   const omargate = program
@@ -20,9 +21,10 @@ export function registerOmarGateCommand(program, invokeLegacy) {
     .option("--model <id>", "LLM model override (default: gpt-5.3-codex)")
     .option("--provider <name>", "LLM provider: sentinelayer, openai, anthropic")
     .option("--max-cost <usd>", "Reported AI cost stop threshold in USD (default: 5.0), not a pre-dispatch spending cap; with TypeSafe evaluation only, explicit 0 means NO monetary cap")
+    .option("--max-model-token-exposure <usd>", "Opt-in pre-dispatch model-token exposure cap under a pinned rate policy; replaces --max-cost, not an invoice/account cap; supported direct routes only; usage stays local", parseExposureOption)
     .option("--severity-classifier <mode>", "Opt-in classification evaluation: off|typesafe; sends generated finding evidence to TypeSafe, never changes gate severities (positive cost caps skip)", "off")
-    .option("--notify-session <session-id>", "Write Omar Deep billing-grade usage entries into this Senti session (default: auto-detect active Senti session)")
-    .option("--require-usage-ledger", "Fail if Omar Deep AI calls cannot write billing-grade session_usage")
+    .option("--notify-session <session-id>", "Usage session (default: auto-detect); exposure mode uses this ID locally only, otherwise writes billing-grade entries")
+    .option("--require-usage-ledger", "Require remote billing-grade session_usage; incompatible with model-token exposure mode")
     .option("--persona <csv>", "Only run these personas (comma-separated IDs); unknown IDs are dropped + warned")
     .option("--skip-persona <csv>", "Skip these personas (comma-separated IDs)")
     .option("--stream", "Emit NDJSON events to stdout as personas run")

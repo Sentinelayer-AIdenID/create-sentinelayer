@@ -331,7 +331,7 @@ test("the bridge withholds exactly the denied inputs from the commands it expose
     "sl.init: injectOpenaiKey,injectSecret",
     "sl.mcp.doctor: apiUrl",
     "sl.mcp.smoke: apiUrl",
-    "sl.omargate.deep: severityClassifier",
+    "sl.omargate.deep: maxModelTokenExposure,severityClassifier",
     "sl.ring-owner: gatewayUrl",
     "sl.session.join: recoverAdmission",
     "sl.swarm.create: target",
@@ -613,12 +613,14 @@ test("the trust context comes from the environment and the global config only", 
 });
 
 
-test("the bridge cannot opt into TypeSafe evaluation or smuggle its flag, even after test approval", async () => {
+test("the bridge cannot opt into provider controls or smuggle their flags, even after test approval", async () => {
   const tools = await buildCliCommandMcpTools();
   const deep = tools.find((tool) => tool.name === "sl.omargate.deep");
   assert.equal(deep.metadata.blocked, false);
   assert.equal(Object.hasOwn(deep.inputSchema.properties, "severityClassifier"), false);
-  assert.deepEqual(deep.metadata.withheldOptions, ["severityClassifier"]);
+  assert.deepEqual(deep.metadata.withheldOptions, ["maxModelTokenExposure", "severityClassifier"]);
+  assert.equal(Object.hasOwn(deep.inputSchema.properties, "maxModelTokenExposure"), false);
+  assert.ok(BRIDGE_DENIED_INPUTS["omargate.deep"].maxModelTokenExposure);
   assert.ok(BRIDGE_DENIED_INPUTS["omargate.deep"].severityClassifier);
   const executed = [];
   const handlers = createCliCommandMcpToolHandlers(tools, {
@@ -630,6 +632,8 @@ test("the bridge cannot opt into TypeSafe evaluation or smuggle its flag, even a
   });
   for (const [input, detail] of [
     [{ severityClassifier: "typesafe", maxCost: "0", json: true }, "unsupported_input:severityClassifier"],
+    [{ maxModelTokenExposure: "5", json: true }, "unsupported_input:maxModelTokenExposure"],
+    [{ maxCost: "--max-model-token-exposure=5", json: true }, "unsupported_input_value:maxCost"],
     [{ "severity-classifier": "typesafe", json: true }, "unsupported_input:severity-classifier"],
     [{ maxCost: "--severity-classifier=typesafe", json: true }, "unsupported_input_value:maxCost"],
   ]) {

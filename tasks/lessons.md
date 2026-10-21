@@ -373,3 +373,13 @@
 - Token-bearing output proves a call occurred, not that a review completed.
   Preserve permissive diagnostic parsing separately from strict structured-review
   validity; error envelopes and fabricated field defaults cannot prove coverage.
+# Bounded review follow-through, 2026-10-21
+
+- Do not derive a maximum input by subtracting a model's maximum output from its context window when the request uses a smaller output ceiling. Reserve the full documented context unless a tighter pre-send bound is proved; preserve discrepancies between normalized and rendered documentation.
+- Test money-bound options through the normal Commander entry and the raw slash entry. Declaring a flag without forwarding it silently removes the control; equals, duplicate and unsupported-mode forms must enforce or reject before transport.
+- Exposure estimates and provider-reported token counts are different evidence. Preserve cache counters and provenance; never send direct BYOK exposure through a billing recorder without a proved non-billable contract.
+- A provider contract violation must invalidate assurance explicitly. Keep sanitized numeric usage and the machine reason separately from the retained reservation; a held ceiling does not prove the provider respected it.
+- A pre-dispatch monetary reservation needs every billable token category, exact route/tier/geography, attempt policy and a freshness rule. Unknown pricing cannot be zero.
+- Provider completion is independent from JSON syntax and token-bearing usage. Preserve stop/status metadata and fail incomplete review coverage closed.
+- Count endpoints may be estimates or have unestablished pricing; use documented coarse model ceilings until the complete count contract is proved.
+- Distinguish a single-run token-exposure policy from final-invoice and account budgets. Preserve the chosen model and operational allowance; never silently shrink coverage or output to claim completion.

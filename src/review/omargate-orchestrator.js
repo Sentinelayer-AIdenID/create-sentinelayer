@@ -425,8 +425,9 @@ function buildAiCallEvidence(result = {}, { dryRun = false } = {}) {
   const outputTokens = Math.max(usageOutputTokens, ledgerOutputTokens);
   const totalTokens = Math.max(usageTotalTokens, ledgerTotalTokens, inputTokens + outputTokens);
   const ledgerProviderCostUsd = normalizeEvidenceNumber(ledger.providerCostUsd);
-  const providerCostUsd = Math.max(resolveAiResultCostUsd(result), ledgerProviderCostUsd);
-  const customerCostUsd = normalizeEvidenceNumber(ledger.customerCostUsd);
+  const accounting = usage.accounting?.costBasis === "pinned_rate_conservative_exposure" ? usage.accounting : null;
+  const providerCostUsd = accounting ? null : Math.max(resolveAiResultCostUsd(result), ledgerProviderCostUsd);
+  const customerCostUsd = accounting ? null : normalizeEvidenceNumber(ledger.customerCostUsd);
   const usageBacked = usageInputTokens + usageOutputTokens + usageTotalTokens > 0;
   const ledgerBacked =
     ledgerInputTokens + ledgerOutputTokens + ledgerTotalTokens > 0 || ledgerProviderCostUsd > 0;
@@ -443,15 +444,25 @@ function buildAiCallEvidence(result = {}, { dryRun = false } = {}) {
     totalTokens,
     providerCostUsd,
     customerCostUsd,
+    ...(accounting ? { accounting, exposureCostUsd: resolveAiResultCostUsd(result) } : {}),
   };
 }
 
-function combineAiCallEvidence(entries = []) {
+function combineAiCallEvidence(entries = [], boundedReview = null) {
   const combined = buildAiCallEvidence({}, { dryRun: true });
   for (const entry of entries) {
     if (!entry || typeof entry !== "object") continue;
     for (const key of Object.keys(combined)) {
       combined[key] += normalizeEvidenceNumber(entry[key]);
+    }
+  }
+  const exposureEntries = entries.filter(entry => entry?.accounting?.costBasis === "pinned_rate_conservative_exposure");
+  if (boundedReview || exposureEntries.length) {
+    combined.accounting = exposureEntries[0]?.accounting || { tokenBasis: "provider_reported", costBasis: "pinned_rate_conservative_exposure", policySha256: boundedReview.snapshot().policySha256 };
+    combined.exposureCostUsd = exposureEntries.reduce((sum, entry) => sum + normalizeEvidenceNumber(entry.exposureCostUsd), 0);
+    if (boundedReview || entries.every(entry => !entry || entry.accounting)) {
+      combined.providerCostUsd = null;
+      combined.customerCostUsd = null;
     }
   }
   return combined;
@@ -583,6 +594,7 @@ async function runOmarPersonaSwarm({
   requireUsageLedger = false,
   usageRecorder = undefined,
   aiReviewRunner = runAiReviewLayer,
+  boundedReview = null,
 } = {}) {
   const scope = buildPersonaFileScope({ deterministic });
   const decision = decideSwarm({ scope });
@@ -659,6 +671,7 @@ async function runOmarPersonaSwarm({
 
       try {
         const result = await aiReviewRunner({
+          boundedReview,
           targetPath,
           mode: "full",
           runId: subagentRunId,
@@ -843,6 +856,7 @@ async function runOmarPersonaSwarm({
   const totalCostUsd = settledSubagents.reduce((sum, result) => sum + (result.costUsd || 0), 0);
   const aiCallEvidence = combineAiCallEvidence(
     settledSubagents.map((result) => result.aiCallEvidence),
+    boundedReview,
   );
   const summary = summarizeFindings(findings);
   const okCount = settledSubagents.filter((result) => result.status === "ok").length;
@@ -987,6 +1001,7 @@ export async function runOmarGateOrchestrator({
   model = "",
   severityClassifier = "off",
   maxCostUsd = 5.0,
+  maxModelTokenExposureUsd = null,
   dryRun = false,
   outputDir = "",
   deterministic = null,
@@ -1050,6 +1065,11 @@ export async function runOmarGateOrchestrator({
     throw new Error("Effective Omar persona roster is empty; AI coverage cannot be completed.");
   }
 
+  const boundedReview = maxModelTokenExposureUsd === null ? null : await (await import("../ai/bounded-review-client.js")).prepareBoundedReview({
+    targetPath, provider, model, maximumUsd: maxModelTokenExposureUsd, severityClassifier, dryRun, requireUsageLedger,
+  });
+  if (boundedReview) { provider = boundedReview.provider; model = boundedReview.model; }
+
   if (onEvent && personaRouting.enabled) {
     onEvent(createAgentEvent({
       event: "omargate_persona_routing",
@@ -1087,6 +1107,7 @@ export async function runOmarGateOrchestrator({
         roster,
         maxParallel,
         maxCostUsd,
+        ...(boundedReview ? { modelTokenExposure: boundedReview.snapshot() } : {}),
         dryRun,
         personaRouting,
       },
@@ -1099,7 +1120,7 @@ export async function runOmarGateOrchestrator({
 
   // Per-persona cost budget = global / effective persona count (with minimum floor).
   const evaluationWithoutCostCap = severityClassifier === "typesafe" && maxCostUsd === 0;
-  const perPersonaCost = evaluationWithoutCostCap ? 0 : personas.length > 0 ? Math.max(0.25, maxCostUsd / personas.length) : 0;
+  const perPersonaCost = boundedReview || evaluationWithoutCostCap ? 0 : personas.length > 0 ? Math.max(0.25, maxCostUsd / personas.length) : 0;
   let runningCostUsd = 0;
 
   const personaResults = await runWithConcurrency(personas, maxParallel, async (personaId) => {
@@ -1114,7 +1135,7 @@ export async function runOmarGateOrchestrator({
     };
 
     // Global budget check — skip remaining personas if exhausted
-    if (!evaluationWithoutCostCap && runningCostUsd >= maxCostUsd) {
+    if (!boundedReview && !evaluationWithoutCostCap && runningCostUsd >= maxCostUsd) {
       if (onEvent) {
         onEvent(createAgentEvent({
           event: "persona_skipped",
@@ -1166,6 +1187,7 @@ export async function runOmarGateOrchestrator({
 
     try {
       const swarmResult = await runOmarPersonaSwarm({
+        boundedReview,
         personaId,
         identity,
         targetPath,
@@ -1256,6 +1278,7 @@ export async function runOmarGateOrchestrator({
         ...(severityClassifier === "typesafe" ? { severityClassifier } : {}),
         sessionId: usageSessionId || `${runId}-${personaId}-ai`,
         maxCostUsd: perPersonaCost,
+        boundedReview,
         systemPrompt,
         dryRun,
         requireUsageLedger,
@@ -1414,7 +1437,7 @@ export async function runOmarGateOrchestrator({
   );
 
   const totalCost = settled.reduce((sum, r) => sum + (r.costUsd || 0), 0);
-  const aiCallEvidence = combineAiCallEvidence(settled.map((result) => result.aiCallEvidence));
+  const aiCallEvidence = combineAiCallEvidence(settled.map((result) => result.aiCallEvidence), boundedReview);
   const totalDuration = Date.now() - startTime;
 
   // Silent-failure detection requires evidence of an actual provider call.
@@ -1507,6 +1530,7 @@ export async function runOmarGateOrchestrator({
     })),
     personaHealth,
     coverage,
+    ...(boundedReview ? { modelTokenExposure: boundedReview.snapshot() } : {}),
     findings: reconciledFindings,
     findingsBySource: {
       deterministic: detFindings.length,

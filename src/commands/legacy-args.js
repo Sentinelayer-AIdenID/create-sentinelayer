@@ -54,6 +54,7 @@ export function buildLegacyArgs(baseArgs, { commandOptions = {}, command } = {})
   appendPassthroughFlag(args, "--scan-mode", commandOptions.scanMode);
   appendPassthroughFlag(args, "--max-parallel", commandOptions.maxParallel);
   appendPassthroughFlag(args, "--max-cost", commandOptions.maxCost);
+  appendPassthroughFlag(args, "--max-model-token-exposure", commandOptions.maxModelTokenExposure);
   appendPassthroughFlag(args, "--max-runtime-minutes", commandOptions.maxRuntimeMinutes);
   appendPassthroughFlag(args, "--model", commandOptions.model);
   appendPassthroughFlag(args, "--provider", commandOptions.provider);

@@ -24,6 +24,7 @@ import {
   userCredential,
 } from "./auth/credential-destinations.js";
 import { resolveOutputRoot } from "./config/service.js";
+import { normalizeExposureOption } from "./commands/exposure-option.js";
 import { normalizeAgentEvent } from "./events/schema.js";
 import { collectCodebaseIngest, formatIngestSummary } from "./ingest/engine.js";
 import { getExpressTemplate, getPackageJsonTemplate, buildReadmeContent } from "./scaffold/templates.js";
@@ -1153,7 +1154,9 @@ function buildOmarTerminalHandler({ startedAt = Date.now() } = {}) {
         const count = roster.length || payload.personas?.length || 0;
         console.error("");
         console.error(pc.bold(pc.cyan(`  Omar Gate AI Analysis (${mode} — ${count} personas) ${pc.gray(`[${elapsed}]`)}`)));
-        console.error(pc.gray(`  Budget: $${(payload.maxCostUsd || 5).toFixed(2)} | Parallel: ${payload.maxParallel || 4}`));
+        console.error(pc.gray(payload.modelTokenExposure
+          ? `  Model-token exposure: $${payload.modelTokenExposure.capUsd} under pinned rate policy (not invoice/account cap) | Parallel: ${payload.maxParallel || 4}`
+          : `  Budget: $${(payload.maxCostUsd || 5).toFixed(2)} | Parallel: ${payload.maxParallel || 4}`));
         if (roster.length) {
           console.error("");
           console.error(pc.bold("  Roster:"));
@@ -1353,6 +1356,12 @@ async function runLocalOmarGateCommand(args) {
   const outputDirArg = getCommandOptionValue(args, "--output-dir") || "";
   const aiEnabled = !hasCommandOption(args, "--no-ai");
   const aiDryRun = hasCommandOption(args, "--ai-dry-run");
+  const maxModelTokenExposureUsd = hasCommandOption(args, "--max-model-token-exposure")
+    ? getCommandOptionValue(args, "--max-model-token-exposure") : null;
+  if (maxModelTokenExposureUsd !== null) {
+    (await import("./cost/run-admission.js")).parseExposureUsd(maxModelTokenExposureUsd);
+    if (!aiEnabled || aiDryRun) throw new Error("Model-token exposure mode requires live AI.");
+  }
   const { normalizeSeverityClassifier, parseSeverityEvaluationMaxCost } = await import("./review/typesafe-severity.js");
   const severityClassifier = normalizeSeverityClassifier(getCommandOptionValue(args, "--severity-classifier") || "off");
   const maxCostFlag = getCommandOptionValue(args, "--max-cost");
@@ -1396,7 +1405,9 @@ async function runLocalOmarGateCommand(args) {
     printInfo(`Target: ${targetPath}`);
     printInfo(`Scope mode: ${scopeMode}`);
     printInfo(`Scan mode: ${scanMode} | AI: ${aiEnabled ? "enabled" : "disabled"}`);
-    if (notifySession) {
+    if (maxModelTokenExposureUsd !== null) {
+      printInfo(`Usage evidence: local only${notifySession ? ` (session ${notifySession})` : ""}; no remote billing entries.`);
+    } else if (notifySession) {
       printInfo(
         `Usage ledger: ${usageSession.source === "explicit" ? "using" : "auto-detected"} Senti session ${notifySession}`,
       );
@@ -1454,6 +1465,7 @@ async function runLocalOmarGateCommand(args) {
         provider: providerOverride || undefined,
         model: modelOverride || undefined,
         maxCostUsd,
+        maxModelTokenExposureUsd,
         ...(severityClassifier === "typesafe" ? { severityClassifier } : {}),
         dryRun: aiDryRun,
         outputDir: outputDirArg,
@@ -1489,9 +1501,9 @@ async function runLocalOmarGateCommand(args) {
         findings: aiOnlyFindings,
         summary: aiOnlySummary,
         costUsd: orchestratorResult.totalCostUsd || 0,
-        model: modelOverride || "multi-persona",
+        model: orchestratorResult.modelTokenExposure?.policy.model || modelOverride || "multi-persona",
         ...(severityClassifier === "typesafe" ? { severityClassification: orchestratorResult.severityClassification } : {}),
-        provider: providerOverride || "sentinelayer",
+        provider: orchestratorResult.modelTokenExposure?.policy.provider || providerOverride || "sentinelayer",
         dryRun: aiDryRun,
         personas: (orchestratorResult.personas || []).map((p) => ({
           id: p.id || p.personaId,
@@ -1558,6 +1570,8 @@ async function runLocalOmarGateCommand(args) {
   const aiFindings = aiResult?.findings || [];
   const aiCoverageFailed = aiEnabled && aiResult?.skipped === true;
   const coverage = orchestratorResult?.coverage || (aiCoverageFailed ? { status: "incomplete" } : null);
+  const modelTokenExposure = orchestratorResult?.modelTokenExposure || (maxModelTokenExposureUsd !== null
+    ? { mode: "pinned-rate-model-token-exposure", invoiceGuarantee: false, status: "refused", reason: aiResult?.reason || "review unavailable" } : null);
   const coverageFailureFindings = aiCoverageFailed ? [{
     severity: "P1", file: "<omargate>", line: 1,
     message: "Omar AI coverage incomplete: the requested AI review did not complete.",
@@ -1605,6 +1619,7 @@ async function runLocalOmarGateCommand(args) {
       basePersonas: orchestratorResult.basePersonas || [],
       personaRouting: orchestratorResult.personaRouting || null,
       coverage,
+      modelTokenExposure,
       findings: (orchestratorResult.personas || []).flatMap((p) => []),
       aiFindings: aiFindings,
       personaCount: (orchestratorResult.personas || []).length,
@@ -1615,6 +1630,7 @@ async function runLocalOmarGateCommand(args) {
       runId: orchestratorResult.runId,
       personas: orchestratorResult.personas || [],
       coverage,
+      modelTokenExposure,
     });
     artifactPaths.reconciled = await writeJsonArtifact("REVIEW_RECONCILED.json", {
       runId: orchestratorResult.runId,
@@ -1624,6 +1640,7 @@ async function runLocalOmarGateCommand(args) {
       personaRouting: orchestratorResult.personaRouting || null,
       findingsBySource: orchestratorResult.findingsBySource,
       coverage,
+      modelTokenExposure,
     });
   }
 
@@ -1642,6 +1659,7 @@ Summary:
 - Scope mode: ${scopeMode}
 - Persona routing: ${orchestratorResult?.personaRouting?.enabled ? `${orchestratorResult.personaRouting.effectivePersonas.length}/${orchestratorResult.personaRouting.basePersonas.length} personas for ${orchestratorResult.personaRouting.changedFileCount} changed files` : "full roster"}
 - AI coverage: ${coverage?.status || (aiEnabled ? "unknown" : "not requested")}
+${modelTokenExposure ? `- Model-token exposure: cap=${modelTokenExposure.capUsd || "refused"}, settled=${modelTokenExposure.settledUsd || "0"}, reserved=${modelTokenExposure.reservedUsd || "0"} USD; assurance=${modelTokenExposure.assuranceStatus || "refused"} (pinned rate policy; not an invoice/account cap)` : ""}
 - Deterministic findings: P0=${detSummary.P0} P1=${detSummary.P1} P2=${detSummary.P2} P3=${detSummary.P3 || 0}
 - AI findings (raw, pre-reconciliation): ${aiResult ? `P0=${aiResult.summary?.P0 || 0} P1=${aiResult.summary?.P1 || 0} P2=${aiResult.summary?.P2 || 0} P3=${aiResult.summary?.P3 || 0}` : "skipped"}
 - Reconciled (deduped + confidence-boosted): P0=${combinedP0} P1=${combinedP1} P2=${combinedP2} P3=${combinedP3}
@@ -1684,6 +1702,7 @@ ${formatFindingsMarkdown(allFindings)}
           p3: combinedP3,
           blocking: combinedP0 > 0 || combinedP1 > 0,
           coverage,
+          modelTokenExposure,
           elapsedMs: totalElapsedMs,
           artifacts: artifactPaths,
           deterministic: {
@@ -1697,6 +1716,7 @@ ${formatFindingsMarkdown(allFindings)}
                 model: aiResult.model || null,
                 provider: aiResult.provider || null,
                 costUsd: aiResult.costUsd || 0,
+                ...(modelTokenExposure?.policySha256 ? { accounting: { tokenBasis: "provider_reported", costBasis: "pinned_rate_conservative_exposure", policySha256: modelTokenExposure.policySha256 } } : {}),
                 dryRun: aiDryRun,
                 personas: aiResult.personas || [],
               }
@@ -1714,7 +1734,7 @@ ${formatFindingsMarkdown(allFindings)}
     console.log(pc.cyan(`Report: ${reportPath}`));
     console.log(`Deterministic: P1=${detSummary.P1} P2=${detSummary.P2}`);
     if (aiResult) {
-      console.log(`AI layer: P1=${aiResult.summary?.P1 || 0} P2=${aiResult.summary?.P2 || 0} (model: ${aiResult.model || "default"}, cost: $${(aiResult.costUsd || 0).toFixed(4)})`);
+      console.log(`AI layer: P1=${aiResult.summary?.P1 || 0} P2=${aiResult.summary?.P2 || 0} (model: ${aiResult.model || "default"}, ${modelTokenExposure ? "pinned-rate exposure" : "cost"}: $${(aiResult.costUsd || 0).toFixed(4)})`);
     } else if (aiEnabled) {
       console.log(pc.gray("AI layer: skipped (no credentials or --no-ai)"));
     }
@@ -3277,6 +3297,7 @@ function printInfo(message) {
 }
 
 export async function runLegacyCli(rawArgs = process.argv.slice(2)) {
+  rawArgs = normalizeExposureOption(rawArgs);
   refreshRuntimeDefaults();
   // The API this flow talks to is the trust context's (environment, then global config): the token
   // it is issued may only be sent there, and a workspace .sentinelayer.yml does not choose it.

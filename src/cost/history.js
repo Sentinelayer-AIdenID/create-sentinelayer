@@ -25,6 +25,13 @@ function normalizeProgressScore(value) {
   return normalized;
 }
 
+function normalizeAccounting(value) {
+  if (value?.tokenBasis !== "provider_reported" || value?.costBasis !== "pinned_rate_conservative_exposure" || !/^[a-f0-9]{64}$/.test(value?.policySha256 || "")) {
+    throw new Error("Invalid cost accounting provenance.");
+  }
+  return { tokenBasis: value.tokenBasis, costBasis: value.costBasis, policySha256: value.policySha256 };
+}
+
 function normalizeEntry(entry) {
   if (!entry || typeof entry !== "object") {
     throw new Error("Cost entry must be an object.");
@@ -57,6 +64,7 @@ function normalizeEntry(entry) {
     toolCalls: normalizeNumber(entry.toolCalls, "entry.toolCalls"),
     costUsd: normalizeNumber(entry.costUsd, "entry.costUsd"),
     progressScore: normalizeProgressScore(entry.progressScore),
+    ...(entry.accounting ? { accounting: normalizeAccounting(entry.accounting) } : {}),
   };
 }
 
