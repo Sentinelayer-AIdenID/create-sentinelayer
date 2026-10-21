@@ -42,6 +42,15 @@ async function runFixture(mode) {
     if (["wrong-existing", "right-existing"].includes(mode)) run("git", ["tag", "-s", "v1.0.0", mode === "wrong-existing" ? previous : expected, "-m", "owned fixture"]);
     if (mode === "unsigned-existing") run("git", ["tag", "-a", "v1.0.0", expected, "-m", "owned unsigned fixture"]);
     if (mode === "lightweight-existing") run("git", ["tag", "v1.0.0", expected]);
+    if (mode === "nested-signed-tag") {
+      run("git", ["tag", "-s", "inner", expected, "-m", "owned inner"]);
+      run("git", ["tag", "-s", "v1.0.0", "refs/tags/inner", "-m", "owned outer"]);
+    }
+    if (mode === "replacement-object") {
+      run("git", ["tag", "-s", "v1.0.0", previous, "-m", "owned original"]);
+      run("git", ["tag", "-s", "replacement", expected, "-m", "owned replacement"]);
+      run("git", ["replace", run("git", ["rev-parse", "refs/tags/v1.0.0"]), run("git", ["rev-parse", "refs/tags/replacement"])]);
+    }
     const receipt = path.join(owned, "receipt.json");
     run(process.execPath, [harness, root, mode, expected, previous, publicKey, receipt]);
     return { ...JSON.parse(await readFile(receipt, "utf8")), expected, previous };
@@ -77,4 +86,20 @@ test("release helper still refuses missing captured target, unsigned tags and li
     assert.equal(result.pushed, false);assert.ok(result.error);
     assert.equal(result.calls.some(c => c.command === "gh" && c.args[0] === "release"), false);
   }
+});
+
+test("release helper refuses a signed nested tag before push using direct object semantics", async () => {
+  const result = await runFixture("nested-signed-tag");
+  assert.equal(result.pushed, false);assert.match(result.error, /directly target a commit/);
+});
+
+test("release helper pushes the verified immutable tag object when its local ref moves", async () => {
+  const result = await runFixture("move-tag-after-check");
+  assert.equal(result.error, null);assert.equal(result.pushedTarget, result.expected);assert.equal(result.target, result.previous);
+  assert.ok(result.calls.some(c => c.command === "git" && c.args[0] === "--no-replace-objects" && c.args[1] === "verify-tag" && c.args[2] === result.pushedObject));
+});
+
+test("release helper refuses a wrong raw tag hidden by a valid signed replacement object", async () => {
+  const result = await runFixture("replacement-object");
+  assert.equal(result.pushed, false);assert.match(result.error, /not expected release commit/);
 });

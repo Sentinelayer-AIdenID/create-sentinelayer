@@ -13,6 +13,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..");
 const TAG_PATTERN = /^v\d+\.\d+\.\d+(?:[.-][0-9A-Za-z.-]+)?$/;
+const OBJECT_ID_PATTERN = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 export const REMOTE_TAG_REF_RETRY_DELAYS_MS = Object.freeze([500, 1000, 2000, 4000, 5000]);
 export const RELEASE_PLEASE_RUN_RETRY_DELAYS_MS = Object.freeze([
   5000,
@@ -181,12 +182,7 @@ export function assertTrustedRemoteTag({ tag, ref, tagObject, policy, expectedTa
     );
   }
 
-  const targetSha = String(tagObject?.object?.sha || "").trim();
-  if (expectedTargetSha && targetSha !== expectedTargetSha) {
-    throw new Error(
-      `Remote tag '${tag}' points at '${targetSha || "<unknown>"}', not expected release commit '${expectedTargetSha}'.`
-    );
-  }
+  const targetSha = assertTagCommitTarget(tag, tagObject?.object, expectedTargetSha);
 
   return {
     objectType,
@@ -194,6 +190,19 @@ export function assertTrustedRemoteTag({ tag, ref, tagObject, policy, expectedTa
     targetSha,
     verificationReason: verification.reason || "unknown",
   };
+}
+
+function assertTagCommitTarget(tag, object, expectedTargetSha) {
+  if (object?.type !== "commit") {
+    throw new Error(`Tag '${tag}' must directly target a commit, not '${object?.type || "<unknown>"}'.`);
+  }
+  const targetSha = String(object?.sha || "").trim();
+  if (expectedTargetSha && targetSha !== expectedTargetSha) {
+    throw new Error(
+      `Tag '${tag}' points at '${targetSha || "<unknown>"}', not expected release commit '${expectedTargetSha}'.`
+    );
+  }
+  return targetSha;
 }
 
 export function buildGhReleaseArgs(tag, options) {
@@ -584,9 +593,9 @@ export function finalizeReleasePullRequestLabels(repository, version, options = 
 }
 
 function ensureMainHead() {
-  run("git", ["fetch", "origin", "main", "--tags"]);
-  const head = run("git", ["rev-parse", "HEAD"], { capture: true }).trim();
-  const originMain = run("git", ["rev-parse", "origin/main"], { capture: true }).trim();
+  rawGit(["fetch", "origin", "main", "--tags"]);
+  const head = rawGit(["rev-parse", "HEAD"], { capture: true }).trim();
+  const originMain = rawGit(["rev-parse", "origin/main"], { capture: true }).trim();
   if (head !== originMain) {
     throw new Error("Release tags must be created from the current origin/main commit.");
   }
@@ -594,34 +603,40 @@ function ensureMainHead() {
 }
 
 function ensureCleanWorktree() {
-  const status = run("git", ["status", "--porcelain"], { capture: true }).trim();
+  const status = rawGit(["status", "--porcelain"], { capture: true }).trim();
   if (status) {
     throw new Error("Worktree must be clean before creating a release tag.");
   }
 }
 
-function localTagType(tag) {
-  const exists = tryRun("git", ["rev-parse", "-q", "--verify", `refs/tags/${tag}`]);
-  if (!exists) return "";
-  return run("git", ["cat-file", "-t", `refs/tags/${tag}`], { capture: true }).trim();
+function rawGit(args, options = {}) {
+  return run("git", ["--no-replace-objects", ...args], options);
 }
 
 function ensureLocalSignedTag(tag, expectedTargetSha) {
-  if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(expectedTargetSha || "")) {
+  if (!OBJECT_ID_PATTERN.test(expectedTargetSha || "")) {
     throw new Error("Expected release commit must be a full Git object SHA before creating or pushing a tag.");
   }
-  const type = localTagType(tag);
-  if (type && type !== "tag") {
-    throw new Error(`Local tag '${tag}' is '${type}', not an annotated tag.`);
+  const resolveArgs = ["rev-parse", "--verify", "--end-of-options", `refs/tags/${tag}`];
+  let tagObjectSha = tryRun("git", ["--no-replace-objects", ...resolveArgs])?.trim();
+  if (!tagObjectSha) {
+    rawGit(["tag", "-s", tag, expectedTargetSha, "-m", `sentinelayer-cli ${tag}`]);
+    tagObjectSha = rawGit(resolveArgs, { capture: true }).trim();
   }
-  if (!type) {
-    run("git", ["tag", "-s", tag, expectedTargetSha, "-m", `sentinelayer-cli ${tag}`]);
+  if (!OBJECT_ID_PATTERN.test(tagObjectSha)) throw new Error("Local release tag did not resolve to a full Git object SHA.");
+  const type = rawGit(["cat-file", "-t", tagObjectSha], { capture: true }).trim();
+  if (type !== "tag") throw new Error(`Local tag '${tag}' is '${type}', not an annotated tag.`);
+  rawGit(["verify-tag", tagObjectSha]);
+  const [objectHeader, typeHeader] = rawGit(["cat-file", "-p", tagObjectSha], { capture: true }).split(/\r?\n/);
+  const directTarget = {
+    sha: objectHeader?.match(/^object ([0-9a-f]+)$/)?.[1],
+    type: typeHeader?.match(/^type (\S+)$/)?.[1],
+  };
+  const targetSha = assertTagCommitTarget(tag, directTarget, expectedTargetSha);
+  if (rawGit(["cat-file", "-t", targetSha], { capture: true }).trim() !== "commit") {
+    throw new Error(`Tag '${tag}' direct target is not a stored commit object.`);
   }
-  run("git", ["tag", "-v", tag]);
-  const targetSha = run("git", ["rev-parse", "--verify", "--end-of-options", `refs/tags/${tag}^{commit}`], { capture: true }).trim();
-  if (targetSha !== expectedTargetSha) {
-    throw new Error(`Local tag '${tag}' points at '${targetSha}', not expected release commit '${expectedTargetSha}'.`);
-  }
+  return tagObjectSha;
 }
 
 function printUsage() {
@@ -678,8 +693,8 @@ export function main(argv = process.argv.slice(2)) {
     );
   } else {
     assertGitHubCanVerifyConfiguredSigningKey(viewer);
-    ensureLocalSignedTag(tag, expectedTargetSha);
-    run("git", ["push", "origin", `refs/tags/${tag}:refs/tags/${tag}`]);
+    const tagObjectSha = ensureLocalSignedTag(tag, expectedTargetSha);
+    rawGit(["push", "origin", `${tagObjectSha}:refs/tags/${tag}`]);
 
     const pushedRef = waitForRemoteTagRef(repository, tag);
     if (!pushedRef) {

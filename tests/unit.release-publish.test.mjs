@@ -149,7 +149,7 @@ test("Release publish helper requires GitHub-verified allowlisted tag signatures
       tagObject: {
         verification: { verified: true, reason: "valid" },
         tagger: { email: "32074640+mrrCarter@users.noreply.github.com" },
-        object: { sha: "release-sha" },
+        object: { type: "commit", sha: "release-sha" },
       },
       policy: POLICY,
       expectedTargetSha: "release-sha",
@@ -170,13 +170,29 @@ test("Release publish helper requires GitHub-verified allowlisted tag signatures
         tagObject: {
           verification: { verified: true, reason: "valid" },
           tagger: { email: "32074640+mrrCarter@users.noreply.github.com" },
-          object: { sha: "old-sha" },
+          object: { type: "commit", sha: "old-sha" },
         },
         policy: POLICY,
         expectedTargetSha: "release-sha",
       }),
     /not expected release commit/
   );
+});
+
+test("Release publish helper requires a direct commit target in the remote tag object", () => {
+  for (const type of ["tag", "tree", "blob", undefined]) {
+    assert.throws(() => assertTrustedRemoteTag({
+      tag: "v0.17.0",
+      ref: { object: { type: "tag", sha: "tag-sha" } },
+      tagObject: {
+        verification: { verified: true },
+        tagger: { email: "32074640+mrrCarter@users.noreply.github.com" },
+        object: { type, sha: "release-sha" },
+      },
+      policy: POLICY,
+      expectedTargetSha: "release-sha",
+    }), /directly target a commit/);
+  }
 });
 
 test("Release publish helper creates GitHub releases with --verify-tag only", () => {
