@@ -327,6 +327,8 @@ Options:
 - `--output-dir <path>` artifact root override
 - `--json` machine-readable event stream + summary
 
+An `outputDir` set in the workspace `.sentinelayer.yml` must be relative and stay inside that workspace, including through existing symlinks or junctions. User-selected `--output-dir` overrides and global configuration can still select an external artifact directory. Filesystem containment is checked before writing; it is not a sandbox against concurrent filesystem changes.
+
 By default, watch output is persisted to:
 
 - `.sentinelayer/observability/runtime-watch/<run-id>/events-<timestamp>.ndjson`
