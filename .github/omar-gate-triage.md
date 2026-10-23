@@ -93,13 +93,16 @@ ok 1 - lockfile is compatible with Jev action dep audit (no peerOptional/link ma
 ok 2 - npm audit reports zero high or critical advisories (P1 gate compat)
 ```
 
-## Workflow security: pull_request_target
+## Workflow security: pull_request (initial PR)
 
-The workflow now uses `pull_request_target` instead of `pull_request` as the
-event trigger. This ensures the workflow YAML always executes from the base ref
-(`main`), so a PR that modifies `.github/workflows/omar-gate-jev.yml` cannot
-exfiltrate secrets. The `actions/checkout` step still checks out the PR head
-for review.
+The workflow uses `pull_request` because it is new in this PR and does not
+exist on `main` yet. Using `pull_request_target` would load the workflow from
+`main` where the file is absent, so the Jev check would not run on this PR.
+After this PR merges, a follow-up PR must switch to `pull_request_target` so
+that future PR modifications to this file cannot exfiltrate secrets. The
+`actions/checkout` step still checks out the PR head for review.
+Fork PRs are skipped at the job level; `fork_policy: block` ensures the
+action fails closed if secrets are absent.
 
 ## Summary
 

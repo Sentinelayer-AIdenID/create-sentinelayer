@@ -1,22 +1,25 @@
 name: Omar Gate (Jev)
 on:
-  pull_request_target:
+  pull_request:
     types: [opened, synchronize, reopened]
-# Write scopes publish the PR report (comment + check run, tagged jev so it never overwrites the legacy Omar Gate's), exactly like the legacy omar-gate.yml. GitHub gives fork PRs a read-only token, and fork_policy: block fails them closed.
+# Write scopes publish the PR report (comment + check run, tagged jev so it
+# never overwrites the legacy Omar Gate's), exactly like the legacy
+# omar-gate.yml. GitHub gives fork PRs a read-only token.
 permissions:
   contents: read
   actions: read
   pull-requests: write
   checks: write
-# pull_request_target: the workflow file always executes from the base ref
-# (main), so a PR that modifies this file cannot exfiltrate secrets. The
-# actions/checkout step below explicitly checks out the PR head for review.
+# NOTE: Uses pull_request (not pull_request_target) because this workflow is
+# NEW in this PR and does not exist on main yet. pull_request_target would
+# load from main where the file is absent, so the check would not run.
+# After this PR merges, a follow-up PR MUST switch to pull_request_target
+# so that future PR modifications to this file cannot exfiltrate secrets.
 # Fork PRs are skipped at the job level (matching omar-gate.yml). Fork PRs
-# do not receive the private configuration secrets (TYPESAFE_API_KEY,
-# OPENAI_API_KEY, etc.) so the action cannot perform a real review. Skipping
-# is safe here because the main omar-gate.yml already covers fork PRs with
-# its untrusted scan path. For non-fork PRs, fork_policy: block provides
-# defense-in-depth: if secrets are somehow absent, the action fails closed.
+# do not receive the private configuration secrets, so the action cannot
+# perform a real review. The main omar-gate.yml covers fork PRs with its
+# untrusted scan path. fork_policy: block provides defense-in-depth:
+# if secrets are somehow absent, the action fails closed.
 jobs:
   omar-jev:
     if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}

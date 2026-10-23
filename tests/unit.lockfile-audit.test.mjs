@@ -16,11 +16,14 @@ try {
   throw new Error(`Failed to read package-lock.json: ${err.message}`);
 }
 
-test("lockfile is compatible with Jev action dep audit (no peerOptional/link markers)", () => {
-  // The Jev action at sentinelayer-v1-action (ebfcb813) accepts npm v3 "peer": true
-  // markers (they are standard npm behavior for packages hoisted as peers).
-  // It still rejects peerOptional: true and link: true which indicate
-  // genuinely incomplete resolution data.
+test("lockfile is compatible with Jev action dep audit", () => {
+  // The Jev action at sentinelayer-v1-action@ebfcb813 runs dep_audit.py
+  // which rejects lockfile v2 markers (peerOptional, link) that indicate
+  // incomplete resolution data. npm v3 lockfiles include "peer": true for
+  // hoisted peer dependencies — these are standard npm behavior. The action
+  // may also check for unknown markers; we verify only the known-rejected
+  // markers are absent. If a CI run reveals additional rejections, the
+  // lockfile must be regenerated with a compatible npm version.
   const packages = lockfile.packages || {};
   const blocked = [];
   for (const [key, record] of Object.entries(packages)) {
