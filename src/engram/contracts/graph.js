@@ -125,7 +125,7 @@ export const assertionSchema = z.object({
   id: z.string().min(1),
   subject: z.string().min(1),
   predicate: z.string().min(1),
-  object: z.unknown(),
+  object: z.json(),
   provenance: provenanceClassSchema,
   schemaValidity: schemaValiditySchema,
   modelConfidence: modelConfidenceSchema.optional(),
