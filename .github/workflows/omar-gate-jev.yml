@@ -1,6 +1,6 @@
 name: Omar Gate (Jev)
 on:
-  pull_request_target:
+  pull_request:
     types: [opened, synchronize, reopened]
 # Write scopes publish the PR report (comment + check run, tagged jev so it
 # never overwrites the legacy Omar Gate's), exactly like the legacy
@@ -10,11 +10,6 @@ permissions:
   actions: read
   pull-requests: write
   checks: write
-# SECURITY: Uses pull_request_target so the workflow definition always
-# loads from the target branch (master after merge) — PR modifications
-# to this file cannot exfiltrate secrets. GitHub gives fork PRs a
-# read-only token; the action fails closed via fork_policy: block.
-# The main omar-gate.yml covers fork PRs with its untrusted scan path.
 jobs:
   omar-jev:
     runs-on: ubuntu-latest
