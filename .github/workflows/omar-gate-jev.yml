@@ -1,18 +1,22 @@
 name: Omar Gate (Jev)
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, reopened]
+# Write scopes publish the PR report (comment + check run, tagged jev so it never overwrites the legacy Omar Gate's), exactly like the legacy omar-gate.yml. GitHub gives fork PRs a read-only token, and fork_policy: block fails them closed.
 permissions:
   contents: read
-  pull-requests: read
   actions: read
-  checks: read
-# Fork PR policy: Forks are skipped at the job level (matching omar-gate.yml).
-# Fork PRs do not receive the private configuration secrets (TYPESAFE_API_KEY,
+  pull-requests: write
+  checks: write
+# pull_request_target: the workflow file always executes from the base ref
+# (main), so a PR that modifies this file cannot exfiltrate secrets. The
+# actions/checkout step below explicitly checks out the PR head for review.
+# Fork PRs are skipped at the job level (matching omar-gate.yml). Fork PRs
+# do not receive the private configuration secrets (TYPESAFE_API_KEY,
 # OPENAI_API_KEY, etc.) so the action cannot perform a real review. Skipping
-# is safe here because the main omar-gate.yml already covers fork PRs with its
-# untrusted scan path. For non-fork PRs, fork_policy: block provides defense-
-# in-depth: if secrets are somehow absent, the action fails closed.
+# is safe here because the main omar-gate.yml already covers fork PRs with
+# its untrusted scan path. For non-fork PRs, fork_policy: block provides
+# defense-in-depth: if secrets are somehow absent, the action fails closed.
 jobs:
   omar-jev:
     if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
@@ -25,7 +29,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Omar Gate (Jev intent cascade)
-        uses: Sentinelayer-AIdenID/sentinelayer-v1-action@3af4d16d0ea6ad315684b6944d32dfad071e763e
+        uses: Sentinelayer-AIdenID/sentinelayer-v1-action@fa8a4379d5e61da644a62ba8e18f62a3462f10d2
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           review_routing: intent-cascade-v1
@@ -44,7 +48,8 @@ jobs:
           sentinelayer_managed_llm: "false"
           llm_failure_policy: block
           fork_policy: block
-          publish_github: "false"
+          publish_github: "true"
+          comment_tag: jev
       - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874
         if: always()
         with:
