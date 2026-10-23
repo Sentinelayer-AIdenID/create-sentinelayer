@@ -16,7 +16,7 @@ const path = require("node:path");
 
 const lockFile = process.env.LOCK_FILE || ".github/policies/actions-lock.json";
 const workflowRoots = [".github/workflows", ".github/actions"];
-const usesPattern = /^\s*uses:\s*([^\s#]+)@([A-Za-z0-9._-]+)\b/;
+const usesPattern = /^\s*-?\s*uses:\s*([^\s#]+)@([A-Za-z0-9._-]+)\b/;
 const shaPattern = /^[a-f0-9]{40}$/;
 const broadVersionCommentPattern = /^v\d+$/i;
 
@@ -138,3 +138,31 @@ function main() {
 
 main();
 NODE
+
+# Self-test: verify the lock file contains required entries
+if [ "${SELF_TEST:-}" = "1" ]; then
+  echo "=== verify-workflow-action-pins self-test ==="
+  
+  # Check Jev action is allowed
+  if ! node -e "
+    const lock = require('$(pwd)/.github/policies/actions-lock.json');
+    const jevPins = lock['Sentinelayer-AIdenID/sentinelayer-v1-action'];
+    if (!jevPins || !jevPins.includes('ebfcb813126ff64f21bb1fccfef8ab30609af67c')) {
+      console.error('FAIL: Jev action pin not in lock policy');
+      process.exit(1);
+    }
+    console.log('PASS: Jev action pin in lock policy');
+  "; then
+    exit 1
+  fi
+  
+  # Check the Jev workflow file exists and references the correct pin
+  if ! grep -q 'Sentinelayer-AIdenID/sentinelayer-v1-action@ebfcb813126ff64f21bb1fccfef8ab30609af67c' \
+    .github/workflows/omar-gate-jev.yml; then
+    echo "FAIL: Jev workflow does not reference the allowed pin"
+    exit 1
+  fi
+  echo "PASS: Jev workflow references allowed pin"
+  echo "=== self-test passed ==="
+  exit 0
+fi

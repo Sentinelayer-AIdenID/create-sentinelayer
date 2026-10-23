@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
@@ -40,7 +40,7 @@ jobs:
           llm_failure_policy: block
           fork_policy: block
           publish_github: "false"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874
         if: always()
         with:
           name: omar-jev-${{ github.run_id }}
