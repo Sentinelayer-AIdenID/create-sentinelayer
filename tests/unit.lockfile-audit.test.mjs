@@ -17,7 +17,7 @@ try {
 }
 
 test("lockfile is compatible with Jev action dep audit (no peerOptional/link markers)", () => {
-  // The Jev action at sentinelayer-v1-action@3af4d16 accepts npm v3 "peer": true
+  // The Jev action at sentinelayer-v1-action (ebfcb813) accepts npm v3 "peer": true
   // markers (they are standard npm behavior for packages hoisted as peers).
   // It still rejects peerOptional: true and link: true which indicate
   // genuinely incomplete resolution data.

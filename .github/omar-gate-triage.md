@@ -24,8 +24,8 @@ Gate run: 39941411025
 - The lockfile has been verified compatible: no `peerOptional` or `link` markers
   (see test `unit.lockfile-audit.test.mjs`), and `npm audit --audit-level=critical`
   reports 0 vulnerabilities.
-- Action pin updated to `fa8a4379d5e61da644a62ba8e18f62a3462f10d2` (HEAD of
-  Sentinelayer-AIdenID/sentinelayer-v1-action as of 2026-10-23).
+- Action pin restored to `ebfcb813126ff64f21bb1fccfef8ab30609af67c` (release/v1.3.x base of
+  Sentinelayer-AIdenID/sentinelayer-v1-action; the original pin from PR #861).
 
 ## P1: `src/legacy-cli.js:606` — Secret-shaped string in source
 
@@ -46,9 +46,11 @@ The `mrrCarter/sentinelayer-v1-action` `dep_audit` harness runs `npm audit
 as `HARNESS-NPM-AUDIT` findings at P1 severity. High, moderate, and low
 advisories do not produce gate findings from the dep audit suite.
 
-The Sentinelayer-AIdenID fork at `fa8a4379` does not include `dep_audit.py` and
-does not perform dependency auditing. Dependency audit coverage is provided by
-the main `omar-gate.yml` workflow which uses the `mrrCarter` fork
+The Sentinelayer-AIdenID fork at `ebfcb813` includes `dep_audit.py` with the
+`unsafe_lockfile` rejection that blocked the original run. That rejection has
+been resolved by making the lockfile compatible (no `peerOptional` or `link`
+markers). Dependency audit coverage for non-Jev scans is provided by the main
+`omar-gate.yml` workflow which uses the `mrrCarter` fork
 (`8afb7dbb42a5e1c25233d422c4cabe401ba02380`).
 
 Current npm audit state: `npm audit --json` → 0 vulnerabilities total.
