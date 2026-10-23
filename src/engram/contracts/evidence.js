@@ -62,7 +62,7 @@ export const evidenceAddressSchema = z.object({
 export const evidenceRecordSchema = z.object({
   address: evidenceAddressSchema,
   /** The raw evidence payload (type depends on scheme) */
-  payload: z.unknown(),
+  payload: z.json(),
   /** Schema version of the evidence format */
   schemaVersion: z.literal(EVIDENCE_SCHEMA_VERSION),
   /** When the evidence was collected */

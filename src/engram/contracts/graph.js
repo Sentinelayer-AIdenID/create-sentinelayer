@@ -177,7 +177,8 @@ export function classifyProvenance(assertion, ctx = {}) {
   ) {
     return "authoritative";
   }
-  if (ctx.observedAt && typeof ctx.observedAt === "string") return "observed";
+  const _observedAtRe = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+  if (ctx.observedAt && typeof ctx.observedAt === "string" && _observedAtRe.test(ctx.observedAt)) return "observed";
   return "unknown";
 }
 

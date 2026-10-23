@@ -267,6 +267,12 @@ test("classifyProvenance: authoritative requires isVerified AND evidenceRef (F2)
 
 test("classifyProvenance: observed when observedAt is a string", () => {
   assert.equal(classifyProvenance({ id: "a1" }, { observedAt: "2026-10-23T00:00:00Z" }), "observed");
+  assert.equal(classifyProvenance({ id: "a1" }, { observedAt: "2026-10-23T00:00:00.000Z" }), "observed");
+  assert.equal(classifyProvenance({ id: "a1" }, { observedAt: "2026-10-23T00:00:00+05:30" }), "observed");
+  // Non-datetime strings must NOT classify as observed
+  assert.equal(classifyProvenance({ id: "a1" }, { observedAt: "banana" }), "unknown");
+  assert.equal(classifyProvenance({ id: "a1" }, { observedAt: "not-a-date" }), "unknown");
+  assert.equal(classifyProvenance({ id: "a1" }, { observedAt: "" }), "unknown");
   // Non-string observedAt must NOT classify as observed
   assert.equal(classifyProvenance({ id: "a1" }, { observedAt: 123456 }), "unknown");
   assert.equal(classifyProvenance({ id: "a1" }, { observedAt: true }), "unknown");

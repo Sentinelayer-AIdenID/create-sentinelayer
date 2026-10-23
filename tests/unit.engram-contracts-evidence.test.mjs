@@ -137,3 +137,13 @@ test("evidenceRecordSchema: REFUSES record without schemaVersion", () => {
   });
   assert.equal(result.success, false);
 });
+
+test("evidenceRecordSchema: REFUSES undefined payload (z.json() rejects undefined)", () => {
+  const result = evidenceRecordSchema.safeParse({
+    address: { scheme: "file", locator: "/data/ev.json", sourceVersion: "v1", tenantScope: "tenant/acme" },
+    payload: undefined,
+    schemaVersion: "engram-evidence/1.0.0",
+    collectedAt: "2026-10-23T00:00:00Z",
+  });
+  assert.equal(result.success, false);
+});
