@@ -36,7 +36,10 @@ export const temporalSegmentSchema = z.object({
   assertionCount: z.number().int().nonnegative().optional(),
   coverageRatio: z.number().min(0).max(1).optional(),
   tenantScope: z.string().min(1),
-}).strict();
+}).strict().refine(
+  (data) => data.endTime > data.startTime,
+  { message: "endTime must be strictly after startTime", path: ["endTime"] },
+);
 
 /**
  * Valid fixture: a complete, valid temporal segment.

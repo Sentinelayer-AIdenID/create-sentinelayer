@@ -50,15 +50,6 @@ export const schemaValiditySchema = z.enum(["valid", "invalid", "unvalidated"]);
 export const modelConfidenceSchema = z.enum(["high", "medium", "low", "unavailable"]);
 
 /**
- * A tenant scope descriptor. Every entity, assertion, and source must declare
- * its tenant scope. Required, not optional (luna-judge finding F2).
- */
-export const tenantScopeDescriptorSchema = z.object({
-  tenantId: z.string().min(1),
-  namespace: z.string().min(1).optional(),
-}).strict();
-
-/**
  * An evidence reference: ties an assertion to a verifiable evidence record.
  * Required for authoritative classification (luna-judge finding F2).
  */
