@@ -7,8 +7,11 @@ permissions:
   pull-requests: read
   actions: read
   checks: read
-# Fork PRs are NOT skipped: a skipped job counts as a passing required check. The action's fork_policy: block fails them
-# closed instead (forks also receive no secrets, so the private configuration is missing and the review is refused).
+# Fork PR policy: Forks are NOT skipped. A skipped required check counts as passing
+# (GitHub treats skipped jobs as success for branch-protection rules). Instead, the
+# action's fork_policy: block fails them closed. Forks receive no secrets (private
+# configuration is missing), so the action refuses the review rather than silently
+# passing. This is the intended security posture: no fork can bypass the gate.
 jobs:
   omar-jev:
     runs-on: ubuntu-latest
@@ -47,4 +50,3 @@ jobs:
           path: .sentinelayer/runs/
           include-hidden-files: true
           if-no-files-found: error
-
