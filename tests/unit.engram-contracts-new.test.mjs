@@ -245,13 +245,37 @@ test("EVIDENCE_SCHEMA_VERSION: pinned to semver", () => {
   assert.ok(/^\d+\.\d+\.\d+$/.test(EVIDENCE_SCHEMA_VERSION));
 });
 
-test("COMPAT_FIXTURES: graphV1 fixture matches GRAPH_SCHEMA_VERSION", () => {
+test("COMPAT_FIXTURES: graphV1 validates against current graphSchema", () => {
   assert.ok(Object.isFrozen(COMPAT_FIXTURES));
   assert.equal(typeof COMPAT_FIXTURES.graphV1, "object");
+  // graphV1 uses the current schema version and must validate
   assert.equal(COMPAT_FIXTURES.graphV1.version, GRAPH_SCHEMA_VERSION);
-  // The compat fixture must be usable with the current graph schema
   const result = graphSchema.safeParse(COMPAT_FIXTURES.graphV1);
   assert.equal(result.success, true, "compat graphV1 must validate against current graphSchema");
+});
+
+test("COMPAT_FIXTURES: prior-version fixture exists for backward-compat testing", () => {
+  // Must have a fixture from a prior contract version — not just the current version
+  assert.ok(COMPAT_FIXTURES.graphV0_9, "prior-version graphV0_9 fixture must exist");
+  assert.equal(typeof COMPAT_FIXTURES.graphV0_9, "object");
+  // The prior-version fixture must differ from the current schema version
+  assert.notEqual(COMPAT_FIXTURES.graphV0_9.version, GRAPH_SCHEMA_VERSION,
+    "prior-version fixture must have a different version than current schema");
+});
+
+test("COMPAT_FIXTURES: prior-version fixture is explicitly rejected", () => {
+  const prior = COMPAT_FIXTURES.graphV0_9;
+  const result = graphSchema.safeParse(prior);
+  // v0.9.0 graphs lack the mandatory source field — the current schema must
+  // explicitly reject them, not silently accept old data without migration.
+  assert.equal(result.success, false,
+    "prior-version graph (v0.9.0) must be rejected by current schema");
+  const messages = result.error.issues.map((i) => i.path.join('.') + ': ' + i.message);
+  // Must report both version mismatch and missing source
+  assert.ok(messages.some((m) => /version/i.test(m)),
+    "must report version mismatch: " + JSON.stringify(messages));
+  assert.ok(messages.some((m) => /source/i.test(m)),
+    "must report missing required source field: " + JSON.stringify(messages));
 });
 
 // --- New tests for luna-judge P1 findings ---

@@ -40,7 +40,39 @@ export const EVIDENCE_SCHEMA_VERSION = "1.0.0";
  * clear migration path).
  */
 export const COMPAT_FIXTURES = Object.freeze({
-  /** Graph v1.0.0 minimal valid fixture. */
+  /**
+   * Prior-version fixture: a graph from a previous contract version (v0.9.0).
+   * This must either validate against the current schema (migration path) or
+   * be explicitly rejected. It proves that the contract handles version skew,
+   * not just same-version data (luna-judge P2 finding — backward-compat req).
+   */
+  graphV0_9: Object.freeze({
+    // v0.9.0 graph lacking mandatory source field (added in v1.0.0).
+    // The current schema must reject this — silent acceptance of old data
+    // without migration is not allowed.
+    version: "0.9.0",
+    assertions: [
+      {
+        id: "assert-v0_9-001",
+        subject: "entity/a",
+        predicate: "connected_to",
+        object: { target: "entity/b" },
+        provenance: "observed",
+        schemaValidity: "valid",
+      },
+    ],
+    generatedAt: "2026-10-22T00:00:00Z",
+    entities: [
+      {
+        id: "entity/a",
+        type: "node",
+        tenantScope: "tenant/default",
+        sourceVersion: "0.9.0",
+      },
+    ],
+  }),
+
+  /** Graph v1.0.0 current-version minimal valid fixture. */
   graphV1: Object.freeze({
     version: "1.0.0",
     assertions: [
