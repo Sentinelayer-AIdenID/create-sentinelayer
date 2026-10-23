@@ -168,6 +168,10 @@ test("classifyProvenance: authoritative when verified with receipt", () => {
 
 test("classifyProvenance: observed when observedAt is present", () => {
   assert.equal(classifyProvenance({ id: "a1" }, { observedAt: "2026-10-23T00:00:00Z" }), "observed");
+  // Non-string observedAt must NOT classify as observed (tightened validation)
+  assert.equal(classifyProvenance({ id: "a1" }, { observedAt: 123456 }), "unknown");
+  assert.equal(classifyProvenance({ id: "a1" }, { observedAt: true }), "unknown");
+  assert.equal(classifyProvenance({ id: "a1" }, { observedAt: null }), "unknown");
 });
 
 test("classifyProvenance: unknown when nothing is known", () => {
