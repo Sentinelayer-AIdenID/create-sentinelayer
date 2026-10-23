@@ -539,3 +539,34 @@ test("validateGraphIntegrity: REJECTS non-object value on money-named field", ()
   assert.ok(errors.some((e) => /money field must be a canonical/i.test(e)),
     "must report non-canonical money: " + JSON.stringify(errors));
 });
+
+test("entitySchema: REFUSES attributes with non-JSON value (z.json() rejects undefined)", () => {
+  const result = entitySchema.safeParse({
+    id: "e1", type: "Person", tenantScope: "tenant/acme",
+    sourceVersion: "1.0.0", capturedAt: "2026-10-23T00:00:00Z",
+    attributes: { value: undefined },
+  });
+  assert.equal(result.success, false,
+    "entity with undefined attribute value must be rejected (z.json() rejects non-JSON)");
+});
+
+test("entitySchema: REFUSES attributes with function value (z.json() rejects functions)", () => {
+  // z.unknown() would silently drop functions; z.json() must reject them
+  const result = entitySchema.safeParse({
+    id: "e1", type: "Person", tenantScope: "tenant/acme",
+    sourceVersion: "1.0.0", capturedAt: "2026-10-23T00:00:00Z",
+    attributes: { callback: () => {}, value: 123 },
+  });
+  assert.equal(result.success, false,
+    "entity with function attribute must be rejected (z.json() rejects non-JSON)");
+});
+
+test("entitySchema: ACCEPTS attributes with valid JSON values", () => {
+  const result = entitySchema.safeParse({
+    id: "e1", type: "Person", label: "Alice", tenantScope: "tenant/acme",
+    sourceVersion: "1.0.0", capturedAt: "2026-10-23T00:00:00Z",
+    attributes: { age: 30, active: true, tags: ["a", "b"], meta: { key: "val" } },
+  });
+  assert.equal(result.success, true,
+    "entity with valid JSON attributes must be accepted: " + JSON.stringify(result.error?.issues));
+});

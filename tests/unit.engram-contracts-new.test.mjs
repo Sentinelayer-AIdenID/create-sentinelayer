@@ -100,6 +100,30 @@ test("temporalSegmentSchema: REFUSES endTime before startTime", () => {
 
 // --- DelegationReference ---
 
+
+test("temporalSegmentSchema: REFUSES equal instants with differing fractional precision", () => {
+  // .10Z and .1Z represent the same instant (luna-judge P2 finding).
+  // String comparison would accept them as strictly ordered; instant
+  // comparison must reject equal timestamps.
+  const r = temporalSegmentSchema.safeParse({
+    ...VALID_TEMPORAL_SEGMENT,
+    startTime: "2026-10-23T12:00:00.10Z",
+    endTime: "2026-10-23T12:00:00.1Z",
+  });
+  assert.equal(r.success, false,
+    "must reject equal instants even with differing fractional precision");
+});
+
+test("temporalSegmentSchema: ACCEPTS genuinely later endTime with precision", () => {
+  const r = temporalSegmentSchema.safeParse({
+    ...VALID_TEMPORAL_SEGMENT,
+    startTime: "2026-10-23T12:00:00.10Z",
+    endTime: "2026-10-23T12:00:00.2Z",
+  });
+  assert.equal(r.success, true,
+    "must accept endTime strictly after startTime regardless of precision");
+});
+
 test("delegationReferenceSchema: accepts valid delegation", () => {
   const r = delegationReferenceSchema.safeParse({
     delegateId: "agent-ew03-001",

@@ -69,7 +69,7 @@ export const entitySchema = z.object({
   id: z.string().min(1),
   type: z.string().min(1),
   label: z.string().optional(),
-  attributes: z.record(z.string(), z.unknown()).optional(),
+  attributes: z.record(z.string(), z.json()).optional(),
   tenantScope: z.string().min(1),
   sourceVersion: z.string().min(1),
   capturedAt: z.string().datetime().optional(),

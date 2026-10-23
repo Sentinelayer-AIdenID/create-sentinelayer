@@ -50,7 +50,7 @@ export const actionReceiptSchema = z.object({
   sourceSnapshot: sourceSnapshotSchema,
   tenantScope: z.string().min(1),
   evidenceRefs: z.array(z.string().min(1)).optional(),
-  metadata: z.record(z.string(), z.unknown()).optional(),
+  metadata: z.record(z.string(), z.json()).optional(),
 }).strict();
 
 /**

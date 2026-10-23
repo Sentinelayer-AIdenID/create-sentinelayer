@@ -21,7 +21,7 @@ import { capabilityVersionSchema } from "./capability.js";
 export const delegationReferenceSchema = z.object({
   delegateId: z.string().min(1),
   capability: capabilityVersionSchema,
-  constraints: z.record(z.string(), z.unknown()).optional(),
+  constraints: z.record(z.string(), z.json()).optional(),
   minVersion: z.string().optional(),
   maxVersion: z.string().optional(),
 }).strict();
@@ -46,7 +46,7 @@ export const taskContextPackSchema = z.object({
   createdAt: z.string().datetime(),
   expiresAt: z.string().datetime().optional(),
   authorizedCrossTenant: z.array(z.string().min(1)).optional(),
-  metadata: z.record(z.string(), z.unknown()).optional(),
+  metadata: z.record(z.string(), z.json()).optional(),
 }).strict().refine(
   (data) => {
     const packTenant = data.tenantScope;

@@ -46,15 +46,22 @@ export const evidenceAddressSchema = z.object({
   tenantScope: z.string().min(1),
   /** Whether the evidence is still reachable */
   reachable: z.boolean().optional(),
+  /** Verifier identity — who attested this address was not screenshot-inferred */
+  verifiedBy: z.string().min(1).optional(),
 }).strict().refine(
   (addr) => {
     // At least one of sourceVersion or contentHash must be present to
     // guard against screenshot-inferred evidence.
-    return !!(addr.sourceVersion || addr.contentHash);
+    if (!addr.sourceVersion && !addr.contentHash) return false;
+    // A verifier must attest that this address was not screenshot-derived.
+    // Self-supplied hashes or version strings without a verifier identity
+    // do not establish provenance (luna-judge P2 finding).
+    if (!addr.verifiedBy) return false;
+    return true;
   },
   {
-    message: "evidence address must have sourceVersion or contentHash to prove it was not screenshot-inferred",
-    path: ["sourceVersion"],
+    message: "evidence address must have sourceVersion or contentHash AND a verifiedBy verifier to prove it was not screenshot-inferred",
+    path: ["verifiedBy"],
   },
 );
 
@@ -192,6 +199,15 @@ export function validateNotScreenshotInferred(address) {
     return {
       valid: false,
       error: "evidence address lacks both sourceVersion and contentHash; cannot verify it was not screenshot-inferred",
+    };
+  }
+  // A verifier must attest this address was not screenshot-derived.
+  // Self-supplied hashes or version strings without a verifier identity
+  // do not establish provenance (luna-judge P2 finding).
+  if (!address.verifiedBy) {
+    return {
+      valid: false,
+      error: "evidence address lacks verifiedBy; a verifier must attest it was not screenshot-inferred",
     };
   }
   return { valid: true };

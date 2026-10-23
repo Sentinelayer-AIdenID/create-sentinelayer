@@ -45,7 +45,7 @@ export const mediaAssetSchema = z.object({
   mimeType: z.string().optional(),
   sizeBytes: z.number().int().positive().optional(),
   sourceSnapshot: sourceSnapshotSchema,
-  metadata: z.record(z.string(), z.unknown()).optional(),
+  metadata: z.record(z.string(), z.json()).optional(),
   tenantScope: z.string().min(1),
 }).strict();
 

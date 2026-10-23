@@ -29,7 +29,7 @@ export const sourceSnapshotSchema = z.object({
   capturedAt: z.string().datetime(),
   tenantScope: z.string().min(1),
   contentHash: z.string().min(1).optional(),
-  metadata: z.record(z.string(), z.unknown()).optional(),
+  metadata: z.record(z.string(), z.json()).optional(),
 }).strict();
 
 /**

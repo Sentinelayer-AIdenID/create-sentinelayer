@@ -26,6 +26,7 @@ test("evidenceAddressSchema: validates complete address", () => {
     sourceVersion: "enrich-v2@1.0.0",
     tenantScope: "tenant:acme",
     reachable: true,
+    verifiedBy: "trusted-verifier",
   }).success, true);
 });
 
@@ -36,7 +37,7 @@ test("evidenceAddressSchema: REFUSES missing scheme or locator", () => {
 
 test("evidenceRecordSchema: validates full evidence record", () => {
   assert.equal(evidenceRecordSchema.safeParse({
-    address: { scheme: "file", locator: "/data/ev.json", sourceVersion: "v1", tenantScope: "tenant/acme" },
+    address: { scheme: "file", locator: "/data/ev.json", sourceVersion: "v1", tenantScope: "tenant/acme", verifiedBy: "trusted-verifier" },
     payload: { key: "value" },
     schemaVersion: "1.0.0",
     collectedAt: "2026-10-23T00:00:00Z",
@@ -48,7 +49,7 @@ test("evidenceRecordSchema: validates full evidence record", () => {
 test("evidencePageSchema: validates paginated list", () => {
   const page = {
     items: [{
-      address: { scheme: "file", locator: "/data/ev.json", sourceVersion: "v1", tenantScope: "tenant/acme" },
+      address: { scheme: "file", locator: "/data/ev.json", sourceVersion: "v1", tenantScope: "tenant/acme", verifiedBy: "trusted-verifier" },
       payload: {},
       schemaVersion: "1.0.0",
       collectedAt: "2026-10-23T00:00:00Z",
@@ -93,6 +94,7 @@ test("validateNotScreenshotInferred: ACCEPTS address with sourceVersion", () => 
     scheme: "http",
     locator: "https://example.com/data",
     sourceVersion: "enrich-v2@1.0.0",
+    verifiedBy: "trusted-verifier",
   });
   assert.equal(result.valid, true);
 });
@@ -102,6 +104,7 @@ test("validateNotScreenshotInferred: ACCEPTS address with contentHash", () => {
     scheme: "file",
     locator: "/data/ev.json",
     contentHash: "abc123",
+    verifiedBy: "trusted-verifier",
   });
   assert.equal(result.valid, true);
 });
@@ -131,7 +134,7 @@ test("evidenceMigrationPolicySchema: validates migration policy", () => {
 
 test("evidenceRecordSchema: REFUSES record without schemaVersion", () => {
   const result = evidenceRecordSchema.safeParse({
-    address: { scheme: "file", locator: "/data/ev.json", sourceVersion: "v1", tenantScope: "tenant/acme" },
+    address: { scheme: "file", locator: "/data/ev.json", sourceVersion: "v1", tenantScope: "tenant/acme", verifiedBy: "trusted-verifier" },
     payload: {},
     collectedAt: "2026-10-23T00:00:00Z",
   });
@@ -140,9 +143,9 @@ test("evidenceRecordSchema: REFUSES record without schemaVersion", () => {
 
 test("evidenceRecordSchema: REFUSES undefined payload (z.json() rejects undefined)", () => {
   const result = evidenceRecordSchema.safeParse({
-    address: { scheme: "file", locator: "/data/ev.json", sourceVersion: "v1", tenantScope: "tenant/acme" },
+    address: { scheme: "file", locator: "/data/ev.json", sourceVersion: "v1", tenantScope: "tenant/acme", verifiedBy: "trusted-verifier" },
     payload: undefined,
-    schemaVersion: "engram-evidence/1.0.0",
+    schemaVersion: "1.0.0",
     collectedAt: "2026-10-23T00:00:00Z",
   });
   assert.equal(result.success, false);
@@ -161,4 +164,66 @@ test("evidencePageSchema: REFUSES hasMore=true without nextCursor", () => {
 test("evidencePageSchema: ACCEPTS hasMore=true with nextCursor", () => {
   const r = evidencePageSchema.safeParse({ items: [], hasMore: true, nextCursor: "page2", total: 100 });
   assert.equal(r.success, true, "hasMore with nextCursor must be accepted");
+});
+
+test("evidenceAddressSchema: REFUSES sourceVersion without verifiedBy", () => {
+  const r = evidenceAddressSchema.safeParse({
+    scheme: "https",
+    locator: "api.example.com/v1/data",
+    sourceVersion: "engram-evidence@1.0.0",
+    tenantScope: "tenant/acme",
+  });
+  assert.equal(r.success, false,
+    "sourceVersion without verifiedBy must be rejected (self-attested hash is not proof)");
+  const messages = r.error.issues.map((i) => i.message);
+  assert.ok(messages.some((m) => /verifiedBy/i.test(m)),
+    "must report missing verifiedBy: " + JSON.stringify(messages));
+});
+
+test("evidenceAddressSchema: REFUSES contentHash without verifiedBy", () => {
+  const r = evidenceAddressSchema.safeParse({
+    scheme: "https",
+    locator: "api.example.com/v1/data",
+    contentHash: "sha256:abc123",
+    tenantScope: "tenant/acme",
+  });
+  assert.equal(r.success, false,
+    "contentHash without verifiedBy must be rejected (self-supplied hash is not proof)");
+});
+
+test("evidenceAddressSchema: ACCEPTS sourceVersion with verifiedBy", () => {
+  const r = evidenceAddressSchema.safeParse({
+    scheme: "https",
+    locator: "api.example.com/v1/data",
+    sourceVersion: "engram-evidence@1.0.0",
+    tenantScope: "tenant/acme",
+    verifiedBy: "trusted-verifier-001",
+  });
+  assert.equal(r.success, true,
+    "sourceVersion with verifiedBy must be accepted: " + JSON.stringify(r.error?.issues));
+});
+
+test("validateNotScreenshotInferred: REFUSES address without verifiedBy", () => {
+  const r = validateNotScreenshotInferred({
+    scheme: "https",
+    locator: "api.example.com/v1/data",
+    sourceVersion: "engram-evidence@1.0.0",
+    tenantScope: "tenant/acme",
+  });
+  assert.equal(r.valid, false,
+    "address without verifiedBy must be rejected by validateNotScreenshotInferred");
+  assert.ok(/verifiedBy/.test(r.error),
+    "must report missing verifiedBy: " + JSON.stringify(r.error));
+});
+
+test("validateNotScreenshotInferred: ACCEPTS address with verifiedBy", () => {
+  const r = validateNotScreenshotInferred({
+    scheme: "https",
+    locator: "api.example.com/v1/data",
+    sourceVersion: "engram-evidence@1.0.0",
+    tenantScope: "tenant/acme",
+    verifiedBy: "trusted-verifier-001",
+  });
+  assert.equal(r.valid, true,
+    "address with verifiedBy must be accepted: " + r.error);
 });

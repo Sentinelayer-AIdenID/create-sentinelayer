@@ -37,8 +37,16 @@ export const temporalSegmentSchema = z.object({
   coverageRatio: z.number().min(0).max(1).optional(),
   tenantScope: z.string().min(1),
 }).strict().refine(
-  (data) => data.endTime > data.startTime,
-  { message: "endTime must be strictly after startTime", path: ["endTime"] },
+  (data) => {
+    // Parse timestamps as instants rather than comparing strings.
+    // Lexical comparison can accept ".10Z" > ".1Z" even though they
+    // represent the same instant (luna-judge P2 finding).
+    const startMs = Date.parse(data.startTime);
+    const endMs = Date.parse(data.endTime);
+    if (isNaN(startMs) || isNaN(endMs)) return false;
+    return endMs > startMs;
+  },
+  { message: "endTime must be strictly after startTime (compared as instants)", path: ["endTime"] },
 );
 
 /**
