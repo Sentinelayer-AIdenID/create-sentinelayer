@@ -28,6 +28,42 @@ OPENAI_PRESENT_EXPR = "secrets.OPENAI_API_KEY != ''"
 GOOGLE_PRESENT_EXPR = "(secrets.GOOGLE_GEMINI_API_KEY != '' || secrets.GOOGLE_API_KEY != '')"
 GOOGLE_ABSENT_EXPR = "secrets.GOOGLE_GEMINI_API_KEY == '' && secrets.GOOGLE_API_KEY == ''"
 ACTION_REF = "mrrCarter/sentinelayer-v1-action@8afb7dbb42a5e1c25233d422c4cabe401ba02380"
+
+JEVA_ACTION_REF = "Sentinelayer-AIdenID/sentinelayer-v1-action@ebfcb813126ff64f21bb1fccfef8ab30609af67c"
+
+ALLOWED_JEVA_LLM_PROVIDER_LINE = "llm_provider: typesafe"
+ALLOWED_JEVA_REVIEW_ROUTING_LINE = "review_routing: intent-cascade-v1"
+ALLOWED_JEVA_FORK_POLICY_LINE = "fork_policy: block"
+ALLOWED_JEVA_SCAN_MODE_LINE = "scan_mode: pr-diff"
+ALLOWED_JEVA_SEVERITY_GATE_LINE = "severity_gate: P1"
+ALLOWED_JEVA_COMMENT_TAG_LINE = "comment_tag: jev"
+ALLOWED_JEVA_PUBLISH_GITHUB_LINE = 'publish_github: "true"'
+ALLOWED_JEVA_LLM_FAILURE_POLICY_LINE = "llm_failure_policy: block"
+ALLOWED_JEVA_CODEX_MODEL_LINE = "codex_model: gpt-6-sol"
+ALLOWED_JEVA_USE_CODEX_LINE = 'use_codex: "false"'
+ALLOWED_JEVA_CODEX_ONLY_LINE = 'codex_only: "false"'
+ALLOWED_JEVA_SENTINELAYER_MANAGED_LLM_LINE = 'sentinelayer_managed_llm: "false"'
+ALLOWED_JEVA_INTENT_PRICE_PROFILE_LINE = "intent_price_profile: typesafe-input-20261020"
+
+JEVA_REQUIRED_FRAGMENTS = (
+    JEVA_ACTION_REF,
+    ALLOWED_JEVA_LLM_PROVIDER_LINE,
+    ALLOWED_JEVA_REVIEW_ROUTING_LINE,
+    ALLOWED_JEVA_FORK_POLICY_LINE,
+    ALLOWED_JEVA_COMMENT_TAG_LINE,
+    ALLOWED_JEVA_PUBLISH_GITHUB_LINE,
+    'name: Omar Gate (Jev)',
+    "actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683",
+    "actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874",
+    "github_token: ${{ secrets.GITHUB_TOKEN }}",
+    "sentinelayer_token: ${{ secrets.SENTINELAYER_TOKEN }}",
+    "intent_model_pin: ${{ secrets.INTENT_MODEL_PIN }}",
+    "intent_policy: ${{ secrets.INTENT_POLICY }}",
+    "typesafe_api_key: ${{ secrets.TYPESAFE_API_KEY }}",
+    "openai_api_key: ${{ secrets.OPENAI_API_KEY }}",
+    "if-no-files-found: error",
+)
+
 ALLOWED_LLM_PROVIDER_LINE = f"llm_provider: ${{{{ {OPENAI_PRESENT_EXPR} && 'openai' || ({GOOGLE_PRESENT_EXPR} && 'google' || 'openai') }}}}"
 ALLOWED_DETERMINISTIC_LLM_PROVIDER_LINE = "llm_provider: openai"
 ALLOWED_MODEL_LINE = f"model: ${{{{ {OPENAI_PRESENT_EXPR} && 'gpt-5.3-codex' || ({GOOGLE_PRESENT_EXPR} && 'gemini-2.5-flash' || 'gpt-5.3-codex') }}}}"
@@ -324,6 +360,44 @@ def validate_omar_contract(workflow_text: str) -> None:
         )
 
 
+def validate_jev_contract(workflow_text: str) -> None:
+
+    if JEVA_ACTION_REF not in workflow_text:
+        raise OmarWorkflowContractError(
+            "omar-gate-jev.yml must use the Sentinelayer-AIdenID sentinelayer-v1-action pin directly"
+        )
+
+    for fragment in JEVA_REQUIRED_FRAGMENTS:
+        if fragment not in workflow_text:
+            raise OmarWorkflowContractError(
+                f"omar-gate-jev.yml is missing required Jev contract fragment: {fragment}"
+            )
+
+    forbidden_jev_fragments = (
+        "mrrCarter/sentinelayer-v1-action",
+        'llm_provider: ${{',
+        'model: ${{',
+        'model_fallback: ${{',
+        'use_codex: ${{',
+        'sentinelayer_managed_llm: ${{',
+        'google_api_key:',
+        'codex_model: gpt-5.',
+        'intent_price_profile: standard',
+    )
+    for fragment in forbidden_jev_fragments:
+        if fragment in workflow_text:
+            raise OmarWorkflowContractError(
+                f"omar-gate-jev.yml must not contain legacy/expression-based fragment: {fragment}"
+            )
+
+    jev_lines = workflow_text.splitlines()
+    if "jobs:" not in workflow_text or "omar-jev:" not in "\n".join(jev_lines):
+        raise OmarWorkflowContractError(
+            "omar-gate-jev.yml must define jobs.omar-jev"
+        )
+
+
+
 def _assert_fails(workflow_text: str) -> None:
     try:
         validate_omar_contract(workflow_text)
@@ -495,6 +569,84 @@ jobs:
             "model_fallback: gpt-5.2-codex",
         )
     )
+    # --- Jev workflow self-tests ---
+    valid_jev_workflow = """\
+name: Omar Gate (Jev)
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+  actions: read
+  pull-requests: write
+  checks: write
+jobs:
+  omar-jev:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Omar Gate (Jev intent cascade)
+        uses: Sentinelayer-AIdenID/sentinelayer-v1-action@ebfcb813126ff64f21bb1fccfef8ab30609af67c
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          review_routing: intent-cascade-v1
+          llm_provider: typesafe
+          typesafe_api_key: ${{ secrets.TYPESAFE_API_KEY }}
+          openai_api_key: ${{ secrets.OPENAI_API_KEY }}
+          intent_model_pin: ${{ secrets.INTENT_MODEL_PIN }}
+          intent_policy: ${{ secrets.INTENT_POLICY }}
+          intent_price_profile: typesafe-input-20261020
+          sentinelayer_token: ${{ secrets.SENTINELAYER_TOKEN }}
+          scan_mode: pr-diff
+          severity_gate: P1
+          codex_model: gpt-6-sol
+          use_codex: "false"
+          codex_only: "false"
+          sentinelayer_managed_llm: "false"
+          llm_failure_policy: block
+          fork_policy: block
+          publish_github: "true"
+          comment_tag: jev
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874
+        if: always()
+        with:
+          name: omar-jev-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .sentinelayer/runs/
+          include-hidden-files: true
+          if-no-files-found: error
+"""
+    validate_jev_contract(valid_jev_workflow)
+
+    _assert_fails(
+        valid_jev_workflow.replace(
+            "Sentinelayer-AIdenID/sentinelayer-v1-action@ebfcb813126ff64f21bb1fccfef8ab30609af67c",
+            "mrrCarter/sentinelayer-v1-action@8afb7dbb42a5e1c25233d422c4cabe401ba02380",
+        )
+    )
+    _assert_fails(
+        valid_jev_workflow.replace(
+            'llm_provider: typesafe',
+            'llm_provider: openai',
+        )
+    )
+    _assert_fails(
+        valid_jev_workflow.replace(
+            'comment_tag: jev',
+            'comment_tag: omar',
+        )
+    )
+    _assert_fails(
+        valid_jev_workflow.replace(
+            'if-no-files-found: error',
+            'if-no-files-found: warn',
+        )
+    )
+
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -503,13 +655,25 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--workflow", default=".github/workflows/omar-gate.yml")
     parser.add_argument("--self-test", action="store_true")
+    parser.add_argument(
+        "--jev",
+        action="store_true",
+        dest="jev_mode",
+        default=False,
+        help="Validate omar-gate-jev.yml instead of omar-gate.yml.",
+    )
     args = parser.parse_args(argv)
 
     if args.self_test:
         _run_self_tests()
+        return 0
 
     try:
-        validate_omar_contract(Path(args.workflow).read_text(encoding="utf-8"))
+        workflow_text = Path(args.workflow).read_text(encoding="utf-8")
+        if args.jev_mode:
+            validate_jev_contract(workflow_text)
+        else:
+            validate_omar_contract(workflow_text)
     except OmarWorkflowContractError as exc:
         print(f"::error::{exc}", file=sys.stderr)
         return 1

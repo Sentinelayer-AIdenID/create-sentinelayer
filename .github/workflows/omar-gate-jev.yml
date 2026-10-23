@@ -20,6 +20,10 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           persist-credentials: false
+      - name: Validate Jev workflow contract
+        run: |
+          python3 scripts/ci/check_omar_workflow_contract.py --self-test
+          python3 scripts/ci/check_omar_workflow_contract.py --workflow .github/workflows/omar-gate-jev.yml --jev
       - name: Omar Gate (Jev intent cascade)
         uses: Sentinelayer-AIdenID/sentinelayer-v1-action@ebfcb813126ff64f21bb1fccfef8ab30609af67c
         with:
