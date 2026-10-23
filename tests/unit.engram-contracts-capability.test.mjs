@@ -41,11 +41,12 @@ test("tenantScopeSchema: REFUSES missing tenantId", () => {
   assert.equal(tenantScopeSchema.safeParse({}).success, false);
 });
 
-test("sourceDescriptorSchema: requires sourceId, sourceType, version", () => {
+test("sourceDescriptorSchema: requires sourceId, sourceType, version, tenantScope", () => {
   assert.equal(sourceDescriptorSchema.safeParse({
     sourceId: "session-adapter",
     sourceType: "adapter",
     version: "enrich-v2@1.0.0",
+    tenantScope: "tenant/acme",
   }).success, true);
 });
 
@@ -68,7 +69,7 @@ test("capabilityEntrySchema: validates full entry", () => {
   assert.equal(capabilityEntrySchema.safeParse({
     capability: "engram-graph",
     version: "engram-graph@1.0.0",
-    source: { sourceId: "s1", sourceType: "adapter", version: "enrich-v2@1.0.0" },
+    source: { sourceId: "s1", sourceType: "adapter", version: "enrich-v2@1.0.0", tenantScope: "tenant/acme" },
     status: "supported",
   }).success, true);
 });
@@ -78,7 +79,7 @@ test("capabilityEntrySchema: REFUSES unsupported status", () => {
   assert.equal(capabilityEntrySchema.safeParse({
     capability: "x",
     version: "x@1.0.0",
-    source: { sourceId: "s1", sourceType: "adapter", version: "enrich-v2@1.0.0" },
+    source: { sourceId: "s1", sourceType: "adapter", version: "enrich-v2@1.0.0", tenantScope: "tenant/acme" },
     status: "unsupported",
   }).success, true);
 });
@@ -138,13 +139,13 @@ test("negotiateCapability: incompatible when capability is unsupported", () => {
   assert.equal(result.result, "incompatible");
 });
 
-test("negotiateCapability: downgraded when capability is stale", () => {
+test("negotiateCapability: incompatible when capability is stale", () => {
   const result = negotiateCapability({
     capability: "stale-cap",
     clientVersion: "stale-cap@2.0.0",
     serverCapabilities: [{ capability: "stale-cap", version: "stale-cap@1.0.0", status: "stale" }],
   });
-  assert.equal(result.result, "downgraded");
+  assert.equal(result.result, "incompatible");
 });
 
 test("CapabilityError: typed errors with codes", () => {

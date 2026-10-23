@@ -11,9 +11,14 @@
  * This contract is the gate every graph consumer validates against before
  * executing on the graph. A graph containing plausible but fabricated fields
  * is not safe to execute (ticket 73ead329).
+ *
+ * All schemas are strict: unknown/unsupported fields produce validation errors
+ * rather than being silently dropped (luna-judge finding F3).
  */
 
 import { z } from "zod";
+import { moneySchema } from "./money.js";
+import { GRAPH_SCHEMA_VERSION } from "./versions.js";
 
 /**
  * Provenance classification (R09 truth). Must be one of exactly four values.
@@ -45,15 +50,35 @@ export const schemaValiditySchema = z.enum(["valid", "invalid", "unvalidated"]);
 export const modelConfidenceSchema = z.enum(["high", "medium", "low", "unavailable"]);
 
 /**
+ * A tenant scope descriptor. Every entity, assertion, and source must declare
+ * its tenant scope. Required, not optional (luna-judge finding F2).
+ */
+export const tenantScopeDescriptorSchema = z.object({
+  tenantId: z.string().min(1),
+  namespace: z.string().min(1).optional(),
+}).strict();
+
+/**
+ * An evidence reference: ties an assertion to a verifiable evidence record.
+ * Required for authoritative classification (luna-judge finding F2).
+ */
+export const evidenceRefSchema = z.object({
+  address: z.string().min(1),
+  verifiedAt: z.string().datetime(),
+  verifier: z.string().min(1),
+}).strict();
+
+/**
  * An entity node in the ENGRAM graph.
  */
 export const entitySchema = z.object({
   id: z.string().min(1),
   type: z.string().min(1),
   label: z.string().optional(),
-  attributes: z.record(z.unknown()).optional(),
-  tenantScope: z.string().optional(),
-});
+  attributes: z.record(z.string(), z.unknown()).optional(),
+  tenantScope: z.string().min(1),
+  sourceVersion: z.string().min(1).optional(),
+}).strict();
 
 /**
  * A link between two graph entities.
@@ -64,8 +89,8 @@ export const linkSchema = z.object({
   predicate: z.string().min(1),
   provenance: provenanceClassSchema,
   confidence: modelConfidenceSchema.optional(),
-  evidenceAddress: z.string().optional(),
-});
+  evidenceAddress: z.string().min(1).optional(),
+}).strict();
 
 /**
  * Freshness marker (R09 truth). Every assertion that can go stale must carry
@@ -76,14 +101,25 @@ export const freshnessSchema = z.object({
   staleAfterMs: z.number().int().positive().optional(),
   isStale: z.boolean().optional(),
   coverageRatio: z.number().min(0).max(1).optional(),
-});
+}).strict();
+
+/**
+ * A versioned source descriptor. Every assertion must carry a source version
+ * and tenant scope (luna-judge finding F2).
+ */
+export const sourceDescriptorSchema = z.object({
+  sourceId: z.string().min(1),
+  version: z.string().min(1),
+  capturedAt: z.string().datetime(),
+  tenantScope: z.string().min(1),
+}).strict();
 
 /**
  * An assertion in the ENGRAM graph.
  *
  * Every assertion must be classifiable as observed/authoritative/derived/unknown,
  * must declare its schema validity, and must carry freshness markers when
- * applicable.
+ * applicable. Tenant scope and source version are required (F2).
  */
 export const assertionSchema = z.object({
   id: z.string().min(1),
@@ -94,10 +130,9 @@ export const assertionSchema = z.object({
   schemaValidity: schemaValiditySchema,
   modelConfidence: modelConfidenceSchema.optional(),
   freshness: freshnessSchema.optional(),
-  evidenceAddress: z.string().optional(),
-  tenantScope: z.string().optional(),
-  sourceVersion: z.string().optional(),
-});
+  evidenceRef: evidenceRefSchema.optional(),
+  source: sourceDescriptorSchema,
+}).strict();
 
 /**
  * A versioned ENGRAM graph.
@@ -106,7 +141,7 @@ export const assertionSchema = z.object({
  * links, and assertions, plus coverage and freshness metadata.
  */
 export const graphSchema = z.object({
-  version: z.string().min(1),
+  version: z.literal(GRAPH_SCHEMA_VERSION),
   entities: z.array(entitySchema).optional(),
   links: z.array(linkSchema).optional(),
   assertions: z.array(assertionSchema),
@@ -114,87 +149,97 @@ export const graphSchema = z.object({
     totalAssertions: z.number().int().nonnegative(),
     byProvenance: z.record(z.string(), z.number().int().nonnegative()).optional(),
     bySchemaValidity: z.record(z.string(), z.number().int().nonnegative()).optional(),
-  }).optional(),
+  }).strict().optional(),
   freshness: freshnessSchema.optional(),
   generatedAt: z.string().datetime(),
-});
+}).strict();
 
 /**
  * Classify an assertion's provenance from its context.
+ *
+ * Only returns "authoritative" when BOTH isVerified is true AND a valid
+ * evidenceRef with a receipt reference is present. A bare hasReceipt or
+ * isVerified flag is not sufficient (luna-judge finding F2).
+ *
  * @param {object} assertion
- * @param {object} [ctx] — { isVerified, hasReceipt, derivedFrom }
+ * @param {object} [ctx] — { isVerified, evidenceRef, derivedFrom, observedAt }
  * @returns {string} one of PROVENANCE_CLASSES
  */
 export function classifyProvenance(assertion, ctx = {}) {
   if (!assertion || !assertion.id) return "unknown";
   if (ctx.derivedFrom && Array.isArray(ctx.derivedFrom) && ctx.derivedFrom.length > 0) return "derived";
-  if (ctx.isVerified === true || ctx.hasReceipt === true) return "authoritative";
+  if (
+    ctx.isVerified === true &&
+    ctx.evidenceRef &&
+    typeof ctx.evidenceRef === "object" &&
+    typeof ctx.evidenceRef.address === "string" &&
+    typeof ctx.evidenceRef.verifier === "string"
+  ) {
+    return "authoritative";
+  }
   if (ctx.observedAt && typeof ctx.observedAt === "string") return "observed";
   return "unknown";
 }
 
 /**
- * Validate that a graph has no fabricated fields: every assertion must have
- * a recognized provenance class, and every monetary-like field within
- * assertions must pass the money contract (not a binary float).
+ * Money field names that must be validated with moneySchema.
+ * Covers common monetary field naming patterns.
+ */
+const MONEY_FIELD_RE = /^(?:[Aa]mount|[Pp]rice|[Cc]ost|[Vv]alue|[Ff]ee|[Tt]otal|[Bb]alance|[Pp]ayment)$/;
+
+/**
+ * Validate that all money fields across the graph use the money contract.
+ * Walks entities, links, and assertions looking for monetary fields and
+ * validates them with moneySchema. Does NOT reject non-monetary numbers
+ * like ratios or temperatures (luna-judge finding F6).
  *
  * @param {object} graph — a graphSchema-shaped object
  * @returns {{ valid: boolean, errors: string[] }}
  */
 export function validateGraphIntegrity(graph) {
   const errors = [];
-  if (!graph || typeof graph !== "object") {
-    return { valid: false, errors: ["graph must be an object"] };
-  }
-  if (!graph.version || typeof graph.version !== "string") {
-    errors.push("graph.version is required and must be a string");
-  }
-  const assertions = Array.isArray(graph.assertions) ? graph.assertions : [];
-  if (assertions.length === 0) {
-    errors.push("graph.assertions must be a non-empty array");
-  }
-  for (let i = 0; i < assertions.length; i++) {
-    const a = assertions[i];
-    if (!a || typeof a !== "object") {
-      errors.push(`assertion[${i}] must be an object`);
-      continue;
+
+  // First, validate the full graph against the schema (F4)
+  const schemaResult = graphSchema.safeParse(graph);
+  if (!schemaResult.success) {
+    for (const issue of schemaResult.error.issues) {
+      errors.push(`schema: ${issue.path.join(".")}: ${issue.message}`);
     }
-    if (!PROVENANCE_CLASSES.includes(a.provenance)) {
-      errors.push(`assertion[${i}].provenance "${a.provenance}" is not a recognized class`);
-    }
-    if (!SCHEMA_VALIDITY.includes(a.schemaValidity)) {
-      errors.push(`assertion[${i}].schemaValidity "${a.schemaValidity}" is not recognized`);
-    }
-    // Reject binary floats anywhere in the object sub-tree
-    _rejectFloats(a.object, `assertion[${i}].object`, errors);
+    return { valid: false, errors };
   }
+
+  const data = schemaResult.data;
+
+  // Walk ALL graph elements for money field validation (F6)
+  function walkForMoney(obj, path) {
+    if (!obj || typeof obj !== "object") return;
+    if (Array.isArray(obj)) {
+      for (let i = 0; i < obj.length; i++) {
+        walkForMoney(obj[i], `${path}[${i}]`);
+      }
+      return;
+    }
+    for (const key of Object.keys(obj)) {
+      const val = obj[key];
+      const fullPath = `${path}.${key}`;
+      if (MONEY_FIELD_RE.test(key) && typeof val === "object" && val !== null) {
+        const moneyResult = moneySchema.safeParse(val);
+        if (!moneyResult.success) {
+          for (const issue of moneyResult.error.issues) {
+            errors.push(`${fullPath}: money field invalid — ${issue.message}`);
+          }
+        }
+      }
+      if (typeof val === "object" && val !== null) {
+        walkForMoney(val, fullPath);
+      }
+    }
+  }
+
+  // Walk entities, links, and assertions
+  if (data.entities) walkForMoney(data.entities, "entities");
+  if (data.links) walkForMoney(data.links, "links");
+  walkForMoney(data.assertions, "assertions");
+
   return { valid: errors.length === 0, errors };
-}
-
-const MAX_FLOAT_CHECK_DEPTH = 100;
-
-function _rejectFloats(value, path, errors, depth = 0) {
-  if (depth > MAX_FLOAT_CHECK_DEPTH) {
-    errors.push(`${path}: exceeded max depth ${MAX_FLOAT_CHECK_DEPTH}; possible circular or deeply nested structure`);
-    return;
-  }
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) {
-      errors.push(`${path}: non-finite number not allowed`);
-    } else if (!Number.isInteger(value)) {
-      errors.push(`${path}: binary float ${value} not allowed; use integer minor units or decimal string`);
-    }
-    return;
-  }
-  if (Array.isArray(value)) {
-    for (let i = 0; i < value.length; i++) {
-      _rejectFloats(value[i], `${path}[${i}]`, errors, depth + 1);
-    }
-    return;
-  }
-  if (value && typeof value === "object") {
-    for (const key of Object.keys(value)) {
-      _rejectFloats(value[key], `${path}.${key}`, errors, depth + 1);
-    }
-  }
 }

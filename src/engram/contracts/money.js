@@ -6,6 +6,9 @@
  * currency and correct exponent, or validated decimal strings; never binary
  * floats for totals. This module is the single codified source of truth for
  * every path that stores, reads, or validates monetary values in ENGRAM.
+ *
+ * Luna-judge F5: use exact BigInt conversion, never floating-point rounding.
+ * Luna-judge F8: minorUnitsSchema must check both safe integer bounds.
  */
 
 import { z } from "zod";
@@ -49,9 +52,9 @@ function rejectFloat(value, ctx) {
 /** Validated decimal string: no scientific notation. */
 const DECIMAL_STRING_RE = /^-?(0|[1-9][0-9]*)(\.[0-9]+)?$/;
 
-/** Minor-units integer: safe, finite. */
+/** Minor-units integer: safe, finite, both bounds checked (F8). */
 export const minorUnitsSchema = z.number().int().finite().refine(
-  (v) => v >= -9007199254740991,
+  (v) => Number.isSafeInteger(v),
   { message: "minor units outside safe representable range" },
 );
 
@@ -69,6 +72,7 @@ export const decimalStringSchema = z.string().regex(
  *   { amount: "-?[0-9]+(\\.[0-9]+)?", currency: "USD", exponent: 2 }
  *
  * Binary floats (1.99), NaN, Infinity, and unsafe integers are REFUSED.
+ * Values without a known exponent are REFUSED (F5: no silent defaults).
  */
 export const moneySchema = z.object({
   amount: z.union([
@@ -88,46 +92,103 @@ export const moneySchema = z.object({
   { message: "exponent must match the currency's standard minor units when both are known", path: ["exponent"] },
 ).refine(
   (data) => {
-    if (typeof data.amount === "string" && data.exponent != null) {
+    // F5: require exponent for decimal strings or use currency default
+    const exponent = data.exponent ?? CURRENCY_MINOR_UNITS.get(data.currency);
+    if (exponent == null) {
+      return false;
+    }
+    if (typeof data.amount === "string") {
       const dot = data.amount.indexOf(".");
       if (dot >= 0) {
         const fracLen = data.amount.length - dot - 1;
-        if (fracLen > data.exponent) return false;
+        if (fracLen > exponent) return false;
       }
     }
     return true;
   },
-  { message: "decimal string fractional digits must not exceed the currency exponent", path: ["amount"] },
+  { message: "currency requires a known exponent; provide exponent or use a known currency code", path: ["exponent"] },
 );
 
 /**
+ * Exact decimal multiplication using BigInt for lossless conversion.
+ * Parses a decimal string and multiplies by 10^exp using integer arithmetic.
+ * @param {string} decimal — e.g. "19.99" or "90071992547409.90"
+ * @param {number} exponent — minor-units exponent
+ * @returns {bigint|null}
+ */
+function decimalToMinorUnitsExact(decimal, exponent) {
+  const negative = decimal.startsWith("-");
+  const abs = negative ? decimal.slice(1) : decimal;
+
+  const dot = abs.indexOf(".");
+  let integerPart, fracPart;
+  if (dot >= 0) {
+    integerPart = abs.slice(0, dot);
+    fracPart = abs.slice(dot + 1).padEnd(exponent, "0").slice(0, exponent);
+  } else {
+    integerPart = abs;
+    fracPart = "0".repeat(exponent);
+  }
+
+  // Pad fraction to exactly exponent digits
+  if (fracPart.length < exponent) {
+    fracPart = fracPart.padEnd(exponent, "0");
+  }
+
+  let result;
+  try {
+    const int = BigInt(integerPart);
+    const frac = BigInt(fracPart);
+    const multiplier = 10n ** BigInt(exponent);
+    result = int * multiplier + frac;
+  } catch {
+    return null;
+  }
+
+  return negative ? -result : result;
+}
+
+/**
  * Normalize a money value to its canonical minor-units integer representation.
+ * Uses exact BigInt conversion for decimal strings (F5).
+ *
  * @param {object} money — a moneySchema-validated object
  * @returns {number|null}
  */
 export function toMinorUnits(money) {
-  const exponent = money.exponent ?? CURRENCY_MINOR_UNITS.get(money.currency) ?? 2;
+  const exponent = money.exponent ?? CURRENCY_MINOR_UNITS.get(money.currency);
+  if (exponent == null) return null;
+
   if (typeof money.amount === "number") return money.amount;
-  const parsed = Number.parseFloat(money.amount);
-  if (!Number.isFinite(parsed)) return null;
-  const scaled = Math.round(parsed * 10 ** exponent);
-  return Number.isSafeInteger(scaled) ? scaled : null;
+
+  // Exact BigInt conversion for decimal strings
+  const exact = decimalToMinorUnitsExact(money.amount, exponent);
+  if (exact == null) return null;
+
+  // Check safe integer range before converting back to Number
+  if (exact > 9007199254740991n || exact < -9007199254740991n) return null;
+
+  return Number(exact);
 }
 
 /**
- * Format minor units back to a decimal string.
+ * Format minor units back to a decimal string using exact BigInt arithmetic (F5).
  * @param {number} minorUnits
  * @param {number} exponent
  * @returns {string}
  */
 export function formatFromMinorUnits(minorUnits, exponent = 2) {
+  if (!Number.isSafeInteger(minorUnits)) return String(minorUnits);
   if (exponent === 0) return String(minorUnits);
-  const divisor = 10 ** exponent;
-  const sign = minorUnits < 0 ? "-" : "";
-  const abs = Math.abs(minorUnits);
-  const whole = Math.floor(abs / divisor);
-  const frac = String(abs % divisor).padStart(exponent, "0");
-  return `${sign}${whole}.${frac}`;
+
+  const negative = minorUnits < 0;
+  const abs = negative ? -minorUnits : minorUnits;
+  const divisor = 10n ** BigInt(exponent);
+  const bigAbs = BigInt(abs);
+  const whole = bigAbs / divisor;
+  const frac = String(bigAbs % divisor).padStart(exponent, "0");
+
+  return `${negative ? "-" : ""}${whole}.${frac}`;
 }
 
 /** Known minor-unit exponent for a currency code (null if unknown). */
