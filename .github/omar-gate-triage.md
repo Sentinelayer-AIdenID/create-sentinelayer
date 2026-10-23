@@ -101,7 +101,7 @@ exist on `main` yet. Using `pull_request_target` would load the workflow from
 After this PR merges, a follow-up PR must switch to `pull_request_target` so
 that future PR modifications to this file cannot exfiltrate secrets. The
 `actions/checkout` step still checks out the PR head for review.
-Fork PRs are skipped at the job level; `fork_policy: block` ensures the
+Fork PRs: the job runs on every PR (no job-level skip). `fork_policy: block` ensures the
 action fails closed if secrets are absent.
 
 ## Summary
