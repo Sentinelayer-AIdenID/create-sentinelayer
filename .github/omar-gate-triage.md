@@ -12,7 +12,7 @@ Gate run: 39941411025
 - The finding flags `ROLLBACK` as secret-shaped, but it is a literal comparison string
   in a shell `if` guard (`if [ "${{ inputs.confirm }}" != "ROLLBACK" ]`) — a public
   workflow_dispatch input sentinel, not a credential.
-- Evidence: `git diff main...HEAD -- .github/workflows/rollback.yml` is empty.
+- Evidence: `git diff master...HEAD -- .github/workflows/rollback.yml` is empty.
   This file is unchanged by PR #861.
 
 ## P0 #2: npm dependency audit harness (unsafe_lockfile)
@@ -24,7 +24,7 @@ Gate run: 39941411025
   npm v3 `"peer": true` markers in `package-lock.json`. These markers are legitimate
   npm v3 lockfile metadata; the lockfile validator is being repaired in Action #125.
 - No changes to `package.json`, `package-lock.json`, or `.gitignore` are included
-  in this PR. The lockfile is unchanged from main.
+  in this PR. The lockfile is unchanged from master.
 
 ## P1: `src/legacy-cli.js:606` — Secret-shaped string in source
 
@@ -35,7 +35,7 @@ Gate run: 39941411025
   of function references at module scope — not a credential, key, or token.
 - The exported object contains: `pollCliSession`, `generateArtifacts`,
   `issueBootstrapToken`, `requestJson` — all function names used in tests.
-- Evidence: `git diff main...HEAD -- src/legacy-cli.js` is empty.
+- Evidence: `git diff master...HEAD -- src/legacy-cli.js` is empty.
   This file is unchanged by PR #861.
 
 ## npm audit advisories
