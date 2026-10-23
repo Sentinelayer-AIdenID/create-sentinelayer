@@ -129,6 +129,19 @@ test("assertionSchema: REFUSES assertion with no provenance", () => {
   assert.equal(result.success, false);
 });
 
+test("assertionSchema: REFUSES undefined object (z.json() rejects undefined per F4)", () => {
+  const result = assertionSchema.safeParse({
+    id: "a1",
+    subject: "x",
+    predicate: "y",
+    object: undefined,
+    provenance: "observed",
+    schemaValidity: "valid",
+    source: { sourceId: "src-001", version: "1.0.0", capturedAt: "2026-10-23T00:00:00Z", tenantScope: "tenant/acme" },
+  });
+  assert.equal(result.success, false);
+});
+
 // --- Entity (F2: tenantScope required) ---
 
 test("entitySchema: validates entity with required tenantScope", () => {
