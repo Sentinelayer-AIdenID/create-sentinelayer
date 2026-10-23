@@ -15,14 +15,12 @@ permissions:
 # load from main where the file is absent, so the check would not run.
 # After this PR merges, a follow-up PR MUST switch to pull_request_target
 # so that future PR modifications to this file cannot exfiltrate secrets.
-# Fork PRs are skipped at the job level (matching omar-gate.yml). Fork PRs
-# do not receive the private configuration secrets, so the action cannot
-# perform a real review. The main omar-gate.yml covers fork PRs with its
-# untrusted scan path. fork_policy: block provides defense-in-depth:
-# if secrets are somehow absent, the action fails closed.
+# Fork PRs: the job runs on every PR. fork_policy: block (below) ensures
+# the action fails closed when secrets are absent (e.g. fork PRs where
+# the token is read-only and private secrets are unavailable).
+# The main omar-gate.yml covers fork PRs with its untrusted scan path.
 jobs:
   omar-jev:
-    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
