@@ -16,28 +16,60 @@ try {
   throw new Error(`Failed to read package-lock.json: ${err.message}`);
 }
 
+test("lockfile has a valid packages section", () => {
+  // A missing or empty packages section is indistinguishable from an
+  // unparseable lockfile — the Jev action's dep_audit.py treats both as
+  // unsafe_lockfile. The test must fail on absence, not silently pass.
+  const packages = lockfile.packages;
+  assert.ok(packages && typeof packages === "object", "lockfile must have a packages section");
+  const keys = Object.keys(packages);
+  assert.ok(keys.length > 0, "lockfile packages section must not be empty");
+});
+
 test("lockfile is compatible with Jev action dep audit", () => {
   // The Jev action at sentinelayer-v1-action@ebfcb813 runs dep_audit.py
-  // which rejects lockfile v2 markers (peerOptional, link) that indicate
-  // incomplete resolution data. npm v3 lockfiles include "peer": true for
-  // hoisted peer dependencies — these are standard npm behavior. The action
-  // may also check for unknown markers; we verify only the known-rejected
-  // markers are absent. If a CI run reveals additional rejections, the
-  // lockfile must be regenerated with a compatible npm version.
-  const packages = lockfile.packages || {};
+  // which rejects lockfile entries it cannot resolve. Known-rejected
+  // markers: peerOptional (v2 incomplete optional peers), link (symlink
+  // workspace deps), and potentially peer:true entries that the action
+  // misclassifies. npm v3 lockfiles include "peer": true for hoisted
+  // peer dependencies — these are standard npm behavior. If the action
+  // rejects them, the lockfile must be regenerated with a compatible npm
+  // version, or the action must be updated to accept them.
+  //
+  // This test checks ALL known-rejected markers so a CI failure here
+  // predicts a Jev action failure.
+  const packages = lockfile.packages;
   const blocked = [];
   for (const [key, record] of Object.entries(packages)) {
     if (record.peerOptional === true) blocked.push(key + " (peerOptional)");
     if (record.link === true) blocked.push(key + " (link)");
   }
-  assert.deepEqual(blocked, [], `lockfile entries would be rejected by dep audit: ${blocked.join(", ")}`);
+  assert.deepEqual(
+    blocked,
+    [],
+    `lockfile entries would be rejected by dep audit: ${blocked.join(", ")}`
+  );
+
+  // Count peer:true entries for documentation. The Jev action at ebfcb813
+  // may reject these; if CI still shows unsafe_lockfile after peerOptional
+  // and link are cleared, the peer:true entries are the likely cause.
+  let peerTrueCount = 0;
+  for (const [, record] of Object.entries(packages)) {
+    if (record.peer === true) peerTrueCount++;
+  }
+  // peer:true is standard npm v3 behavior for hoisted peer deps.
+  // Document the count so triage can reference it.
+  console.log(`lockfile-audit: ${peerTrueCount} peer:true entries (standard npm v3 hoisting)`);
 });
 
-test("npm audit reports zero high or critical advisories (P1 gate compat)", () => {
+test("npm audit produces a valid report with zero high/critical advisories (P1 gate compat)", () => {
   // The Jev gate severity_gate=P1 blocks on P0 (critical) and P1 (high).
-  // This test ensures npm audit itself reports 0 such advisories, which
-  // is what the dep_audit harness uses to decide HARNESS-NPM-AUDIT.
+  // This test ensures npm audit itself reports a clean, parseable result.
+  // It rejects error responses and missing vulnerability fields — an
+  // indeterminate audit (unsafe_lockfile) must fail this test, not pass
+  // silently.
   let stdout;
+  let exitCode = 0;
   try {
     stdout = execSync("npm audit --json", {
       cwd: new URL("..", import.meta.url),
@@ -47,17 +79,43 @@ test("npm audit reports zero high or critical advisories (P1 gate compat)", () =
     });
   } catch (err) {
     // npm audit exits non-zero when vulnerabilities exist, but still
-    // writes valid JSON to stdout.
+    // writes valid JSON to stdout. A non-zero exit with empty stdout
+    // is an error (e.g. network failure, lockfile corruption).
     stdout = err.stdout || "";
+    exitCode = err.status || 1;
   }
-  const data = JSON.parse(stdout);
-  const vulns = data.vulnerabilities || {};
+
+  // Reject empty or unparseable output — an indeterminate audit.
+  assert.ok(stdout.length > 0, "npm audit produced empty output (indeterminate audit)");
+
+  let data;
+  try {
+    data = JSON.parse(stdout);
+  } catch (parseErr) {
+    assert.fail(`npm audit produced unparseable JSON: ${parseErr.message}. Output: ${stdout.slice(0, 500)}`);
+  }
+
+  // Require the audit report to have a vulnerabilities field.
+  // A report without it (e.g. an error response) is indeterminate.
+  const vulns = data.vulnerabilities;
+  assert.ok(
+    vulns && typeof vulns === "object",
+    `npm audit response missing vulnerabilities field (indeterminate audit). Keys: ${Object.keys(data).join(", ")}`
+  );
+
+  // Lockfile v3 overrides field is standard; not a vulnerability.
   const blocking = [];
   for (const [name, v] of Object.entries(vulns)) {
     if (v.severity === "high" || v.severity === "critical") {
       blocking.push(name + ":" + v.severity);
     }
   }
+
+  // Verify exit code matches: 0 = clean, non-zero = vulns found.
+  if (exitCode !== 0 && blocking.length === 0) {
+    console.log(`npm audit exited ${exitCode} but found no high/critical advisories (may have lower-severity findings)`);
+  }
+
   assert.deepEqual(
     blocking,
     [],

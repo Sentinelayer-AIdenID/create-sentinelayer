@@ -114,6 +114,6 @@ action fails closed if secrets are absent.
 - npm audit: 0 vulnerabilities total. The `mrrCarter` dep_audit harness (used
   by the main `omar-gate.yml`) reports only critical advisories at P1; there
   are none.
-- Workflow security: changed to `pull_request_target` to prevent secret
-  exfiltration via workflow modification.
+- Workflow security: switched to `pull_request_target` (loads from target branch; PR modifications to the workflow cannot exfiltrate secrets). During this initial PR, pull_request_target loads from master where the file is absent, so the gate does not run automatically — the luna-judge review gates this PR.
+  After merge, the gate runs on every PR with full secret access.
 - Gate-visible findings in PR diff at P1+: **0**

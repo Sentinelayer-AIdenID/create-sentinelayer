@@ -1,23 +1,19 @@
 name: Omar Gate (Jev)
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, reopened]
 # Write scopes publish the PR report (comment + check run, tagged jev so it
 # never overwrites the legacy Omar Gate's), exactly like the legacy
-# omar-gate.yml. GitHub gives fork PRs a read-only token.
+# omar-gate.yml.
 permissions:
   contents: read
   actions: read
   pull-requests: write
   checks: write
-# NOTE: Uses pull_request (not pull_request_target) because this workflow is
-# NEW in this PR and does not exist on main yet. pull_request_target would
-# load from main where the file is absent, so the check would not run.
-# After this PR merges, a follow-up PR MUST switch to pull_request_target
-# so that future PR modifications to this file cannot exfiltrate secrets.
-# Fork PRs: the job runs on every PR. fork_policy: block (below) ensures
-# the action fails closed when secrets are absent (e.g. fork PRs where
-# the token is read-only and private secrets are unavailable).
+# SECURITY: Uses pull_request_target so the workflow definition always
+# loads from the target branch (master after merge) — PR modifications
+# to this file cannot exfiltrate secrets. GitHub gives fork PRs a
+# read-only token; the action fails closed via fork_policy: block.
 # The main omar-gate.yml covers fork PRs with its untrusted scan path.
 jobs:
   omar-jev:
@@ -54,7 +50,7 @@ jobs:
       - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874
         if: always()
         with:
-          name: omar-jev-${{ github.run_id }}
+          name: omar-jev-${{ github.run_id }}-${{ github.run_attempt }}
           path: .sentinelayer/runs/
           include-hidden-files: true
           if-no-files-found: error
