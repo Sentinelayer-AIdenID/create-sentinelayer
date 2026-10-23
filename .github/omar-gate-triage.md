@@ -17,14 +17,16 @@ Gate run: 39941411025
 
 ## P0 #2: npm dependency audit harness (unsafe_lockfile)
 
-**Disposition: Action-side fix (not a repo change)**
+**Disposition: Executive decision — dependency audit is out of scope for #861**
 
-- The original run (action pinned to `ebfcb813`) failed with `unsafe_lockfile` because
-  the npm audit harness in Sentinelayer-AIdenID/sentinelayer-v1-action rejected
+- The action pinned to `ebfcb813` flags the lockfile as `unsafe_lockfile` because
+  the npm audit harness in Sentinelayer-AIdenID/sentinelayer-v1-action rejects
   npm v3 `"peer": true` markers in `package-lock.json`. These markers are legitimate
   npm v3 lockfile metadata; the lockfile validator is being repaired in Action #125.
-- No changes to `package.json`, `package-lock.json`, or `.gitignore` are included
-  in this PR. The lockfile is unchanged from master.
+- Carter Theogene (mrrCarter) committed `10fc8ec`: "The dependency audit is out of
+  scope for #861." The `package.json` and `package-lock.json` are restored to main
+  (628f96c1) bytes. No further lockfile changes are warranted.
+- `npm audit --audit-level=critical` exits 0 with 0 critical vulnerabilities.
 
 ## P1: `src/legacy-cli.js:606` — Secret-shaped string in source
 
@@ -56,9 +58,11 @@ action fails closed for fork PRs where secrets are absent.
 
 ## Summary
 
-- 2 P0: 1 false positive (pre-existing, `rollback.yml` line 67), 1 action-side fix
-  (unsafe_lockfile — resolved in Action #125, no lockfile changes in this PR)
+- 2 P0: 1 false positive (pre-existing, `rollback.yml` line 67), 1 exec decision
+  (unsafe_lockfile — dep audit out of scope per Carter's `10fc8ec`; Action #125
+  will repair the lockfile validator)
 - 1 P1: false positive (function exports, `src/legacy-cli.js` line 606);
   pre-existing, not in PR diff
-- npm audit: no changes to lockfile or overrides in this PR
+- npm audit: lockfile restored to main bytes; `npm audit --audit-level=critical`
+  exits 0 (0 critical, 1 moderate, 11 high)
 - Gate-visible findings in PR diff at P1+: **0**
