@@ -27,6 +27,7 @@ export {
   provenanceClassSchema,
   schemaValiditySchema,
   modelConfidenceSchema,
+  quantitySchema,
   entitySchema,
   linkSchema,
   freshnessSchema,

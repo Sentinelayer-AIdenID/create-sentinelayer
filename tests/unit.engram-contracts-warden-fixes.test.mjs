@@ -120,8 +120,7 @@ test("WARDEN-F2c: validateGraphIntegrity REJECTS amount:1.99 (float) in entity a
     "amount:1.99 (binary float) must be rejected: " + JSON.stringify(errors));
 });
 
-test("WARDEN-F2d: validateGraphIntegrity ACCEPTS non-monetary numeric fields like ratio/temperature", () => {
-  // Non-monetary numeric fields should NOT be rejected just because they are numbers
+test("WARDEN-F2d: validateGraphIntegrity ACCEPTS typed non-monetary quantities", () => {
   const { valid, errors } = validateGraphIntegrity({
     version: "1.0.0",
     assertions: [{
@@ -132,7 +131,11 @@ test("WARDEN-F2d: validateGraphIntegrity ACCEPTS non-monetary numeric fields lik
     entities: [{
       id: "e1", type: "product", tenantScope: "tenant/acme",
       sourceVersion: "1.0.0", capturedAt: "2026-10-23T00:00:00Z",
-      sourceId: "src-001", attributes: { ratio: 0.5, temperature: 98.6, count: 42 },
+      sourceId: "src-001", attributes: {
+        ratio: { kind: "quantity", value: 0.5, unit: "ratio" },
+        temperature: { kind: "quantity", value: 98.6, unit: "fahrenheit" },
+        count: { kind: "quantity", value: 42, unit: "count" },
+      },
     }],
     generatedAt: "2026-10-23T00:00:00Z",
   });

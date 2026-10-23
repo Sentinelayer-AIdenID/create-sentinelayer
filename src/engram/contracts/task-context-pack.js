@@ -5,9 +5,8 @@
  * to operate: capabilities, evidence references, and delegation instructions.
  * Every pack carries its own version, tenant scope, and source snapshot.
  *
- * Cross-field tenant validation: nested source snapshots, media assets,
- * temporal segments, and receipts must share the pack's tenant scope or
- * declare an explicit authorized cross-tenant relationship.
+ * Cross-field tenant validation: source snapshots must share the pack's
+ * tenant scope. A pack cannot grant itself a cross-tenant exception.
  */
 
 import { z } from "zod";
@@ -33,7 +32,8 @@ export const delegationReferenceSchema = z.object({
  * so every agent gets a consistent, validated starting context.
  *
  * Tenant scope reconciliation: nested objects must share the pack's tenant
- * scope unless an explicit authorizedCrossTenant relationship is declared.
+ * scope. Cross-tenant delegation needs a separate, trusted authorization
+ * boundary rather than a self-declared field in an incoming pack.
  */
 export const taskContextPackSchema = z.object({
   packId: z.string().min(1),
@@ -45,18 +45,12 @@ export const taskContextPackSchema = z.object({
   delegations: z.array(delegationReferenceSchema).optional(),
   createdAt: z.string().datetime(),
   expiresAt: z.string().datetime().optional(),
-  authorizedCrossTenant: z.array(z.string().min(1)).optional(),
   metadata: z.record(z.string(), z.json()).optional(),
 }).strict().refine(
   (data) => {
-    const packTenant = data.tenantScope;
-    const allowed = data.authorizedCrossTenant ? [packTenant, ...data.authorizedCrossTenant] : [packTenant];
-    if (!allowed.includes(data.sourceSnapshot.tenantScope)) {
-      return false;
-    }
-    return true;
+    return data.sourceSnapshot.tenantScope === data.tenantScope;
   },
-  { message: "sourceSnapshot tenantScope must match pack tenantScope or be listed in authorizedCrossTenant", path: ["sourceSnapshot", "tenantScope"] },
+  { message: "sourceSnapshot tenantScope must match pack tenantScope", path: ["sourceSnapshot", "tenantScope"] },
 );
 
 /**

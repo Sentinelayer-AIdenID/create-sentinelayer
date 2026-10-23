@@ -94,8 +94,9 @@ test("validateNotScreenshotInferred: ACCEPTS address with sourceVersion", () => 
     scheme: "http",
     locator: "https://example.com/data",
     sourceVersion: "enrich-v2@1.0.0",
+    tenantScope: "tenant/acme",
     verifiedBy: "trusted-verifier",
-  });
+  }, { verifySource: (address) => address.locator === "https://example.com/data" });
   assert.equal(result.valid, true);
 });
 
@@ -104,8 +105,9 @@ test("validateNotScreenshotInferred: ACCEPTS address with contentHash", () => {
     scheme: "file",
     locator: "/data/ev.json",
     contentHash: "abc123",
+    tenantScope: "tenant/acme",
     verifiedBy: "trusted-verifier",
-  });
+  }, { verifySource: (address) => address.locator === "/data/ev.json" });
   assert.equal(result.valid, true);
 });
 
@@ -216,14 +218,14 @@ test("validateNotScreenshotInferred: REFUSES address without verifiedBy", () => 
     "must report missing verifiedBy: " + JSON.stringify(r.error));
 });
 
-test("validateNotScreenshotInferred: ACCEPTS address with verifiedBy", () => {
+test("validateNotScreenshotInferred: ACCEPTS address after trusted source verification", () => {
   const r = validateNotScreenshotInferred({
     scheme: "https",
     locator: "api.example.com/v1/data",
     sourceVersion: "engram-evidence@1.0.0",
     tenantScope: "tenant/acme",
     verifiedBy: "trusted-verifier-001",
-  });
+  }, { verifySource: (address) => address.sourceVersion === "engram-evidence@1.0.0" });
   assert.equal(r.valid, true,
     "address with verifiedBy must be accepted: " + r.error);
 });

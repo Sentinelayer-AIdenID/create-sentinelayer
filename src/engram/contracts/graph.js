@@ -8,9 +8,10 @@
  *   derived      — computed from other assertions (e.g. recall ranking, summary)
  *   unknown      — provenance cannot be determined; treated as non-authoritative
  *
- * This contract is the gate every graph consumer validates against before
- * executing on the graph. A graph containing plausible but fabricated fields
- * is not safe to execute (ticket 73ead329).
+ * graphSchema checks serializable shape and deterministic graph consistency.
+ * validateGraphIntegrity additionally requires an out-of-band verifier before
+ * accepting any authoritative provenance. Neither check grants permission to
+ * execute an action (ticket 73ead329).
  *
  * All schemas are strict: unknown/unsupported fields produce validation errors
  * rather than being silently dropped (luna-judge finding F3).
@@ -177,45 +178,72 @@ export const graphSchema = z.object({
   assertions: z.array(assertionSchema),
   coverage: z.object({
     totalAssertions: z.number().int().nonnegative(),
-    byProvenance: z.record(z.string(), z.number().int().nonnegative()).optional(),
-    bySchemaValidity: z.record(z.string(), z.number().int().nonnegative()).optional(),
+    byProvenance: z.partialRecord(provenanceClassSchema, z.number().int().nonnegative()).optional(),
+    bySchemaValidity: z.partialRecord(schemaValiditySchema, z.number().int().nonnegative()).optional(),
   }).strict().optional(),
   freshness: freshnessSchema.optional(),
   generatedAt: z.string().datetime(),
-}).strict();
+}).strict().superRefine((data, ctx) => {
+  const nodeScopes = new Map();
+  for (const [kind, nodes] of [["entities", data.entities ?? []], ["assertions", data.assertions]]) {
+    nodes.forEach((node, i) => {
+      if (nodeScopes.has(node.id)) {
+        ctx.addIssue({ code: "custom", path: [kind, i, "id"], message: `duplicate graph id ${node.id}` });
+      } else {
+        nodeScopes.set(node.id, kind === "entities" ? node.tenantScope : node.source.tenantScope);
+      }
+    });
+  }
+  if (new Set(nodeScopes.values()).size > 1) {
+    ctx.addIssue({ code: "custom", path: ["assertions"], message: "graph facts must share one tenant scope" });
+  }
+  (data.links ?? []).forEach((link, i) => {
+    for (const endpoint of ["source", "target"]) {
+      if (!nodeScopes.has(link[endpoint])) {
+        ctx.addIssue({ code: "custom", path: ["links", i, endpoint], message: `dangling link ${endpoint}` });
+      } else if (nodeScopes.get(link[endpoint]) !== link.tenantScope) {
+        ctx.addIssue({ code: "custom", path: ["links", i, "tenantScope"], message: "link tenant scope must match both endpoints" });
+      }
+    }
+  });
+  if (!data.coverage) return;
+  if (data.coverage.totalAssertions !== data.assertions.length) {
+    ctx.addIssue({ code: "custom", path: ["coverage", "totalAssertions"], message: "coverage totalAssertions must match assertions" });
+  }
+  for (const [field, key] of [["byProvenance", "provenance"], ["bySchemaValidity", "schemaValidity"]]) {
+    const claimed = data.coverage[field];
+    if (!claimed) continue;
+    for (const className of field === "byProvenance" ? PROVENANCE_CLASSES : SCHEMA_VALIDITY) {
+      const actual = data.assertions.filter((item) => item[key] === className).length;
+      if ((claimed[className] ?? 0) !== actual) {
+        ctx.addIssue({ code: "custom", path: ["coverage", field, className], message: `${className} count must match assertions` });
+      }
+    }
+  }
+});
 
 /**
  * Classify an assertion's provenance from its context.
  *
- * Only returns "authoritative" when BOTH isVerified is true AND a valid
- * evidenceRef with a receipt reference including verifiedAt is present.
- * A bare hasReceipt or isVerified flag is not sufficient (luna-judge finding F2).
+ * Only returns "authoritative" when a caller-supplied trusted verifier checks
+ * the fact and reference. Serializable isVerified/verifiedBy fields are claims.
  *
  * @param {object} assertion
- * @param {object} [ctx] — { isVerified, evidenceRef, derivedFrom, observedAt }
+ * @param {object} [ctx] — { evidenceRef, derivedFrom, observedAt }
+ * @param {{verifyEvidence?: (fact: object, reference: object) => boolean}} options
  * @returns {string} one of PROVENANCE_CLASSES
  */
-export function classifyProvenance(assertion, ctx = {}) {
+export function classifyProvenance(assertion, ctx = {}, { verifyEvidence } = {}) {
   if (!assertion || !assertion.id) return "unknown";
   if (ctx.derivedFrom && Array.isArray(ctx.derivedFrom) && ctx.derivedFrom.length > 0) return "derived";
-  if (
-    ctx.isVerified === true &&
-    ctx.evidenceRef &&
-    typeof ctx.evidenceRef === "object" &&
-    typeof ctx.evidenceRef.address === "string" && ctx.evidenceRef.address.trim().length > 0 &&
-    typeof ctx.evidenceRef.verifier === "string" && ctx.evidenceRef.verifier.trim().length > 0 &&
-    typeof ctx.evidenceRef.verifiedAt === "string" && ctx.evidenceRef.verifiedAt.trim().length > 0
-  ) {
-    // Validate that verifiedAt is a real ISO datetime, not an arbitrary string.
-    // evidenceRefSchema enforces z.string().datetime(); replicate that check here.
-    const _isoRe = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
-    if (_isoRe.test(ctx.evidenceRef.verifiedAt.trim())) {
-      return "authoritative";
-    }
-    return "unknown";
+  // Serializable flags and verifier names are claims. Only a trusted caller's
+  // out-of-band verifier can bind this fact to an independently checked record.
+  if (typeof verifyEvidence === "function" && evidenceRefSchema.safeParse(ctx.evidenceRef).success) {
+    try {
+      if (verifyEvidence(assertion, ctx.evidenceRef) === true) return "authoritative";
+    } catch { /* unverifiable is not authoritative */ }
   }
-  const _observedAtRe = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
-  if (ctx.observedAt && typeof ctx.observedAt === "string" && _observedAtRe.test(ctx.observedAt)) return "observed";
+  if (z.string().datetime({ offset: true }).safeParse(ctx.observedAt).success && Number.isFinite(Date.parse(ctx.observedAt))) return "observed";
   return "unknown";
 }
 
@@ -243,23 +271,31 @@ const MONEY_FIELD_NAMES = new Set([
   "shipping_cost", "shippingCost", "ShippingCost",
 ]);
 
+/** Explicit non-money numeric fact. Bare JSON numbers are ambiguous. */
+export const quantitySchema = z.object({
+  kind: z.literal("quantity"),
+  value: z.number().finite(),
+  unit: z.string().regex(/^[a-z][a-z0-9/_-]*$/),
+}).strict();
+
 function isMoneyFieldName(key) {
   return MONEY_FIELD_NAMES.has(key);
 }
 
 /**
  * Validate that all money fields across the graph use the money contract.
- * Walks entities, links, and assertions looking for monetary fields and
- * validates them with moneySchema regardless of value type (luna-judge P1 finding).
- * Does NOT reject non-monetary numbers like ratios or temperatures.
+ * Walks open-ended fact payloads, rejecting ambiguous bare numbers and
+ * accepting canonical money or explicitly typed non-money quantities.
+ * Familiar monetary field names are also checked directly.
  *
  * Also checks that authoritative assertions have evidenceRef and that
  * fact-bearing entities/links have required provenance fields.
  *
  * @param {object} graph — a graphSchema-shaped object
+ * @param {{verifyEvidence?: (fact: object, reference: object|string) => boolean}} options
  * @returns {{ valid: boolean, errors: string[] }}
  */
-export function validateGraphIntegrity(graph) {
+export function validateGraphIntegrity(graph, { verifyEvidence } = {}) {
   const errors = [];
 
   // First, validate the full graph against the schema (F4)
@@ -280,11 +316,16 @@ export function validateGraphIntegrity(graph) {
     );
   }
 
-  // Check: authoritative assertions must have evidenceRef
+  // A payload's evidence strings are only a claim; authority requires an
+  // independently supplied verifier that checks the fact and reference pair.
+  const isVerified = (fact, reference) => {
+    if (typeof verifyEvidence !== "function") return false;
+    try { return verifyEvidence(fact, reference) === true; } catch { return false; }
+  };
   for (let i = 0; i < data.assertions.length; i++) {
     const a = data.assertions[i];
-    if (a.provenance === "authoritative" && !a.evidenceRef) {
-      errors.push(`assertions[${i}]: authoritative provenance requires evidenceRef`);
+    if (a.provenance === "authoritative" && !isVerified(a, a.evidenceRef)) {
+      errors.push(`assertions[${i}]: authoritative provenance requires trusted evidence verification`);
     }
   }
 
@@ -309,20 +350,30 @@ export function validateGraphIntegrity(graph) {
       if (l.provenance !== "unknown" && !l.capturedAt) {
         errors.push(`links[${i}]: non-unknown provenance link requires capturedAt`);
       }
-      if (l.provenance === "authoritative" && !l.evidenceAddress) {
-        errors.push(`links[${i}]: authoritative provenance link requires evidenceAddress`);
+      if (l.provenance === "authoritative" && !isVerified(l, l.evidenceAddress)) {
+        errors.push(`links[${i}]: authoritative provenance link requires trusted evidence verification`);
       }
     }
   }
 
-  // Walk ALL graph elements for money field validation (F6, P1 update: check regardless of value type)
-  // skipObjects: set of objects to NOT recurse into (already validated as money objects)
-  function walkForMoney(obj, path, skipObjects = new Set()) {
+  // Fact payloads need explicit numeric types. A finite list of money-like
+  // field names cannot catch new names such as grandTotal or purchase_total.
+  function validateFactNumbers(obj, path) {
+    if (typeof obj === "number") {
+      errors.push(`${path}: untyped numeric fact; use canonical money or an explicit quantity`);
+      return;
+    }
     if (!obj || typeof obj !== "object") return;
-    if (skipObjects.has(obj)) return;
+    if (moneySchema.safeParse(obj).success) return;
+    if (obj.kind === "quantity") {
+      if (!quantitySchema.safeParse(obj).success) {
+        errors.push(`${path}: invalid explicit quantity`);
+      }
+      return;
+    }
     if (Array.isArray(obj)) {
       for (let i = 0; i < obj.length; i++) {
-        walkForMoney(obj[i], `${path}[${i}]`, skipObjects);
+        validateFactNumbers(obj[i], `${path}[${i}]`);
       }
       return;
     }
@@ -336,18 +387,13 @@ export function validateGraphIntegrity(graph) {
             for (const issue of moneyResult.error.issues) {
               errors.push(`${fullPath}: money field invalid — ${issue.message}`);
             }
-          } else {
-            // Valid money object — don't recurse into its internals
-            // (amount, currency, exponent are structural, not standalone money fields)
-            skipObjects.add(val);
           }
         } else {
           errors.push(`${fullPath}: money field must be a canonical money object { amount, currency, exponent }, got ${typeof val}`);
         }
+        continue;
       }
-      if (typeof val === "object" && val !== null && !skipObjects.has(val)) {
-        walkForMoney(val, fullPath, skipObjects);
-      }
+      validateFactNumbers(val, fullPath);
     }
   }
 
@@ -362,19 +408,14 @@ export function validateGraphIntegrity(graph) {
     }
   }
 
-  // Walk entities, links, and assertions
-  // Collect already-validated money objects (from assertion predicate checks above)
-  // so walkForMoney doesn't recurse into their internal keys
-  const moneySkip = new Set();
-  for (const a of data.assertions) {
-    if (isMoneyFieldName(a.predicate) && typeof a.object === "object" && a.object !== null) {
-      const r = moneySchema.safeParse(a.object);
-      if (r.success) moneySkip.add(a.object);
-    }
+  // Only open-ended fact JSON needs this check. Typed graph metadata has its
+  // own schemas, and money objects must not be reinterpreted as bare numbers.
+  for (let i = 0; i < (data.entities ?? []).length; i++) {
+    if (data.entities[i].attributes) validateFactNumbers(data.entities[i].attributes, `entities[${i}].attributes`);
   }
-  if (data.entities) walkForMoney(data.entities, "entities", moneySkip);
-  if (data.links) walkForMoney(data.links, "links", moneySkip);
-  walkForMoney(data.assertions, "assertions", moneySkip);
+  for (let i = 0; i < data.assertions.length; i++) {
+    validateFactNumbers(data.assertions[i].object, `assertions[${i}].object`);
+  }
 
   return { valid: errors.length === 0, errors };
 }

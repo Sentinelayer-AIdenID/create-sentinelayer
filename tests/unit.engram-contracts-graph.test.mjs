@@ -263,7 +263,7 @@ test("classifyProvenance: derived when derivedFrom has entries", () => {
   assert.equal(classifyProvenance({ id: "a1" }, { derivedFrom: ["a0"] }), "derived");
 });
 
-test("classifyProvenance: authoritative requires isVerified AND evidenceRef (F2)", () => {
+test("classifyProvenance: authoritative requires trusted verification of the fact and evidence", () => {
   // Bare isVerified without evidenceRef is NOT authoritative
   assert.equal(classifyProvenance({ id: "a1" }, { isVerified: true }), "unknown");
   // Bare hasReceipt is NOT authoritative
@@ -273,11 +273,15 @@ test("classifyProvenance: authoritative requires isVerified AND evidenceRef (F2)
     isVerified: true,
     evidenceRef: { address: "engram://rec/1", verifier: "aidenid-01" },
   }), "unknown");
-  // isVerified + evidenceRef WITH verifiedAt IS authoritative
+  // A complete self-reported reference still is not authoritative.
   assert.equal(classifyProvenance({ id: "a1" }, {
     isVerified: true,
     evidenceRef: { address: "engram://rec/1", verifier: "aidenid-01", verifiedAt: "2026-10-23T00:00:00Z" },
-  }), "authoritative");
+  }), "unknown");
+  // The caller supplies a trusted verifier outside the serializable payload.
+  assert.equal(classifyProvenance({ id: "a1" }, {
+    evidenceRef: { address: "engram://rec/1", verifier: "aidenid-01", verifiedAt: "2026-10-23T00:00:00Z" },
+  }, { verifyEvidence: (fact, ref) => fact.id === "a1" && ref.address === "engram://rec/1" }), "authoritative");
   // isVerified + incomplete evidenceRef is NOT authoritative
   assert.equal(classifyProvenance({ id: "a1" }, {
     isVerified: true,
@@ -313,7 +317,7 @@ test("validateGraphIntegrity: valid graph passes (F4: full schema validation)", 
       id: "a1",
       subject: "x",
       predicate: "y",
-      object: { value: 100 },
+      object: { kind: "quantity", value: 100, unit: "count" },
       provenance: "observed",
       schemaValidity: "valid",
       source: { sourceId: "src-001", version: "1.0.0", capturedAt: "2026-10-23T00:00:00Z", tenantScope: "tenant/acme" },
@@ -361,14 +365,17 @@ test("validateGraphIntegrity: rejects money float in assertion field (F6: typed 
     "must reject money float in Amount field: " + JSON.stringify(errors));
 });
 
-test("validateGraphIntegrity: accepts non-monetary float like ratio (F6: not too broad)", () => {
+test("validateGraphIntegrity: accepts explicitly typed non-monetary floats", () => {
   const { valid, errors } = validateGraphIntegrity({
     version: "1.0.0",
     assertions: [{
       id: "a1",
       subject: "x",
       predicate: "temperature",
-      object: { ratio: 0.85, degrees: 36.6 },
+      object: {
+        ratio: { kind: "quantity", value: 0.85, unit: "ratio" },
+        degrees: { kind: "quantity", value: 36.6, unit: "celsius" },
+      },
       provenance: "observed",
       schemaValidity: "valid",
       source: { sourceId: "src-001", version: "1.0.0", capturedAt: "2026-10-23T00:00:00Z", tenantScope: "tenant/acme" },

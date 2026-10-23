@@ -292,7 +292,7 @@ test("taskContextPackSchema: REFUSES tenant scope mismatch with sourceSnapshot",
     "must report tenant scope mismatch: " + JSON.stringify(messages));
 });
 
-test("taskContextPackSchema: ACCEPTS cross-tenant when authorizedCrossTenant lists it", () => {
+test("taskContextPackSchema: REFUSES self-declared cross-tenant authorization", () => {
   const crossTenantPack = {
     ...VALID_TASK_CONTEXT_PACK,
     tenantScope: "tenant/acme",
@@ -300,7 +300,7 @@ test("taskContextPackSchema: ACCEPTS cross-tenant when authorizedCrossTenant lis
     authorizedCrossTenant: ["tenant/beta"],
   };
   const r = taskContextPackSchema.safeParse(crossTenantPack);
-  assert.equal(r.success, true, "authorized cross-tenant must be accepted");
+  assert.equal(r.success, false, "a pack cannot grant itself cross-tenant access");
 });
 
 test("actionReceiptSchema: REFUSES contentHash not matching scheme:encoded format", () => {

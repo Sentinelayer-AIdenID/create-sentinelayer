@@ -18,7 +18,7 @@ import { z } from "zod";
 import { EVIDENCE_SCHEMA_VERSION } from "./versions.js";
 
 /**
- * Supported evidence schemes. Only these are trusted; "screenshot" and
+ * Supported evidence locator schemes. "screenshot" and
  * "image" are explicitly banned (ticket 73ead329: no inferred backend
  * endpoints from screenshots).
  */
@@ -28,11 +28,11 @@ const TRUSTED_SCHEMES = Object.freeze(["file", "http", "https", "engram", "recei
  * An evidence address: a stable reference to where an assertion's proof lives.
  * Must NOT be inferred from screenshots (ticket 73ead329 constraint).
  *
- * The address must be verified by a trusted verifier (sourceVersion with
- * verifier identity), not just carry caller-supplied metadata.
+ * These fields record a provenance claim. Parsing them does not authenticate
+ * the claimed verifier; consumers must check it against a trusted source.
  */
 export const evidenceAddressSchema = z.object({
-  /** Protocol/scheme: must be a trusted scheme */
+  /** Protocol/scheme: must be an allowed locator scheme */
   scheme: z.enum(["file", "http", "https", "engram", "receipt", "inline"]),
   /** Locator within that scheme */
   locator: z.string().min(1),
@@ -53,14 +53,13 @@ export const evidenceAddressSchema = z.object({
     // At least one of sourceVersion or contentHash must be present to
     // guard against screenshot-inferred evidence.
     if (!addr.sourceVersion && !addr.contentHash) return false;
-    // A verifier must attest that this address was not screenshot-derived.
-    // Self-supplied hashes or version strings without a verifier identity
-    // do not establish provenance (luna-judge P2 finding).
+    // Require a verifier identity as metadata, but do not treat this string as
+    // proof of independent verification.
     if (!addr.verifiedBy) return false;
     return true;
   },
   {
-    message: "evidence address must have sourceVersion or contentHash AND a verifiedBy verifier to prove it was not screenshot-inferred",
+    message: "evidence address must claim sourceVersion or contentHash and verifiedBy; a trusted source must verify the claim",
     path: ["verifiedBy"],
   },
 );
@@ -171,15 +170,15 @@ export function evidenceUnsupportedScheme(scheme) {
 }
 
 /**
- * Validate that an evidence address was NOT inferred from a screenshot.
- * Screenshot-inferred evidence has no contentHash and no sourceVersion — it
- * is rejected with a clear error. This is now also enforced at the schema
- * level via evidenceAddressSchema's refine.
+ * Validate the address shape and ask a trusted, out-of-band source verifier
+ * whether it was actually derived from the stated source. Caller-supplied
+ * sourceVersion, hash, and verifiedBy strings cannot prove this by themselves.
  *
  * @param {object} address — evidenceAddressSchema-shaped
+ * @param {{verifySource?: (address: object) => boolean}} options
  * @returns {{ valid: boolean, error?: string }}
  */
-export function validateNotScreenshotInferred(address) {
+export function validateNotScreenshotInferred(address, { verifySource } = {}) {
   if (!address || typeof address !== "object") {
     return { valid: false, error: "evidence address is required" };
   }
@@ -201,14 +200,24 @@ export function validateNotScreenshotInferred(address) {
       error: "evidence address lacks both sourceVersion and contentHash; cannot verify it was not screenshot-inferred",
     };
   }
-  // A verifier must attest this address was not screenshot-derived.
-  // Self-supplied hashes or version strings without a verifier identity
-  // do not establish provenance (luna-judge P2 finding).
   if (!address.verifiedBy) {
     return {
       valid: false,
-      error: "evidence address lacks verifiedBy; a verifier must attest it was not screenshot-inferred",
+      error: "evidence address lacks verifiedBy metadata; trusted source verification is also required",
     };
+  }
+  if (!evidenceAddressSchema.safeParse(address).success) {
+    return { valid: false, error: "evidence address does not match the required source and tenant shape" };
+  }
+  if (typeof verifySource !== "function") {
+    return { valid: false, error: "trusted source verification is required; verifiedBy is only a claim" };
+  }
+  try {
+    if (verifySource(address) !== true) {
+      return { valid: false, error: "trusted source did not verify this evidence address" };
+    }
+  } catch {
+    return { valid: false, error: "trusted source verification failed" };
   }
   return { valid: true };
 }

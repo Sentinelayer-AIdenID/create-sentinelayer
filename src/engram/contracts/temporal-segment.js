@@ -37,6 +37,9 @@ export const temporalSegmentSchema = z.object({
   coverageRatio: z.number().min(0).max(1).optional(),
   tenantScope: z.string().min(1),
 }).strict().refine(
+  (data) => data.tenantScope === data.sourceSnapshot.tenantScope,
+  { message: "segment tenantScope must match sourceSnapshot tenantScope", path: ["tenantScope"] },
+).refine(
   (data) => {
     // Parse timestamps as instants rather than comparing strings.
     // Lexical comparison can accept ".10Z" > ".1Z" even though they
