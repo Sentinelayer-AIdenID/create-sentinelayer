@@ -65,3 +65,49 @@ export {
   evidenceUnsupportedScheme,
   validateNotScreenshotInferred,
 } from "./evidence.js";
+
+// SourceSnapshot contract
+export {
+  sourceSnapshotSchema,
+  VALID_SOURCE_SNAPSHOT,
+  MINIMAL_SOURCE_SNAPSHOT,
+} from "./source-snapshot.js";
+
+// MediaAsset contract
+export {
+  MEDIA_ASSET_TYPES,
+  mediaAssetTypeSchema,
+  mediaAssetSchema,
+  VALID_MEDIA_ASSET,
+} from "./media-asset.js";
+
+// TemporalSegment contract
+export {
+  TEMPORAL_SEGMENT_KINDS,
+  temporalSegmentKindSchema,
+  temporalSegmentSchema,
+  VALID_TEMPORAL_SEGMENT,
+} from "./temporal-segment.js";
+
+// TaskContextPack contract
+export {
+  delegationReferenceSchema,
+  taskContextPackSchema,
+  VALID_TASK_CONTEXT_PACK,
+} from "./task-context-pack.js";
+
+// Contract versions
+export {
+  CONTRACT_VERSIONS,
+  GRAPH_SCHEMA_VERSION,
+  EVIDENCE_SCHEMA_VERSION,
+  COMPAT_FIXTURES,
+} from "./versions.js";
+
+// ActionReceipt contract
+export {
+  ACTION_RECEIPT_STATUSES,
+  actionReceiptStatusSchema,
+  actionReceiptSchema,
+  VALID_ACTION_RECEIPT,
+} from "./action-receipt.js";

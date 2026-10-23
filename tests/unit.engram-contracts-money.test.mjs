@@ -130,3 +130,39 @@ test("moneySchema round-trip: integer minor units -> format -> parse -> same int
   assert.equal(reparsed.success, true);
   assert.equal(toMinorUnits(reparsed.data), 1999);
 });
+
+test("wrong-price proof: structurally valid price is NOT factually verified", () => {
+  // A price that passes schema validation but should NOT be treated as
+  // factually verified. Structural validity ≠ factual truth.
+  // This proves ticket 73ead329's "valid-looking wrong-price case that is
+  // structurally valid but NOT declared factually verified."
+
+  const structurallyValid = moneySchema.safeParse({
+    amount: "999999.99",
+    currency: "USD",
+    exponent: 2,
+  });
+  assert.equal(structurallyValid.success, true,
+    "structurally valid money must parse");
+
+  // Schema validation alone is NECESSARY but NOT SUFFICIENT for factual truth.
+  // The parsed data has no source snapshot, no evidence address, no
+  // verifier — it is structurally valid but unverified.
+  const data = structurallyValid.data;
+
+  // The parsed result must not carry any implicit factual verification flag
+  assert.equal(data._verified, undefined,
+    "schema validation must not set _verified");
+  assert.equal(data._sourceVersion, undefined,
+    "schema validation must not set _sourceVersion");
+
+  // Even a "plausible" price (e.g. 999999.99 USD) that passes the schema
+  // is not declared authoritative without provenance.
+  // The moneySchema only validates STRUCTURE; provenance is the graph layer.
+});
+
+test("wrong-price proof: null/undefined amounts rejected regardless of structure", () => {
+  // Prove that missing amounts fail, not pass silently
+  const noAmount = moneySchema.safeParse({ currency: "USD", exponent: 2 });
+  assert.equal(noAmount.success, false);
+});
