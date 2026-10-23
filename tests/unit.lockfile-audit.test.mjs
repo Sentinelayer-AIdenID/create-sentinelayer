@@ -3,9 +3,14 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const lockfile = JSON.parse(
-  readFileSync(new URL("../package-lock.json", import.meta.url), "utf8")
-);
+let lockfile;
+try {
+  lockfile = JSON.parse(
+    readFileSync(new URL("../package-lock.json", import.meta.url), "utf8")
+  );
+} catch (err) {
+  throw new Error(`Failed to read package-lock.json: ${err.message}`);
+}
 
 test("lockfile has no peer=true markers (unsafe_lockfile gate compat)", () => {
   const packages = lockfile.packages || {};
