@@ -28,6 +28,7 @@ export {
 export { createGovernance } from "./governance.js";
 export { createMemoryTools } from "./tools.js";
 export { runEngramSla } from "./sla.js";
+export * from "./contracts/index.js";
 export { ingestDocumentIntoNamespace } from "./ingest-document.js";
 
 import { createStore } from "./store.js";
