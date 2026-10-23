@@ -47,7 +47,21 @@ export const mediaAssetSchema = z.object({
   sourceSnapshot: sourceSnapshotSchema,
   metadata: z.record(z.string(), z.json()).optional(),
   tenantScope: z.string().min(1),
-}).strict();
+}).strict().refine(
+  (data) => {
+    // Tenant scope must be consistent: top-level tenantScope must match
+    // the sourceSnapshot's tenantScope, or an explicit authorization boundary
+    // must be declared. Without authorization, cross-tenant is refused.
+    if (data.tenantScope !== data.sourceSnapshot.tenantScope) {
+      return false;
+    }
+    return true;
+  },
+  {
+    message: "tenantScope must match sourceSnapshot.tenantScope; cross-tenant requires explicit authorization",
+    path: ["tenantScope"],
+  },
+);
 
 /**
  * Valid fixture: a complete, valid media asset.

@@ -198,19 +198,23 @@ export function negotiateCapability({ capability, clientVersion, serverCapabilit
   if (!capability || typeof capability !== "string") {
     return makeResult({
       capability: capability || "unknown",
-      clientVersion: clientVersion || "unknown",
+      clientVersion: "unknown-cap@0.0.0",
       reason: "capability is required and must be a string",
     });
   }
   if (!clientVersion || typeof clientVersion !== "string") {
     return makeResult({
+      clientVersion: `${capability}@0.0.0`,
       reason: "clientVersion is required and must be a string",
     });
   }
 
   const clientParts = parseCapVersion(clientVersion);
   if (!clientParts) {
+    // Return a schema-valid result: use a placeholder that passes capabilityVersionSchema
+    const placeholder = `${capability}@0.0.0`;
     return makeResult({
+      clientVersion: placeholder,
       reason: "clientVersion is not a valid capability version",
     });
   }
@@ -230,7 +234,19 @@ export function negotiateCapability({ capability, clientVersion, serverCapabilit
     return makeResult({ result: "unknown", reason: `capability "${capability}" is not registered on the server` });
   }
 
-  // Validate server entry
+  // Validate the server entry against the full capabilityEntrySchema.
+  // This ensures source, tenantScope, and all required fields are present
+  // before negotiating. An entry missing source/tenant is not a valid capability.
+  const entryResult = capabilityEntrySchema.safeParse(serverCap);
+  if (!entryResult.success) {
+    return makeResult({
+      result: "unknown",
+      serverVersion: serverCap.version,
+      reason: `capability "${capability}" server entry is invalid: ${entryResult.error.issues.map((i) => i.message).join("; ")}`,
+    });
+  }
+
+  // Validate server version format
   if (!isValidServerEntry(serverCap)) {
     return makeResult({
       result: "unknown",

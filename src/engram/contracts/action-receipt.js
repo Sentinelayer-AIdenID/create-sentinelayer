@@ -44,14 +44,42 @@ export const actionReceiptSchema = z.object({
   performedAt: z.string().datetime(),
   verifier: z.string().min(1),
   contentHash: z.string().regex(
-    /^[a-z0-9]+:[a-zA-Z0-9+/=-]+$/,
-    { message: "contentHash must be scheme:encoded format (e.g. sha256:<hex>)" },
+    /^[a-z0-9]+:[a-zA-Z0-9+/=]+$/,
+    { message: "contentHash must be scheme:encoded format (e.g. sha256:<base64>)" },
   ),
   sourceSnapshot: sourceSnapshotSchema,
   tenantScope: z.string().min(1),
   evidenceRefs: z.array(z.string().min(1)).optional(),
   metadata: z.record(z.string(), z.json()).optional(),
-}).strict();
+}).strict().refine(
+  (data) => {
+    // Tenant scope must be consistent with sourceSnapshot.
+    if (data.tenantScope !== data.sourceSnapshot.tenantScope) {
+      return false;
+    }
+    return true;
+  },
+  {
+    message: "tenantScope must match sourceSnapshot.tenantScope; cross-tenant requires explicit authorization",
+    path: ["tenantScope"],
+  },
+).refine(
+  (data) => {
+    // contentHash scheme:encoded values must carry a meaningful digest.
+    // A single character after the scheme prefix is not a real hash.
+    const colonIdx = data.contentHash.indexOf(":");
+    if (colonIdx < 0) return false;
+    const digest = data.contentHash.slice(colonIdx + 1);
+    // sha256 hex digests are 64 hex chars; base64 digests for sha256 are ~44 chars.
+    // Minimum: require at least 8 characters of actual digest content.
+    if (digest.length < 8) return false;
+    return true;
+  },
+  {
+    message: "contentHash digest is too short to be a meaningful integrity hash (minimum 8 characters after scheme prefix)",
+    path: ["contentHash"],
+  },
+);
 
 /**
  * Valid fixture: a complete, valid action receipt.

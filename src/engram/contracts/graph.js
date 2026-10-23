@@ -71,6 +71,7 @@ export const entitySchema = z.object({
   label: z.string().optional(),
   attributes: z.record(z.string(), z.json()).optional(),
   tenantScope: z.string().min(1),
+  sourceId: z.string().min(1),
   sourceVersion: z.string().min(1),
   capturedAt: z.string().datetime().optional(),
 }).strict().refine(
@@ -97,19 +98,19 @@ export const linkSchema = z.object({
   provenance: provenanceClassSchema,
   confidence: modelConfidenceSchema.optional(),
   evidenceAddress: z.string().min(1).optional(),
-  tenantScope: z.string().min(1).optional(),
+  tenantScope: z.string().min(1),
   capturedAt: z.string().datetime().optional(),
 }).strict().refine(
   (data) => {
     if (data.provenance === "authoritative" && !data.evidenceAddress) {
       return false;
     }
-    if (data.provenance !== "unknown" && (!data.tenantScope || !data.capturedAt)) {
+    if (data.provenance !== "unknown" && !data.capturedAt) {
       return false;
     }
     return true;
   },
-  { message: "non-unknown provenance links require tenantScope and capturedAt; authoritative links require evidenceAddress", path: ["tenantScope"] },
+  { message: "all links require tenantScope; non-unknown provenance links require capturedAt; authoritative links require evidenceAddress", path: ["capturedAt"] },
 );
 
 /**
@@ -201,11 +202,17 @@ export function classifyProvenance(assertion, ctx = {}) {
     ctx.isVerified === true &&
     ctx.evidenceRef &&
     typeof ctx.evidenceRef === "object" &&
-    typeof ctx.evidenceRef.address === "string" &&
-    typeof ctx.evidenceRef.verifier === "string" &&
-    typeof ctx.evidenceRef.verifiedAt === "string"
+    typeof ctx.evidenceRef.address === "string" && ctx.evidenceRef.address.trim().length > 0 &&
+    typeof ctx.evidenceRef.verifier === "string" && ctx.evidenceRef.verifier.trim().length > 0 &&
+    typeof ctx.evidenceRef.verifiedAt === "string" && ctx.evidenceRef.verifiedAt.trim().length > 0
   ) {
-    return "authoritative";
+    // Validate that verifiedAt is a real ISO datetime, not an arbitrary string.
+    // evidenceRefSchema enforces z.string().datetime(); replicate that check here.
+    const _isoRe = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+    if (_isoRe.test(ctx.evidenceRef.verifiedAt.trim())) {
+      return "authoritative";
+    }
+    return "unknown";
   }
   const _observedAtRe = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
   if (ctx.observedAt && typeof ctx.observedAt === "string" && _observedAtRe.test(ctx.observedAt)) return "observed";
@@ -216,7 +223,29 @@ export function classifyProvenance(assertion, ctx = {}) {
  * Money field names that must be validated with moneySchema.
  * Covers common monetary field naming patterns.
  */
-const MONEY_FIELD_RE = /^(?:[Aa]mount|[Pp]rice|[Cc]ost|[Ff]ee|[Tt]otal|[Bb]alance|[Pp]ayment)$/;
+// Money field name set: covers common monetary field naming patterns.
+// Fields whose name exactly matches one of these are expected to carry
+// a canonical money object { amount, currency, exponent }, never a bare float.
+// Non-monetary numeric fields like ratio, temperature, count are not in this set.
+const MONEY_FIELD_NAMES = new Set([
+  "amount", "Amount",
+  "price", "Price",
+  "cost", "Cost",
+  "fee", "Fee",
+  "total", "Total",
+  "balance", "Balance",
+  "payment", "Payment",
+  "subtotal", "Subtotal",
+  "total_amount", "totalAmount", "TotalAmount",
+  "unit_price", "unitPrice", "UnitPrice",
+  "tax_amount", "taxAmount", "TaxAmount",
+  "discount_amount", "discountAmount", "DiscountAmount",
+  "shipping_cost", "shippingCost", "ShippingCost",
+]);
+
+function isMoneyFieldName(key) {
+  return MONEY_FIELD_NAMES.has(key);
+}
 
 /**
  * Validate that all money fields across the graph use the money contract.
@@ -244,6 +273,13 @@ export function validateGraphIntegrity(graph) {
 
   const data = schemaResult.data;
 
+  // Check: coverage.totalAssertions must match actual assertion count
+  if (data.coverage && data.coverage.totalAssertions !== data.assertions.length) {
+    errors.push(
+      `coverage.totalAssertions (${data.coverage.totalAssertions}) does not match actual assertion count (${data.assertions.length})`,
+    );
+  }
+
   // Check: authoritative assertions must have evidenceRef
   for (let i = 0; i < data.assertions.length; i++) {
     const a = data.assertions[i];
@@ -263,12 +299,15 @@ export function validateGraphIntegrity(graph) {
     }
   }
 
-  // Check: non-unknown provenance links need tenantScope and capturedAt
+  // Check: links need tenantScope (all) and capturedAt (non-unknown)
   if (data.links) {
     for (let i = 0; i < data.links.length; i++) {
       const l = data.links[i];
-      if (l.provenance !== "unknown" && (!l.tenantScope || !l.capturedAt)) {
-        errors.push(`links[${i}]: non-unknown provenance link requires tenantScope and capturedAt`);
+      if (!l.tenantScope) {
+        errors.push(`links[${i}]: all links require tenantScope`);
+      }
+      if (l.provenance !== "unknown" && !l.capturedAt) {
+        errors.push(`links[${i}]: non-unknown provenance link requires capturedAt`);
       }
       if (l.provenance === "authoritative" && !l.evidenceAddress) {
         errors.push(`links[${i}]: authoritative provenance link requires evidenceAddress`);
@@ -277,31 +316,37 @@ export function validateGraphIntegrity(graph) {
   }
 
   // Walk ALL graph elements for money field validation (F6, P1 update: check regardless of value type)
-  function walkForMoney(obj, path) {
+  // skipObjects: set of objects to NOT recurse into (already validated as money objects)
+  function walkForMoney(obj, path, skipObjects = new Set()) {
     if (!obj || typeof obj !== "object") return;
+    if (skipObjects.has(obj)) return;
     if (Array.isArray(obj)) {
       for (let i = 0; i < obj.length; i++) {
-        walkForMoney(obj[i], `${path}[${i}]`);
+        walkForMoney(obj[i], `${path}[${i}]`, skipObjects);
       }
       return;
     }
     for (const key of Object.keys(obj)) {
       const val = obj[key];
       const fullPath = `${path}.${key}`;
-      if (MONEY_FIELD_RE.test(key) && key !== "amount" && key !== "currency" && key !== "exponent") {
+      if (isMoneyFieldName(key)) {
         if (typeof val === "object" && val !== null) {
           const moneyResult = moneySchema.safeParse(val);
           if (!moneyResult.success) {
             for (const issue of moneyResult.error.issues) {
               errors.push(`${fullPath}: money field invalid — ${issue.message}`);
             }
+          } else {
+            // Valid money object — don't recurse into its internals
+            // (amount, currency, exponent are structural, not standalone money fields)
+            skipObjects.add(val);
           }
         } else {
           errors.push(`${fullPath}: money field must be a canonical money object { amount, currency, exponent }, got ${typeof val}`);
         }
       }
-      if (typeof val === "object" && val !== null) {
-        walkForMoney(val, fullPath);
+      if (typeof val === "object" && val !== null && !skipObjects.has(val)) {
+        walkForMoney(val, fullPath, skipObjects);
       }
     }
   }
@@ -309,7 +354,7 @@ export function validateGraphIntegrity(graph) {
   // Check: assertions with monetary predicates must have moneySchema-valid objects
   for (let i = 0; i < data.assertions.length; i++) {
     const a = data.assertions[i];
-    if (MONEY_FIELD_RE.test(a.predicate)) {
+    if (isMoneyFieldName(a.predicate)) {
       const objResult = moneySchema.safeParse(a.object);
       if (!objResult.success) {
         errors.push(`assertions[${i}].object: assertion with monetary predicate "${a.predicate}" must have a canonical money object, got ${typeof a.object === "object" ? JSON.stringify(a.object) : String(a.object)}`);
@@ -318,9 +363,18 @@ export function validateGraphIntegrity(graph) {
   }
 
   // Walk entities, links, and assertions
-  if (data.entities) walkForMoney(data.entities, "entities");
-  if (data.links) walkForMoney(data.links, "links");
-  walkForMoney(data.assertions, "assertions");
+  // Collect already-validated money objects (from assertion predicate checks above)
+  // so walkForMoney doesn't recurse into their internal keys
+  const moneySkip = new Set();
+  for (const a of data.assertions) {
+    if (isMoneyFieldName(a.predicate) && typeof a.object === "object" && a.object !== null) {
+      const r = moneySchema.safeParse(a.object);
+      if (r.success) moneySkip.add(a.object);
+    }
+  }
+  if (data.entities) walkForMoney(data.entities, "entities", moneySkip);
+  if (data.links) walkForMoney(data.links, "links", moneySkip);
+  walkForMoney(data.assertions, "assertions", moneySkip);
 
   return { valid: errors.length === 0, errors };
 }

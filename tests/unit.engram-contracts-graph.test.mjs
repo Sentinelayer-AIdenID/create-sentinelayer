@@ -146,7 +146,7 @@ test("assertionSchema: REFUSES undefined object (z.json() rejects undefined per 
 
 test("entitySchema: validates entity with required tenantScope", () => {
   assert.equal(entitySchema.safeParse({
-    id: "session:s1", type: "session", tenantScope: "tenant/acme", sourceVersion: "1.0.0",
+    id: "session:s1", type: "session", tenantScope: "tenant/acme", sourceId: "src-001", sourceVersion: "1.0.0",
   }).success, true);
 });
 
@@ -205,7 +205,7 @@ test("graphSchema: validates a complete versioned graph", () => {
       },
     ],
     entities: [
-      { id: "session:s1", type: "session", tenantScope: "tenant/acme", sourceVersion: "1.0.0" },
+      { id: "session:s1", type: "session", tenantScope: "tenant/acme", sourceId: "src-001", sourceVersion: "1.0.0" },
     ],
     links: [
       { source: "a1", target: "a2", predicate: "supports", provenance: "derived",
@@ -394,7 +394,7 @@ test("validateGraphIntegrity: catches money float in entity.attributes.Price (F6
       id: "e1",
       type: "product",
       tenantScope: "tenant/acme",
-      sourceVersion: "1.0.0",
+      sourceId: "src-1", sourceVersion: "1.0.0",
       capturedAt: "2026-10-23T00:00:00Z",
       attributes: { Price: { amount: 1.99, currency: "USD" } },
     }],
@@ -460,7 +460,7 @@ test("validateGraphIntegrity: REJECTS authoritative assertion without evidenceRe
 test("entitySchema: REFUSES entity with factual label but no capturedAt", () => {
   const result = entitySchema.safeParse({
     id: "e1", type: "product", tenantScope: "tenant/acme",
-    sourceVersion: "1.0.0",
+      sourceId: "src-1", sourceVersion: "1.0.0",
     label: "A Product",
   });
   assert.equal(result.success, false, "factual entity without capturedAt must be rejected");
@@ -469,7 +469,7 @@ test("entitySchema: REFUSES entity with factual label but no capturedAt", () => 
 test("entitySchema: ACCEPTS entity with label, sourceVersion and capturedAt", () => {
   const result = entitySchema.safeParse({
     id: "e1", type: "product", tenantScope: "tenant/acme",
-    sourceVersion: "1.0.0", capturedAt: "2026-10-23T00:00:00Z",
+      sourceId: "src-1", sourceVersion: "1.0.0", capturedAt: "2026-10-23T00:00:00Z",
     label: "A Product",
   });
   assert.equal(result.success, true, "factual entity with capturedAt must be accepted");
@@ -484,12 +484,14 @@ test("linkSchema: REFUSES authoritative link without evidenceAddress", () => {
   assert.equal(result.success, false, "authoritative link without evidenceAddress must be rejected");
 });
 
-test("linkSchema: REFUSES non-unknown provenance link without tenantScope and capturedAt", () => {
+test("linkSchema: REFUSES non-unknown provenance link without capturedAt", () => {
+  // tenantScope is required for ALL links. Without capturedAt, observed provenance is rejected.
   const result = linkSchema.safeParse({
     source: "n1", target: "n2", predicate: "child_of",
     provenance: "observed",
+    tenantScope: "tenant/acme",
   });
-  assert.equal(result.success, false, "observed link without tenantScope/capturedAt must be rejected");
+  assert.equal(result.success, false, "observed link without capturedAt must be rejected");
 });
 
 test("validateGraphIntegrity: REJECTS monetary predicate with non-money object", () => {
@@ -511,7 +513,7 @@ test("validateGraphIntegrity: ACCEPTS monetary predicate with valid money object
   const { valid, errors } = validateGraphIntegrity({
     version: "1.0.0",
     assertions: [{
-      id: "a1", subject: "x", predicate: "cost", object: { amount: 199, currency: "USD" },
+      id: "a1", subject: "x", predicate: "cost", object: { amount: 199, currency: "USD", exponent: 2 },
       provenance: "observed", schemaValidity: "valid",
       source: { sourceId: "src-001", version: "1.0.0", capturedAt: "2026-10-23T00:00:00Z", tenantScope: "tenant/acme" },
     }],
@@ -530,7 +532,7 @@ test("validateGraphIntegrity: REJECTS non-object value on money-named field", ()
     }],
     entities: [{
       id: "e1", type: "product", tenantScope: "tenant/acme",
-      sourceVersion: "1.0.0", capturedAt: "2026-10-23T00:00:00Z",
+      sourceId: "src-1", sourceVersion: "1.0.0", capturedAt: "2026-10-23T00:00:00Z",
       attributes: { total: 1.99 },
     }],
     generatedAt: "2026-10-23T00:00:00Z",
@@ -543,7 +545,7 @@ test("validateGraphIntegrity: REJECTS non-object value on money-named field", ()
 test("entitySchema: REFUSES attributes with non-JSON value (z.json() rejects undefined)", () => {
   const result = entitySchema.safeParse({
     id: "e1", type: "Person", tenantScope: "tenant/acme",
-    sourceVersion: "1.0.0", capturedAt: "2026-10-23T00:00:00Z",
+      sourceId: "src-1", sourceVersion: "1.0.0", capturedAt: "2026-10-23T00:00:00Z",
     attributes: { value: undefined },
   });
   assert.equal(result.success, false,
@@ -554,7 +556,7 @@ test("entitySchema: REFUSES attributes with function value (z.json() rejects fun
   // z.unknown() would silently drop functions; z.json() must reject them
   const result = entitySchema.safeParse({
     id: "e1", type: "Person", tenantScope: "tenant/acme",
-    sourceVersion: "1.0.0", capturedAt: "2026-10-23T00:00:00Z",
+      sourceId: "src-1", sourceVersion: "1.0.0", capturedAt: "2026-10-23T00:00:00Z",
     attributes: { callback: () => {}, value: 123 },
   });
   assert.equal(result.success, false,
@@ -564,7 +566,7 @@ test("entitySchema: REFUSES attributes with function value (z.json() rejects fun
 test("entitySchema: ACCEPTS attributes with valid JSON values", () => {
   const result = entitySchema.safeParse({
     id: "e1", type: "Person", label: "Alice", tenantScope: "tenant/acme",
-    sourceVersion: "1.0.0", capturedAt: "2026-10-23T00:00:00Z",
+      sourceId: "src-1", sourceVersion: "1.0.0", capturedAt: "2026-10-23T00:00:00Z",
     attributes: { age: 30, active: true, tags: ["a", "b"], meta: { key: "val" } },
   });
   assert.equal(result.success, true,
