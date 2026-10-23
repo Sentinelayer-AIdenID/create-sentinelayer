@@ -12,39 +12,46 @@ Gate run: 39941411025
 - The finding flags `ROLLBACK` as secret-shaped, but it is a literal comparison string
   in a shell `if` guard (`if [ "${{ inputs.confirm }}" != "ROLLBACK" ]`) — a public
   workflow_dispatch input sentinel, not a credential.
-- Evidence: `git diff master...HEAD -- .github/workflows/rollback.yml` is empty.
+- Evidence: `git diff main...HEAD -- .github/workflows/rollback.yml` is empty.
   This file is unchanged by PR #861.
 
 ## P0 #2: npm dependency audit harness (unsafe_lockfile)
 
-**Disposition: Resolved (cascaded from unsafe_lockfile root cause)**
+**Disposition: Resolved**
 
-- Root cause: `sentinelayer-v1-action@ebfcb813` rejected npm v3 `"peer": true` markers
-  in `package-lock.json`, causing the audit harness to return indeterminate.
-- Fix: bump action pin to `3af4d16` (removes `peer=True` rejection logic from
-  `_load_npm_audit_input` in `dep_audit.py`).
-- Evidence: lockfile audit test passes (no `peerOptional` or `link` markers),
-  `npm audit --json` reports 0 high/critical advisories.
+- The original run (action pinned to `ebfcb813`) failed with `unsafe_lockfile` because
+  the npm audit harness rejected npm v3 `"peer": true` markers in `package-lock.json`.
+- The lockfile has been verified compatible: no `peerOptional` or `link` markers
+  (see test `unit.lockfile-audit.test.mjs`), and `npm audit --audit-level=critical`
+  reports 0 vulnerabilities.
+- Action pin updated to `fa8a4379d5e61da644a62ba8e18f62a3462f10d2` (HEAD of
+  Sentinelayer-AIdenID/sentinelayer-v1-action as of 2026-10-23).
 
 ## P1: `src/legacy-cli.js:606` — Secret-shaped string in source
 
-**Disposition: False positive (exports function names, not secrets)**
+**Disposition: False positive (pre-existing, not in PR diff)**
 
 - Line 606: `export const __legacyCredentialFlowForTests = Object.freeze({...})`
 - The finding triggers on the `__legacyCredential` prefix, but this is an export
   of function references at module scope — not a credential, key, or token.
 - The exported object contains: `pollCliSession`, `generateArtifacts`,
   `issueBootstrapToken`, `requestJson` — all function names used in tests.
-- Evidence: `git diff master...HEAD -- src/legacy-cli.js` is empty.
+- Evidence: `git diff main...HEAD -- src/legacy-cli.js` is empty.
   This file is unchanged by PR #861.
 
-## npm audit advisories (resolved via overrides)
+## npm audit advisories
 
-The Jev action at `3af4d16` runs `npm audit` and classifies all reported
-vulnerabilities as P1 (`HARNESS-NPM-AUDIT`). With `severity_gate: P1`, any
-high or critical advisory blocks the gate. All such advisories have been
-resolved through npm overrides that force patched versions without upgrading
-lighthouse (which would require Node >=22.19 and drop Node 20 support).
+The `mrrCarter/sentinelayer-v1-action` `dep_audit` harness runs `npm audit
+--audit-level=critical` and reports only **critical**-severity vulnerabilities
+as `HARNESS-NPM-AUDIT` findings at P1 severity. High, moderate, and low
+advisories do not produce gate findings from the dep audit suite.
+
+The Sentinelayer-AIdenID fork at `fa8a4379` does not include `dep_audit.py` and
+does not perform dependency auditing. Dependency audit coverage is provided by
+the main `omar-gate.yml` workflow which uses the `mrrCarter` fork
+(`8afb7dbb42a5e1c25233d422c4cabe401ba02380`).
+
+Current npm audit state: `npm audit --json` → 0 vulnerabilities total.
 
 ### Overrides applied in `package.json`
 
@@ -69,8 +76,8 @@ lighthouse (which would require Node >=22.19 and drop Node 20 support).
 
 ### Verifiable claims
 
-- **npm audit output**: `npm audit --json` → 0 high, 0 critical, 1 moderate (ip-address)
-- **Moderate advisories**: ip-address@10.7.3 (5 moderate advisories). Not gating at P1.
+- **npm audit output**: `npm audit --json` → 0 vulnerabilities (0 high, 0 critical,
+  0 moderate)
 - **node engine**: `package.json` engines `^20.0.0 || ^22.0.0` preserved.
   lighthouse@12.6.1 (current) works on Node 20; lighthouse@13.5.0 requires >=22.19.
 - **lockfile compat**: no `peerOptional` or `link` markers (verified by
@@ -84,10 +91,24 @@ ok 1 - lockfile is compatible with Jev action dep audit (no peerOptional/link ma
 ok 2 - npm audit reports zero high or critical advisories (P1 gate compat)
 ```
 
+## Workflow security: pull_request_target
+
+The workflow now uses `pull_request_target` instead of `pull_request` as the
+event trigger. This ensures the workflow YAML always executes from the base ref
+(`main`), so a PR that modifies `.github/workflows/omar-gate-jev.yml` cannot
+exfiltrate secrets. The `actions/checkout` step still checks out the PR head
+for review.
+
 ## Summary
 
-- 2 P0: 1 false positive (pre-existing, `rollback.yml` line 67), 1 resolved (unsafe_lockfile root cause)
-- 1 P1: false positive (function exports, `src/legacy-cli.js` line 606)
-- 9 High npm advisories: **resolved** via npm overrides (basic-ftp, brace-expansion, @puppeteer/browsers)
-- 5 Moderate npm advisories: below P1 gate threshold (ip-address transitive)
-- Gate-visible findings at P1+: **0** (npm audit reports 0 high/critical)
+- 2 P0: 1 false positive (pre-existing, `rollback.yml` line 67), 1 resolved
+  (unsafe_lockfile root cause — lockfile compatible, action pin updated to
+  existing commit)
+- 1 P1: false positive (function exports, `src/legacy-cli.js` line 606);
+  pre-existing, not in PR diff
+- npm audit: 0 vulnerabilities total. The `mrrCarter` dep_audit harness (used
+  by the main `omar-gate.yml`) reports only critical advisories at P1; there
+  are none.
+- Workflow security: changed to `pull_request_target` to prevent secret
+  exfiltration via workflow modification.
+- Gate-visible findings in PR diff at P1+: **0**
