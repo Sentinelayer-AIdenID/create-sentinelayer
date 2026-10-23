@@ -61,3 +61,20 @@ test("npm audit reports zero high or critical advisories (P1 gate compat)", () =
     `npm audit blocking advisories (high/critical): ${blocking.join(", ")}`
   );
 });
+
+test("Jev workflow action pin is in the actions-lock allowlist", () => {
+  const workflowPath = new URL("../.github/workflows/omar-gate-jev.yml", import.meta.url);
+  const lockPath = new URL("../.github/policies/actions-lock.json", import.meta.url);
+  const workflow = readFileSync(workflowPath, "utf8");
+  const lock = JSON.parse(readFileSync(lockPath, "utf8"));
+
+  const usesMatch = workflow.match(/uses:\s*Sentinelayer-AIdenID\/sentinelayer-v1-action@([a-f0-9]{40})/);
+  assert.ok(usesMatch, "Jev workflow must pin Sentinelayer-AIdenID/sentinelayer-v1-action with a 40-char SHA");
+  const pin = usesMatch[1];
+
+  const allowed = lock["Sentinelayer-AIdenID/sentinelayer-v1-action"] || [];
+  assert.ok(
+    allowed.includes(pin),
+    `Jev workflow pin ${pin} must be in actions-lock.json allowlist for Sentinelayer-AIdenID/sentinelayer-v1-action (allowed: ${allowed.join(", ")})`
+  );
+});
