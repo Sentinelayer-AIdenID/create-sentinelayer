@@ -9,3 +9,4 @@ coverage/
 .env
 .env.local
 .env.*.local
+scripts/ci/__pycache__/
