@@ -36,7 +36,7 @@ test("evidenceAddressSchema: REFUSES missing scheme or locator", () => {
 
 test("evidenceRecordSchema: validates full evidence record", () => {
   assert.equal(evidenceRecordSchema.safeParse({
-    address: { scheme: "file", locator: "/data/ev.json", sourceVersion: "v1" },
+    address: { scheme: "file", locator: "/data/ev.json", sourceVersion: "v1", tenantScope: "tenant/acme" },
     payload: { key: "value" },
     schemaVersion: "1.0.0",
     collectedAt: "2026-10-23T00:00:00Z",
@@ -48,7 +48,7 @@ test("evidenceRecordSchema: validates full evidence record", () => {
 test("evidencePageSchema: validates paginated list", () => {
   const page = {
     items: [{
-      address: { scheme: "file", locator: "/data/ev.json", sourceVersion: "v1" },
+      address: { scheme: "file", locator: "/data/ev.json", sourceVersion: "v1", tenantScope: "tenant/acme" },
       payload: {},
       schemaVersion: "1.0.0",
       collectedAt: "2026-10-23T00:00:00Z",
@@ -131,7 +131,7 @@ test("evidenceMigrationPolicySchema: validates migration policy", () => {
 
 test("evidenceRecordSchema: REFUSES record without schemaVersion", () => {
   const result = evidenceRecordSchema.safeParse({
-    address: { scheme: "file", locator: "/data/ev.json", sourceVersion: "v1" },
+    address: { scheme: "file", locator: "/data/ev.json", sourceVersion: "v1", tenantScope: "tenant/acme" },
     payload: {},
     collectedAt: "2026-10-23T00:00:00Z",
   });

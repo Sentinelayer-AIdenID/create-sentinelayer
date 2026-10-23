@@ -13,27 +13,48 @@
  */
 
 import { z } from "zod";
+import { EVIDENCE_SCHEMA_VERSION } from "./versions.js";
+
+/**
+ * Supported evidence schemes. Only these are trusted; "screenshot" and
+ * "image" are explicitly banned (ticket 73ead329: no inferred backend
+ * endpoints from screenshots).
+ */
+const TRUSTED_SCHEMES = Object.freeze(["file", "http", "https", "engram", "receipt", "inline"]);
 
 /**
  * An evidence address: a stable reference to where an assertion's proof lives.
  * Must NOT be inferred from screenshots (ticket 73ead329 constraint).
+ *
+ * The address must be verified by a trusted verifier (sourceVersion with
+ * verifier identity), not just carry caller-supplied metadata.
  */
 export const evidenceAddressSchema = z.object({
-  /** Protocol/scheme: "file", "http", "engram", "receipt", "inline" */
-  scheme: z.string().min(1),
+  /** Protocol/scheme: must be a trusted scheme */
+  scheme: z.enum(["file", "http", "https", "engram", "receipt", "inline"]),
   /** Locator within that scheme */
   locator: z.string().min(1),
   /** Content hash at the time of reference (for integrity) */
-  contentHash: z.string().optional(),
+  contentHash: z.string().min(1).optional(),
   /** When this evidence was captured */
   capturedAt: z.string().datetime().optional(),
   /** Source version that produced this evidence */
-  sourceVersion: z.string().optional(),
+  sourceVersion: z.string().min(1).optional(),
   /** Tenant scope of the evidence */
-  tenantScope: z.string().optional(),
+  tenantScope: z.string().min(1),
   /** Whether the evidence is still reachable */
   reachable: z.boolean().optional(),
-});
+}).strict().refine(
+  (addr) => {
+    // At least one of sourceVersion or contentHash must be present to
+    // guard against screenshot-inferred evidence.
+    return !!(addr.sourceVersion || addr.contentHash);
+  },
+  {
+    message: "evidence address must have sourceVersion or contentHash to prove it was not screenshot-inferred",
+    path: ["sourceVersion"],
+  },
+);
 
 /**
  * An evidence record: the address plus the actual evidence payload.
@@ -43,7 +64,7 @@ export const evidenceRecordSchema = z.object({
   /** The raw evidence payload (type depends on scheme) */
   payload: z.unknown(),
   /** Schema version of the evidence format */
-  schemaVersion: z.string().min(1),
+  schemaVersion: z.literal(EVIDENCE_SCHEMA_VERSION),
   /** When the evidence was collected */
   collectedAt: z.string().datetime(),
   /** When the evidence expires (if applicable) */
@@ -52,7 +73,9 @@ export const evidenceRecordSchema = z.object({
   modelConfidence: z.enum(["high", "medium", "low", "unavailable"]).optional(),
   /** Whether the evidence has been independently verified */
   independentlyVerified: z.boolean().optional(),
-});
+  /** Verifier identity — who attested this evidence is not screenshot-inferred */
+  verifiedBy: z.string().min(1).optional(),
+}).strict();
 
 /**
  * Paginated evidence list.
@@ -63,7 +86,7 @@ export const evidencePageSchema = z.object({
   nextCursor: z.string().optional(),
   hasMore: z.boolean(),
   total: z.number().int().nonnegative().optional(),
-});
+}).strict();
 
 /**
  * Migration policy for evidence format changes.
@@ -75,7 +98,7 @@ export const evidenceMigrationPolicySchema = z.object({
   migrationNotes: z.string().optional(),
   createdAt: z.string().datetime(),
   appliesToSchemes: z.array(z.string()).optional(),
-});
+}).strict();
 
 /**
  * Freshness declaration for an evidence set.
@@ -86,10 +109,10 @@ export const evidenceFreshnessSchema = z.object({
     totalAssertions: z.number().int().nonnegative(),
     evidenced: z.number().int().nonnegative(),
     ratio: z.number().min(0).max(1),
-  }),
+  }).strict(),
   staleAfterMs: z.number().int().positive().optional(),
   isStale: z.boolean().optional(),
-});
+}).strict();
 
 /**
  * Error types for evidence operations.
@@ -130,7 +153,8 @@ export function evidenceUnsupportedScheme(scheme) {
 /**
  * Validate that an evidence address was NOT inferred from a screenshot.
  * Screenshot-inferred evidence has no contentHash and no sourceVersion — it
- * is rejected with a clear error.
+ * is rejected with a clear error. This is now also enforced at the schema
+ * level via evidenceAddressSchema's refine.
  *
  * @param {object} address — evidenceAddressSchema-shaped
  * @returns {{ valid: boolean, error?: string }}
@@ -143,6 +167,12 @@ export function validateNotScreenshotInferred(address) {
     return {
       valid: false,
       error: `evidence scheme "${address.scheme}" is screenshot-inferred; backend endpoints must not be inferred from screenshots (ticket 73ead329)`,
+    };
+  }
+  if (address.scheme && !TRUSTED_SCHEMES.includes(address.scheme)) {
+    return {
+      valid: false,
+      error: `evidence scheme "${address.scheme}" is not a trusted scheme; must be one of: ${TRUSTED_SCHEMES.join(", ")}`,
     };
   }
   if (!address.sourceVersion && !address.contentHash) {
