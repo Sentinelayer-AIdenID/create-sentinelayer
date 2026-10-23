@@ -1,5 +1,6 @@
-// Preloaded by the test harness via --import ./tests/setup-env.mjs;
-// explicit import kept for standalone runs (node --test tests/unit.lockfile-audit.test.mjs).
+// Preloaded by the test harness via --import ./tests/setup-env.mjs
+// (the repo consistently uses tests/ not test/; see package.json scripts).
+// Explicit import for standalone runs: node --test tests/unit.lockfile-audit.test.mjs
 import "./setup-env.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

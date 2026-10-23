@@ -7,13 +7,15 @@ permissions:
   pull-requests: read
   actions: read
   checks: read
-# Fork PR policy: Forks are NOT skipped. A skipped required check counts as passing
-# (GitHub treats skipped jobs as success for branch-protection rules). Instead, the
-# action's fork_policy: block fails them closed. Forks receive no secrets (private
-# configuration is missing), so the action refuses the review rather than silently
-# passing. This is the intended security posture: no fork can bypass the gate.
+# Fork PR policy: Forks are skipped at the job level (matching omar-gate.yml).
+# Fork PRs do not receive the private configuration secrets (TYPESAFE_API_KEY,
+# OPENAI_API_KEY, etc.) so the action cannot perform a real review. Skipping
+# is safe here because the main omar-gate.yml already covers fork PRs with its
+# untrusted scan path. For non-fork PRs, fork_policy: block provides defense-
+# in-depth: if secrets are somehow absent, the action fails closed.
 jobs:
   omar-jev:
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
