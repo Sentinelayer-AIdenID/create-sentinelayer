@@ -146,13 +146,13 @@ test("assertionSchema: REFUSES undefined object (z.json() rejects undefined per 
 
 test("entitySchema: validates entity with required tenantScope", () => {
   assert.equal(entitySchema.safeParse({
-    id: "session:s1", type: "session", tenantScope: "tenant/acme",
+    id: "session:s1", type: "session", tenantScope: "tenant/acme", sourceVersion: "1.0.0",
   }).success, true);
 });
 
 test("entitySchema: REFUSES entity without tenantScope", () => {
   assert.equal(entitySchema.safeParse({
-    id: "session:s1", type: "session",
+    id: "session:s1", type: "session", sourceVersion: "1.0.0",
   }).success, false);
 });
 
@@ -161,6 +161,7 @@ test("entitySchema: REFUSES entity without tenantScope", () => {
 test("linkSchema: validates a graph link with provenance", () => {
   assert.equal(linkSchema.safeParse({
     source: "n1", target: "n2", predicate: "child_of", provenance: "observed",
+    tenantScope: "tenant/acme", capturedAt: "2026-10-23T00:00:00Z",
   }).success, true);
 });
 
@@ -204,10 +205,11 @@ test("graphSchema: validates a complete versioned graph", () => {
       },
     ],
     entities: [
-      { id: "session:s1", type: "session", tenantScope: "tenant/acme" },
+      { id: "session:s1", type: "session", tenantScope: "tenant/acme", sourceVersion: "1.0.0" },
     ],
     links: [
-      { source: "a1", target: "a2", predicate: "supports", provenance: "derived" },
+      { source: "a1", target: "a2", predicate: "supports", provenance: "derived",
+        tenantScope: "tenant/acme", capturedAt: "2026-10-23T00:00:00Z" },
     ],
     coverage: {
       totalAssertions: 2,
@@ -266,10 +268,15 @@ test("classifyProvenance: authoritative requires isVerified AND evidenceRef (F2)
   assert.equal(classifyProvenance({ id: "a1" }, { isVerified: true }), "unknown");
   // Bare hasReceipt is NOT authoritative
   assert.equal(classifyProvenance({ id: "a1" }, { hasReceipt: true }), "unknown");
-  // isVerified + evidenceRef IS authoritative
+  // isVerified + evidenceRef without verifiedAt is NOT authoritative
   assert.equal(classifyProvenance({ id: "a1" }, {
     isVerified: true,
     evidenceRef: { address: "engram://rec/1", verifier: "aidenid-01" },
+  }), "unknown");
+  // isVerified + evidenceRef WITH verifiedAt IS authoritative
+  assert.equal(classifyProvenance({ id: "a1" }, {
+    isVerified: true,
+    evidenceRef: { address: "engram://rec/1", verifier: "aidenid-01", verifiedAt: "2026-10-23T00:00:00Z" },
   }), "authoritative");
   // isVerified + incomplete evidenceRef is NOT authoritative
   assert.equal(classifyProvenance({ id: "a1" }, {
@@ -387,6 +394,8 @@ test("validateGraphIntegrity: catches money float in entity.attributes.Price (F6
       id: "e1",
       type: "product",
       tenantScope: "tenant/acme",
+      sourceVersion: "1.0.0",
+      capturedAt: "2026-10-23T00:00:00Z",
       attributes: { Price: { amount: 1.99, currency: "USD" } },
     }],
     generatedAt: "2026-10-23T00:00:00Z",
@@ -406,4 +415,127 @@ test("freshnessSchema: REFUSES extra field (strict)", () => {
   assert.equal(freshnessSchema.safeParse({
     asOf: "2026-10-23T00:00:00Z", extraField: true,
   }).success, false);
+});
+
+// --- New tests for luna-judge P1 findings ---
+
+test("assertionSchema: REFUSES authoritative provenance without evidenceRef", () => {
+  const result = assertionSchema.safeParse({
+    id: "a1",
+    subject: "x",
+    predicate: "y",
+    object: { val: 1 },
+    provenance: "authoritative",
+    schemaValidity: "valid",
+    source: { sourceId: "src-001", version: "1.0.0", capturedAt: "2026-10-23T00:00:00Z", tenantScope: "tenant/acme" },
+  });
+  assert.equal(result.success, false, "authoritative without evidenceRef must be rejected");
+  const messages = result.error.issues.map((i) => i.message);
+  assert.ok(messages.some((m) => /authoritative.*evidenceRef/i.test(m)),
+    "must report missing evidenceRef for authoritative: " + JSON.stringify(messages));
+});
+
+test("classifyProvenance: REFUSES evidenceRef without verifiedAt", () => {
+  assert.equal(classifyProvenance({ id: "a1" }, {
+    isVerified: true,
+    evidenceRef: { address: "addr", verifier: "v" },
+  }), "unknown", "evidenceRef without verifiedAt is NOT authoritative");
+});
+
+test("validateGraphIntegrity: REJECTS authoritative assertion without evidenceRef", () => {
+  const { valid, errors } = validateGraphIntegrity({
+    version: "1.0.0",
+    assertions: [{
+      id: "a1", subject: "x", predicate: "y", object: { val: 1 },
+      provenance: "authoritative", schemaValidity: "valid",
+      source: { sourceId: "src-001", version: "1.0.0", capturedAt: "2026-10-23T00:00:00Z", tenantScope: "tenant/acme" },
+    }],
+    generatedAt: "2026-10-23T00:00:00Z",
+  });
+  assert.equal(valid, false);
+  assert.ok(errors.some((e) => /authoritative.*evidenceRef/i.test(e)),
+    "must report missing evidenceRef in integrity check");
+});
+
+test("entitySchema: REFUSES entity with factual label but no capturedAt", () => {
+  const result = entitySchema.safeParse({
+    id: "e1", type: "product", tenantScope: "tenant/acme",
+    sourceVersion: "1.0.0",
+    label: "A Product",
+  });
+  assert.equal(result.success, false, "factual entity without capturedAt must be rejected");
+});
+
+test("entitySchema: ACCEPTS entity with label, sourceVersion and capturedAt", () => {
+  const result = entitySchema.safeParse({
+    id: "e1", type: "product", tenantScope: "tenant/acme",
+    sourceVersion: "1.0.0", capturedAt: "2026-10-23T00:00:00Z",
+    label: "A Product",
+  });
+  assert.equal(result.success, true, "factual entity with capturedAt must be accepted");
+});
+
+test("linkSchema: REFUSES authoritative link without evidenceAddress", () => {
+  const result = linkSchema.safeParse({
+    source: "n1", target: "n2", predicate: "child_of",
+    provenance: "authoritative",
+    tenantScope: "tenant/acme", capturedAt: "2026-10-23T00:00:00Z",
+  });
+  assert.equal(result.success, false, "authoritative link without evidenceAddress must be rejected");
+});
+
+test("linkSchema: REFUSES non-unknown provenance link without tenantScope and capturedAt", () => {
+  const result = linkSchema.safeParse({
+    source: "n1", target: "n2", predicate: "child_of",
+    provenance: "observed",
+  });
+  assert.equal(result.success, false, "observed link without tenantScope/capturedAt must be rejected");
+});
+
+test("validateGraphIntegrity: REJECTS monetary predicate with non-money object", () => {
+  const { valid, errors } = validateGraphIntegrity({
+    version: "1.0.0",
+    assertions: [{
+      id: "a1", subject: "x", predicate: "total", object: 1.99,
+      provenance: "observed", schemaValidity: "valid",
+      source: { sourceId: "src-001", version: "1.0.0", capturedAt: "2026-10-23T00:00:00Z", tenantScope: "tenant/acme" },
+    }],
+    generatedAt: "2026-10-23T00:00:00Z",
+  });
+  assert.equal(valid, false, "predicate=total with float object must be rejected");
+  assert.ok(errors.some((e) => /monetary predicate/i.test(e)),
+    "must report monetary predicate issue: " + JSON.stringify(errors));
+});
+
+test("validateGraphIntegrity: ACCEPTS monetary predicate with valid money object", () => {
+  const { valid, errors } = validateGraphIntegrity({
+    version: "1.0.0",
+    assertions: [{
+      id: "a1", subject: "x", predicate: "cost", object: { amount: 199, currency: "USD" },
+      provenance: "observed", schemaValidity: "valid",
+      source: { sourceId: "src-001", version: "1.0.0", capturedAt: "2026-10-23T00:00:00Z", tenantScope: "tenant/acme" },
+    }],
+    generatedAt: "2026-10-23T00:00:00Z",
+  });
+  assert.equal(valid, true, "predicate=cost with valid money object must be accepted: " + JSON.stringify(errors));
+});
+
+test("validateGraphIntegrity: REJECTS non-object value on money-named field", () => {
+  const { valid, errors } = validateGraphIntegrity({
+    version: "1.0.0",
+    assertions: [{
+      id: "a1", subject: "x", predicate: "y", object: "z",
+      provenance: "observed", schemaValidity: "valid",
+      source: { sourceId: "src-001", version: "1.0.0", capturedAt: "2026-10-23T00:00:00Z", tenantScope: "tenant/acme" },
+    }],
+    entities: [{
+      id: "e1", type: "product", tenantScope: "tenant/acme",
+      sourceVersion: "1.0.0", capturedAt: "2026-10-23T00:00:00Z",
+      attributes: { total: 1.99 },
+    }],
+    generatedAt: "2026-10-23T00:00:00Z",
+  });
+  assert.equal(valid, false, "attributes.total=1.99 (non-money-object) must be rejected");
+  assert.ok(errors.some((e) => /money field must be a canonical/i.test(e)),
+    "must report non-canonical money: " + JSON.stringify(errors));
 });

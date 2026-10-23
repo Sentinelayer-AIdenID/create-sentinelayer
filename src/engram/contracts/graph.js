@@ -61,6 +61,9 @@ export const evidenceRefSchema = z.object({
 
 /**
  * An entity node in the ENGRAM graph.
+ *
+ * Entities carrying factual content (label, attributes) require sourceVersion
+ * and capturedAt to establish provenance. Source-less facts are fabricable.
  */
 export const entitySchema = z.object({
   id: z.string().min(1),
@@ -68,11 +71,24 @@ export const entitySchema = z.object({
   label: z.string().optional(),
   attributes: z.record(z.string(), z.unknown()).optional(),
   tenantScope: z.string().min(1),
-  sourceVersion: z.string().min(1).optional(),
-}).strict();
+  sourceVersion: z.string().min(1),
+  capturedAt: z.string().datetime().optional(),
+}).strict().refine(
+  (data) => {
+    const hasFacts = !!(data.label || (data.attributes && Object.keys(data.attributes).length > 0));
+    if (hasFacts && !data.capturedAt) {
+      return false;
+    }
+    return true;
+  },
+  { message: "entity with factual content (label or attributes) requires capturedAt", path: ["capturedAt"] },
+);
 
 /**
  * A link between two graph entities.
+ *
+ * Links with non-unknown provenance require tenantScope and capturedAt.
+ * Authoritative links require an evidenceAddress.
  */
 export const linkSchema = z.object({
   source: z.string().min(1),
@@ -81,7 +97,20 @@ export const linkSchema = z.object({
   provenance: provenanceClassSchema,
   confidence: modelConfidenceSchema.optional(),
   evidenceAddress: z.string().min(1).optional(),
-}).strict();
+  tenantScope: z.string().min(1).optional(),
+  capturedAt: z.string().datetime().optional(),
+}).strict().refine(
+  (data) => {
+    if (data.provenance === "authoritative" && !data.evidenceAddress) {
+      return false;
+    }
+    if (data.provenance !== "unknown" && (!data.tenantScope || !data.capturedAt)) {
+      return false;
+    }
+    return true;
+  },
+  { message: "non-unknown provenance links require tenantScope and capturedAt; authoritative links require evidenceAddress", path: ["tenantScope"] },
+);
 
 /**
  * Freshness marker (R09 truth). Every assertion that can go stale must carry
@@ -111,6 +140,7 @@ export const sourceDescriptorSchema = z.object({
  * Every assertion must be classifiable as observed/authoritative/derived/unknown,
  * must declare its schema validity, and must carry freshness markers when
  * applicable. Tenant scope and source version are required (F2).
+ * Authoritative assertions MUST carry an evidenceRef (luna-judge P1 finding).
  */
 export const assertionSchema = z.object({
   id: z.string().min(1),
@@ -123,7 +153,15 @@ export const assertionSchema = z.object({
   freshness: freshnessSchema.optional(),
   evidenceRef: evidenceRefSchema.optional(),
   source: sourceDescriptorSchema,
-}).strict();
+}).strict().refine(
+  (data) => {
+    if (data.provenance === "authoritative" && !data.evidenceRef) {
+      return false;
+    }
+    return true;
+  },
+  { message: "authoritative provenance requires an evidenceRef with a verified address", path: ["evidenceRef"] },
+);
 
 /**
  * A versioned ENGRAM graph.
@@ -149,8 +187,8 @@ export const graphSchema = z.object({
  * Classify an assertion's provenance from its context.
  *
  * Only returns "authoritative" when BOTH isVerified is true AND a valid
- * evidenceRef with a receipt reference is present. A bare hasReceipt or
- * isVerified flag is not sufficient (luna-judge finding F2).
+ * evidenceRef with a receipt reference including verifiedAt is present.
+ * A bare hasReceipt or isVerified flag is not sufficient (luna-judge finding F2).
  *
  * @param {object} assertion
  * @param {object} [ctx] — { isVerified, evidenceRef, derivedFrom, observedAt }
@@ -164,7 +202,8 @@ export function classifyProvenance(assertion, ctx = {}) {
     ctx.evidenceRef &&
     typeof ctx.evidenceRef === "object" &&
     typeof ctx.evidenceRef.address === "string" &&
-    typeof ctx.evidenceRef.verifier === "string"
+    typeof ctx.evidenceRef.verifier === "string" &&
+    typeof ctx.evidenceRef.verifiedAt === "string"
   ) {
     return "authoritative";
   }
@@ -177,13 +216,16 @@ export function classifyProvenance(assertion, ctx = {}) {
  * Money field names that must be validated with moneySchema.
  * Covers common monetary field naming patterns.
  */
-const MONEY_FIELD_RE = /^(?:[Aa]mount|[Pp]rice|[Cc]ost|[Vv]alue|[Ff]ee|[Tt]otal|[Bb]alance|[Pp]ayment)$/;
+const MONEY_FIELD_RE = /^(?:[Aa]mount|[Pp]rice|[Cc]ost|[Ff]ee|[Tt]otal|[Bb]alance|[Pp]ayment)$/;
 
 /**
  * Validate that all money fields across the graph use the money contract.
  * Walks entities, links, and assertions looking for monetary fields and
- * validates them with moneySchema. Does NOT reject non-monetary numbers
- * like ratios or temperatures (luna-judge finding F6).
+ * validates them with moneySchema regardless of value type (luna-judge P1 finding).
+ * Does NOT reject non-monetary numbers like ratios or temperatures.
+ *
+ * Also checks that authoritative assertions have evidenceRef and that
+ * fact-bearing entities/links have required provenance fields.
  *
  * @param {object} graph — a graphSchema-shaped object
  * @returns {{ valid: boolean, errors: string[] }}
@@ -202,7 +244,39 @@ export function validateGraphIntegrity(graph) {
 
   const data = schemaResult.data;
 
-  // Walk ALL graph elements for money field validation (F6)
+  // Check: authoritative assertions must have evidenceRef
+  for (let i = 0; i < data.assertions.length; i++) {
+    const a = data.assertions[i];
+    if (a.provenance === "authoritative" && !a.evidenceRef) {
+      errors.push(`assertions[${i}]: authoritative provenance requires evidenceRef`);
+    }
+  }
+
+  // Check: fact-bearing entities need sourceVersion and capturedAt
+  if (data.entities) {
+    for (let i = 0; i < data.entities.length; i++) {
+      const e = data.entities[i];
+      const hasFacts = !!(e.label || (e.attributes && Object.keys(e.attributes).length > 0));
+      if (hasFacts && (!e.sourceVersion || !e.capturedAt)) {
+        errors.push(`entities[${i}]: entity with factual content requires sourceVersion and capturedAt`);
+      }
+    }
+  }
+
+  // Check: non-unknown provenance links need tenantScope and capturedAt
+  if (data.links) {
+    for (let i = 0; i < data.links.length; i++) {
+      const l = data.links[i];
+      if (l.provenance !== "unknown" && (!l.tenantScope || !l.capturedAt)) {
+        errors.push(`links[${i}]: non-unknown provenance link requires tenantScope and capturedAt`);
+      }
+      if (l.provenance === "authoritative" && !l.evidenceAddress) {
+        errors.push(`links[${i}]: authoritative provenance link requires evidenceAddress`);
+      }
+    }
+  }
+
+  // Walk ALL graph elements for money field validation (F6, P1 update: check regardless of value type)
   function walkForMoney(obj, path) {
     if (!obj || typeof obj !== "object") return;
     if (Array.isArray(obj)) {
@@ -214,16 +288,31 @@ export function validateGraphIntegrity(graph) {
     for (const key of Object.keys(obj)) {
       const val = obj[key];
       const fullPath = `${path}.${key}`;
-      if (MONEY_FIELD_RE.test(key) && typeof val === "object" && val !== null) {
-        const moneyResult = moneySchema.safeParse(val);
-        if (!moneyResult.success) {
-          for (const issue of moneyResult.error.issues) {
-            errors.push(`${fullPath}: money field invalid — ${issue.message}`);
+      if (MONEY_FIELD_RE.test(key) && key !== "amount" && key !== "currency" && key !== "exponent") {
+        if (typeof val === "object" && val !== null) {
+          const moneyResult = moneySchema.safeParse(val);
+          if (!moneyResult.success) {
+            for (const issue of moneyResult.error.issues) {
+              errors.push(`${fullPath}: money field invalid — ${issue.message}`);
+            }
           }
+        } else {
+          errors.push(`${fullPath}: money field must be a canonical money object { amount, currency, exponent }, got ${typeof val}`);
         }
       }
       if (typeof val === "object" && val !== null) {
         walkForMoney(val, fullPath);
+      }
+    }
+  }
+
+  // Check: assertions with monetary predicates must have moneySchema-valid objects
+  for (let i = 0; i < data.assertions.length; i++) {
+    const a = data.assertions[i];
+    if (MONEY_FIELD_RE.test(a.predicate)) {
+      const objResult = moneySchema.safeParse(a.object);
+      if (!objResult.success) {
+        errors.push(`assertions[${i}].object: assertion with monetary predicate "${a.predicate}" must have a canonical money object, got ${typeof a.object === "object" ? JSON.stringify(a.object) : String(a.object)}`);
       }
     }
   }

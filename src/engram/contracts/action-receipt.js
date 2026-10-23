@@ -1,10 +1,15 @@
 /**
  * ENGRAM §EW02 — ActionReceipt contract.
  *
- * An ActionReceipt is the cryptographically verifiable record of an action
- * taken by an agent or system. It carries a content hash, timestamp,
- * verifier identity, and a source snapshot. Every authoritative assertion
- * in the ENGRAM graph MUST reference an ActionReceipt.
+ * An ActionReceipt is a verifiable record of an action taken by an agent or
+ * system. It carries a content hash, timestamp, verifier identity, and a
+ * source snapshot. Receipts without these fields cannot be used to establish
+ * authoritative provenance.
+ *
+ * Note: The contentHash and verifier fields provide integrity and attestation;
+ * full cryptographic verification (signatures, signed payloads) is deferred to
+ * a future contract version. Do not treat these receipts as cryptographically
+ * authoritative without verifying signatures at the application layer.
  */
 
 import { z } from "zod";
@@ -28,8 +33,9 @@ export const actionReceiptStatusSchema = z.enum([
  * A verifiable receipt for an action performed in the system.
  *
  * Every receipt carries a content hash over the action payload, the
- * verifier identity, and a source snapshot. Receipts without these
- * fields cannot be used to establish authoritative provenance.
+ * verifier identity, and a source snapshot. The contentHash format is a
+ * scheme-prefixed digest (e.g. "sha256:<hex>") for integrity checking;
+ * full signature verification is deferred to a future contract version.
  */
 export const actionReceiptSchema = z.object({
   receiptId: z.string().min(1),
@@ -37,7 +43,10 @@ export const actionReceiptSchema = z.object({
   status: actionReceiptStatusSchema,
   performedAt: z.string().datetime(),
   verifier: z.string().min(1),
-  contentHash: z.string().min(1),
+  contentHash: z.string().regex(
+    /^[a-z0-9]+:[a-zA-Z0-9+/=-]+$/,
+    { message: "contentHash must be scheme:encoded format (e.g. sha256:<hex>)" },
+  ),
   sourceSnapshot: sourceSnapshotSchema,
   tenantScope: z.string().min(1),
   evidenceRefs: z.array(z.string().min(1)).optional(),
@@ -53,7 +62,7 @@ export const VALID_ACTION_RECEIPT = Object.freeze({
   status: "executed",
   performedAt: "2026-10-23T12:00:01Z",
   verifier: "aidenid-verifier-01",
-  contentHash: "sha256:receipt-hash-abc123",
+  contentHash: "sha256:YWJjMTIzZGVmNDU2Cg==",
   sourceSnapshot: {
     sourceId: "src-session-abc123",
     sourceType: "session",

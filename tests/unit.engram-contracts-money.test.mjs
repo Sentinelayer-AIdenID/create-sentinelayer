@@ -166,3 +166,32 @@ test("wrong-price proof: null/undefined amounts rejected regardless of structure
   const noAmount = moneySchema.safeParse({ currency: "USD", exponent: 2 });
   assert.equal(noAmount.success, false);
 });
+
+// --- New tests for luna-judge P2 findings ---
+
+test("moneySchema: REFUSES unknown currency code with provided exponent", () => {
+  const result = moneySchema.safeParse({ amount: 100, currency: "ZZZ", exponent: 2 });
+  assert.equal(result.success, false, "unknown currency ZZZ must be rejected");
+  const messages = result.error.issues.map((i) => i.message);
+  assert.ok(messages.some((m) => /not in the supported/i.test(m)),
+    "must report unknown currency: " + JSON.stringify(messages));
+});
+
+test("moneySchema: REFUSES extra unsupported field (strict)", () => {
+  const result = moneySchema.safeParse({ amount: 199, currency: "USD", exponent: 2, verified: true });
+  assert.equal(result.success, false, "extra 'verified' field must be rejected");
+});
+
+test("toMinorUnits: returns null for excess fractional digits (no silent truncation)", () => {
+  assert.equal(toMinorUnits({ amount: "1.999", currency: "USD", exponent: 2 }), null,
+    "1.999 with exponent 2 must return null, not silently truncate to 199");
+  assert.equal(toMinorUnits({ amount: "1.99", currency: "USD", exponent: 2 }), 199,
+    "1.99 with exponent 2 must correctly convert to 199");
+});
+
+test("toMinorUnits: rejects excess fraction before BigInt conversion", () => {
+  assert.equal(toMinorUnits({ amount: "0.123", currency: "BHD", exponent: 3 }), 123,
+    "0.123 with BHD exponent 3 must convert correctly");
+  assert.equal(toMinorUnits({ amount: "0.1234", currency: "BHD", exponent: 3 }), null,
+    "0.1234 with BHD exponent 3 must return null (excess precision)");
+});

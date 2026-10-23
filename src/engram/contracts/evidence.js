@@ -10,6 +10,8 @@
  * Mandatory constraint (ticket 73ead329): include unknown/unsupported/stale
  * errors, pagination, evidence addresses, migration policy and protocol
  * capability negotiation.
+ *
+ * Luna-judge P2: evidencePageSchema requires nextCursor when hasMore is true.
  */
 
 import { z } from "zod";
@@ -79,6 +81,9 @@ export const evidenceRecordSchema = z.object({
 
 /**
  * Paginated evidence list.
+ *
+ * When hasMore is true, nextCursor is required so clients can retrieve the
+ * next page (luna-judge P2 finding).
  */
 export const evidencePageSchema = z.object({
   items: z.array(evidenceRecordSchema),
@@ -86,7 +91,15 @@ export const evidencePageSchema = z.object({
   nextCursor: z.string().optional(),
   hasMore: z.boolean(),
   total: z.number().int().nonnegative().optional(),
-}).strict();
+}).strict().refine(
+  (data) => {
+    if (data.hasMore && !data.nextCursor) {
+      return false;
+    }
+    return true;
+  },
+  { message: "hasMore requires nextCursor for pagination", path: ["nextCursor"] },
+);
 
 /**
  * Migration policy for evidence format changes.

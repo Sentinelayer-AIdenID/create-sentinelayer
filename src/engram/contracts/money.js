@@ -9,12 +9,14 @@
  *
  * Luna-judge F5: use exact BigInt conversion, never floating-point rounding.
  * Luna-judge F8: minorUnitsSchema must check both safe integer bounds.
+ * Luna-judge P2: validate against a complete currency registry; reject unknown codes.
+ * Luna-judge P2: strict schema — reject extra fields.
  */
 
 import { z } from "zod";
 
 /**
- * ISO 4217 currency codes (subset validated at runtime).
+ * ISO 4217 currency codes (supported subset validated at runtime).
  */
 const CURRENCY_RE = /^[A-Z]{3}$/;
 const CURRENCY_MINOR_UNITS = new Map([
@@ -25,6 +27,9 @@ const CURRENCY_MINOR_UNITS = new Map([
   ["BHD", 3], ["KWD", 3], ["OMR", 3], ["JOD", 3], ["TND", 3],
   ["CLF", 4], ["UYW", 4],
 ]);
+
+/** Complete list of known currency codes — used to reject unknown codes. */
+const KNOWN_CURRENCIES = new Set(CURRENCY_MINOR_UNITS.keys());
 
 /**
  * Reject binary floating-point in monetary positions.
@@ -65,14 +70,15 @@ export const decimalStringSchema = z.string().regex(
 );
 
 /**
- * The single canonical money schema.
+ * The single canonical money schema — strict: rejects extra fields.
  *
  * A well-formed monetary value in ENGRAM is exactly one of:
  *   { amount: <integer minor units>, currency: "USD", exponent: 2 }
  *   { amount: "-?[0-9]+(\\.[0-9]+)?", currency: "USD", exponent: 2 }
  *
  * Binary floats (1.99), NaN, Infinity, and unsafe integers are REFUSED.
- * Values without a known exponent are REFUSED (F5: no silent defaults).
+ * Unknown currency codes are REFUSED (P2: pinned registry only).
+ * Extra fields are REFUSED (P2: strict).
  */
 export const moneySchema = z.object({
   amount: z.union([
@@ -81,7 +87,15 @@ export const moneySchema = z.object({
   ]),
   currency: z.string().regex(CURRENCY_RE, { message: "currency must be a 3-letter ISO 4217 code" }),
   exponent: z.number().int().min(0).max(6).optional(),
-}).refine(
+}).strict().refine(
+  (data) => {
+    if (!KNOWN_CURRENCIES.has(data.currency)) {
+      return false;
+    }
+    return true;
+  },
+  { message: "currency code is not in the supported ISO 4217 registry; register it before use", path: ["currency"] },
+).refine(
   (data) => {
     const known = CURRENCY_MINOR_UNITS.get(data.currency);
     if (data.exponent != null && known != null && data.exponent !== known) {
@@ -92,7 +106,7 @@ export const moneySchema = z.object({
   { message: "exponent must match the currency's standard minor units when both are known", path: ["exponent"] },
 ).refine(
   (data) => {
-    // F5: require exponent for decimal strings or use currency default
+    // Require exponent for decimal strings or use currency default
     const exponent = data.exponent ?? CURRENCY_MINOR_UNITS.get(data.currency);
     if (exponent == null) {
       return false;
@@ -125,6 +139,9 @@ function decimalToMinorUnitsExact(decimal, exponent) {
   if (dot >= 0) {
     integerPart = abs.slice(0, dot);
     fracPart = abs.slice(dot + 1).padEnd(exponent, "0").slice(0, exponent);
+    // Reject extra fractional digits beyond the exponent
+    const origFracLen = abs.length - dot - 1;
+    if (origFracLen > exponent) return null;
   } else {
     integerPart = abs;
     fracPart = "0".repeat(exponent);
@@ -151,6 +168,7 @@ function decimalToMinorUnitsExact(decimal, exponent) {
 /**
  * Normalize a money value to its canonical minor-units integer representation.
  * Uses exact BigInt conversion for decimal strings (F5).
+ * Validates the input: rejects extra fractional digits that would truncate.
  *
  * @param {object} money — a moneySchema-validated object
  * @returns {number|null}
@@ -160,6 +178,13 @@ export function toMinorUnits(money) {
   if (exponent == null) return null;
 
   if (typeof money.amount === "number") return money.amount;
+
+  // Validate: reject if fractional digits exceed exponent (would truncate)
+  const dot = money.amount.indexOf(".");
+  if (dot >= 0) {
+    const fracLen = money.amount.length - dot - 1;
+    if (fracLen > exponent) return null;
+  }
 
   // Exact BigInt conversion for decimal strings
   const exact = decimalToMinorUnitsExact(money.amount, exponent);

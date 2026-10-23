@@ -12,7 +12,8 @@
  *   - Pagination: cursor-based pagination for evidence lists
  *   - Migration policy: version compatibility declarations
  *
- * Luna-judge F7: stale/unknown must return errors, not usable versions.
+ * All schemas are strict: extra fields are rejected (luna-judge P2 finding).
+ * Negotiation validates inputs on every path and returns validated results.
  */
 
 import { z } from "zod";
@@ -35,7 +36,7 @@ export const tenantScopeSchema = z.object({
   tenantId: z.string().min(1).max(128),
   namespace: z.string().min(1).max(256).optional(),
   environment: z.enum(["production", "staging", "development", "sandbox"]).optional(),
-});
+}).strict();
 
 /**
  * A source descriptor: identifies where an assertion or capability originated.
@@ -46,7 +47,12 @@ export const sourceDescriptorSchema = z.object({
   version: capabilityVersionSchema,
   tenantScope: z.string().min(1),
   endpoint: z.string().url().optional(),
-});
+}).strict();
+
+/**
+ * Valid capability status values for server entries.
+ */
+const CAPABILITY_STATUS = z.enum(["supported", "deprecated", "experimental", "unknown", "unsupported", "stale"]);
 
 /**
  * A single capability entry: what a source can do, at what version.
@@ -55,11 +61,11 @@ export const capabilityEntrySchema = z.object({
   capability: z.string().min(1),
   version: capabilityVersionSchema,
   source: sourceDescriptorSchema,
-  status: z.enum(["supported", "deprecated", "experimental", "unknown", "unsupported", "stale"]),
+  status: CAPABILITY_STATUS,
   evidenceAddress: z.string().optional(),
   deprecatesAt: z.string().datetime().optional(),
   migratesTo: capabilityVersionSchema.optional(),
-});
+}).strict();
 
 /**
  * Protocol capability negotiation result.
@@ -72,7 +78,7 @@ export const negotiationResultSchema = z.object({
   result: z.enum(["matched", "upgraded", "downgraded", "incompatible", "unknown"]),
   reason: z.string().optional(),
   evidenceAddress: z.string().optional(),
-});
+}).strict();
 
 /**
  * Pagination cursor for evidence lists.
@@ -83,7 +89,7 @@ export const paginationSchema = z.object({
   nextCursor: z.string().optional(),
   hasMore: z.boolean().optional(),
   total: z.number().int().nonnegative().optional(),
-});
+}).strict();
 
 /**
  * Migration policy: declares compatibility between capability versions.
@@ -95,7 +101,7 @@ export const migrationPolicySchema = z.object({
   compatibility: z.enum(["compatible", "breaking", "additive"]),
   migrationNotes: z.string().optional(),
   createdAt: z.string().datetime(),
-});
+}).strict();
 
 /**
  * Error types for capability operations.
@@ -133,21 +139,46 @@ export function staleCapability(capability, version, asOf, evidence) {
   );
 }
 
-function parseSemver(capVersion) {
-  const parts = capVersion.split("@")[1];
-  if (!parts) return null;
-  const nums = parts.split(".").map(Number);
-  if (nums.length !== 3 || nums.some((n) => !Number.isFinite(n))) return null;
-  return nums;
+/**
+ * Parse a semver tuple from a capability version string.
+ * @param {string} capVersion — e.g. "engram-graph@1.2.3"
+ * @returns {[string, number, number, number]|null} — [name, major, minor, patch]
+ */
+function parseCapVersion(capVersion) {
+  const atIdx = capVersion.lastIndexOf("@");
+  if (atIdx < 0) return null;
+  const name = capVersion.slice(0, atIdx);
+  const version = capVersion.slice(atIdx + 1);
+  const parts = version.split(".").map(Number);
+  if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) return null;
+  return [name, parts[0], parts[1], parts[2]];
+}
+
+/**
+ * Validate a server capability entry matches the capabilityVersionSchema.
+ */
+function isValidServerEntry(entry) {
+  return CAPABILITY_VERSION_RE.test(entry.version);
+}
+
+/**
+ * Validate that a server entry's version name binds to the stated capability.
+ */
+function versionNameMatches(capabilityName, versionString) {
+  const parts = parseCapVersion(versionString);
+  if (!parts) return false;
+  return parts[0] === capabilityName;
 }
 
 /**
  * Negotiate a protocol capability between client and server.
  *
- * F7 fixes:
+ * F7/F8 fixes:
  * - Stale capabilities return "incompatible" with NO negotiatedVersion
  * - Unknown capabilities return "unknown" immediately, no version comparison
- * - Inputs are validated; output is validated against negotiationResultSchema
+ * - Validates server entries and binds version names to the capability
+ * - Misspelled statuses are rejected (invalid status → incompatible)
+ * - Every path returns a negotiationResultSchema-valid result or a typed error
  *
  * @param {object} params
  * @param {string} params.capability
@@ -156,22 +187,39 @@ function parseSemver(capVersion) {
  * @returns {object} negotiationResultSchema-shaped result
  */
 export function negotiateCapability({ capability, clientVersion, serverCapabilities = [] } = {}) {
-  // F7: validate inputs
+  const makeResult = (overrides) => ({
+    capability,
+    clientVersion,
+    result: "incompatible",
+    ...overrides,
+  });
+
+  // Validate inputs
   if (!capability || typeof capability !== "string") {
-    return {
+    return makeResult({
       capability: capability || "unknown",
       clientVersion: clientVersion || "unknown",
-      result: "incompatible",
       reason: "capability is required and must be a string",
-    };
+    });
   }
   if (!clientVersion || typeof clientVersion !== "string") {
-    return {
-      capability,
-      clientVersion: clientVersion || "unknown",
-      result: "incompatible",
+    return makeResult({
       reason: "clientVersion is required and must be a string",
-    };
+    });
+  }
+
+  const clientParts = parseCapVersion(clientVersion);
+  if (!clientParts) {
+    return makeResult({
+      reason: "clientVersion is not a valid capability version",
+    });
+  }
+
+  // Bind: client version name must match capability
+  if (clientParts[0] !== capability) {
+    return makeResult({
+      reason: `clientVersion name "${clientParts[0]}" does not match capability "${capability}"`,
+    });
   }
 
   const serverCap = Array.isArray(serverCapabilities)
@@ -179,96 +227,102 @@ export function negotiateCapability({ capability, clientVersion, serverCapabilit
     : undefined;
 
   if (!serverCap) {
-    return {
-      capability,
-      clientVersion,
-      result: "unknown",
-      reason: `capability "${capability}" is not registered on the server`,
-    };
+    return makeResult({ result: "unknown", reason: `capability "${capability}" is not registered on the server` });
   }
 
-  // F7: stale → incompatible, no negotiated version
-  if (serverCap.status === "stale") {
-    return {
-      capability,
-      clientVersion,
+  // Validate server entry
+  if (!isValidServerEntry(serverCap)) {
+    return makeResult({
+      result: "unknown",
+      serverVersion: serverCap.version,
+      reason: `capability "${capability}" server version "${serverCap.version}" is not a valid capability version`,
+    });
+  }
+
+  // Bind: server version name must match capability
+  if (!versionNameMatches(capability, serverCap.version)) {
+    return makeResult({
+      result: "unknown",
+      serverVersion: serverCap.version,
+      reason: `capability "${capability}" server version name does not match capability`,
+    });
+  }
+
+  // Validate status
+  const statusResult = CAPABILITY_STATUS.safeParse(serverCap.status);
+  if (!statusResult.success) {
+    return makeResult({
+      serverVersion: serverCap.version,
+      reason: `capability "${capability}" has invalid status "${serverCap.status}"; must be one of: ${CAPABILITY_STATUS.options.join(", ")}`,
+    });
+  }
+
+  const status = statusResult.data;
+
+  // stale → incompatible, no negotiated version
+  if (status === "stale") {
+    return makeResult({
       serverVersion: serverCap.version,
       result: "incompatible",
       reason: `capability "${capability}" is stale; cannot negotiate a usable version`,
-    };
+    });
   }
 
-  // F7: unknown → unknown immediately, no version comparison
-  if (serverCap.status === "unknown") {
-    return {
-      capability,
-      clientVersion,
+  // unknown → unknown immediately, no version comparison
+  if (status === "unknown") {
+    return makeResult({
       serverVersion: serverCap.version,
       result: "unknown",
       reason: `capability "${capability}" status is unknown; cannot determine compatibility`,
-    };
+    });
   }
 
-  if (serverCap.status === "unsupported") {
-    return {
-      capability,
-      clientVersion,
+  if (status === "unsupported") {
+    return makeResult({
       serverVersion: serverCap.version,
-      result: "incompatible",
       reason: `capability "${capability}" is explicitly unsupported`,
-    };
+    });
   }
 
   // Version comparison for supported/deprecated/experimental
-  const clientParts = parseSemver(clientVersion);
-  const serverParts = parseSemver(serverCap.version);
-
-  if (!clientParts || !serverParts) {
-    return {
-      capability,
-      clientVersion,
+  const serverParts = parseCapVersion(serverCap.version);
+  if (!serverParts) {
+    return makeResult({
       serverVersion: serverCap.version,
-      result: "incompatible",
-      reason: "cannot parse version numbers",
-    };
+      reason: "cannot parse server version numbers",
+    });
   }
 
-  if (clientParts[0] !== serverParts[0]) {
-    return {
-      capability,
-      clientVersion,
+  if (clientParts[1] !== serverParts[1]) {
+    return makeResult({
       serverVersion: serverCap.version,
       result: "incompatible",
-      reason: `major version mismatch: client ${clientParts[0]}, server ${serverParts[0]}`,
-    };
+      reason: `major version mismatch: client ${clientParts[1]}, server ${serverParts[1]}`,
+    });
   }
 
   if (
-    serverParts[1] > clientParts[1] ||
-    (serverParts[1] === clientParts[1] && serverParts[2] >= clientParts[2])
+    serverParts[2] > clientParts[2] ||
+    (serverParts[2] === clientParts[2] && serverParts[3] >= clientParts[3])
   ) {
-    const result = {
+    const rawResult = {
       capability,
       clientVersion,
       serverVersion: serverCap.version,
       negotiatedVersion: serverCap.version,
       result: clientVersion === serverCap.version ? "matched" : "upgraded",
     };
-    // F7: validate output
-    const parsed = negotiationResultSchema.safeParse(result);
+    const parsed = negotiationResultSchema.safeParse(rawResult);
     if (!parsed.success) {
-      return {
-        capability,
-        clientVersion,
+      return makeResult({
         serverVersion: serverCap.version,
-        result: "incompatible",
         reason: `output validation failed: ${parsed.error.issues.map((i) => i.message).join("; ")}`,
-      };
+      });
     }
     return parsed.data;
   }
 
-  return {
+  const rawResult = {
     capability,
     clientVersion,
     serverVersion: serverCap.version,
@@ -276,4 +330,12 @@ export function negotiateCapability({ capability, clientVersion, serverCapabilit
     result: "downgraded",
     reason: `server version ${serverCap.version} is behind client ${clientVersion}`,
   };
+  const parsed = negotiationResultSchema.safeParse(rawResult);
+  if (!parsed.success) {
+    return makeResult({
+      serverVersion: serverCap.version,
+      reason: `output validation failed: ${parsed.error.issues.map((i) => i.message).join("; ")}`,
+    });
+  }
+  return parsed.data;
 }

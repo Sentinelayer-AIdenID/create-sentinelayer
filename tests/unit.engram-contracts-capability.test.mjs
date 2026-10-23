@@ -185,3 +185,60 @@ test("migrationPolicySchema: REFUSES invalid compatibility", () => {
     createdAt: "2026-10-23T00:00:00Z",
   }).success, false);
 });
+
+// --- New tests for luna-judge P2 findings ---
+
+test("capabilityEntrySchema: REFUSES extra unknown field (strict)", () => {
+  const r = capabilityEntrySchema.safeParse({
+    capability: "engram-graph",
+    version: "engram-graph@1.0.0",
+    source: { sourceId: "s1", sourceType: "adapter", version: "enrich-v2@1.0.0", tenantScope: "tenant/acme" },
+    status: "supported",
+    extraField: "should-be-rejected",
+  });
+  assert.equal(r.success, false, "extra field must be rejected by strict schema");
+});
+
+test("tenantScopeSchema: REFUSES extra unknown field (strict)", () => {
+  const r = tenantScopeSchema.safeParse({ tenantId: "acme", extra: true });
+  assert.equal(r.success, false);
+});
+
+test("sourceDescriptorSchema: REFUSES extra unknown field (strict)", () => {
+  const r = sourceDescriptorSchema.safeParse({
+    sourceId: "s1", sourceType: "adapter", version: "ev@1.0.0", tenantScope: "tenant/acme",
+    injectedField: "bad",
+  });
+  assert.equal(r.success, false);
+});
+
+test("negotiateCapability: REJECTS misspelled status", () => {
+  const result = negotiateCapability({
+    capability: "c",
+    clientVersion: "c@1.0.0",
+    serverCapabilities: [{ capability: "c", version: "c@1.0.0", status: "suported" }],
+  });
+  assert.equal(result.result, "incompatible", "misspelled status must be rejected: " + JSON.stringify(result));
+  assert.ok(/invalid status/i.test(result.reason || ""),
+    "must report invalid status: " + result.reason);
+});
+
+test("negotiateCapability: REJECTS when version name does not match capability", () => {
+  const result = negotiateCapability({
+    capability: "engram-graph",
+    clientVersion: "engram-graph@1.0.0",
+    serverCapabilities: [{ capability: "wrong-cap", version: "wrong-cap@2.0.0", status: "supported" }],
+  });
+  assert.equal(result.result, "unknown", "unrelated capability must be rejected");
+});
+
+test("negotiateCapability: REJECTS client version name mismatch", () => {
+  const result = negotiateCapability({
+    capability: "engram-graph",
+    clientVersion: "other-cap@1.0.0",
+    serverCapabilities: [{ capability: "engram-graph", version: "engram-graph@1.0.0", status: "supported" }],
+  });
+  assert.equal(result.result, "incompatible", "mismatched client version name must be rejected");
+  assert.ok(/does not match capability/i.test(result.reason || ""),
+    "must report name mismatch: " + result.reason);
+});

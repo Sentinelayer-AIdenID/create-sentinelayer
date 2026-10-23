@@ -147,3 +147,18 @@ test("evidenceRecordSchema: REFUSES undefined payload (z.json() rejects undefine
   });
   assert.equal(result.success, false);
 });
+
+// --- New tests for luna-judge P2 findings ---
+
+test("evidencePageSchema: REFUSES hasMore=true without nextCursor", () => {
+  const r = evidencePageSchema.safeParse({ items: [], hasMore: true, total: 0 });
+  assert.equal(r.success, false, "hasMore without nextCursor must be rejected");
+  const messages = r.error.issues.map((i) => i.message);
+  assert.ok(messages.some((m) => /hasMore.*requires.*nextCursor/i.test(m) || /nextCursor/i.test(m)),
+    "must report missing nextCursor: " + JSON.stringify(messages));
+});
+
+test("evidencePageSchema: ACCEPTS hasMore=true with nextCursor", () => {
+  const r = evidencePageSchema.safeParse({ items: [], hasMore: true, nextCursor: "page2", total: 100 });
+  assert.equal(r.success, true, "hasMore with nextCursor must be accepted");
+});

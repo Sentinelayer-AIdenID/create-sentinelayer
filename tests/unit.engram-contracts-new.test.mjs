@@ -229,3 +229,42 @@ test("COMPAT_FIXTURES: graphV1 fixture matches GRAPH_SCHEMA_VERSION", () => {
   const result = graphSchema.safeParse(COMPAT_FIXTURES.graphV1);
   assert.equal(result.success, true, "compat graphV1 must validate against current graphSchema");
 });
+
+// --- New tests for luna-judge P1 findings ---
+
+test("taskContextPackSchema: REFUSES tenant scope mismatch with sourceSnapshot", () => {
+  const mismatchPack = { ...VALID_TASK_CONTEXT_PACK,
+    tenantScope: "tenant/acme",
+    sourceSnapshot: { ...VALID_TASK_CONTEXT_PACK.sourceSnapshot, tenantScope: "tenant/beta" },
+  };
+  const r = taskContextPackSchema.safeParse(mismatchPack);
+  assert.equal(r.success, false, "tenant scope mismatch must be rejected");
+  const messages = r.error.issues.map((i) => i.message);
+  assert.ok(messages.some((m) => /tenantScope/i.test(m)),
+    "must report tenant scope mismatch: " + JSON.stringify(messages));
+});
+
+test("taskContextPackSchema: ACCEPTS cross-tenant when authorizedCrossTenant lists it", () => {
+  const crossTenantPack = {
+    ...VALID_TASK_CONTEXT_PACK,
+    tenantScope: "tenant/acme",
+    sourceSnapshot: { ...VALID_TASK_CONTEXT_PACK.sourceSnapshot, tenantScope: "tenant/beta" },
+    authorizedCrossTenant: ["tenant/beta"],
+  };
+  const r = taskContextPackSchema.safeParse(crossTenantPack);
+  assert.equal(r.success, true, "authorized cross-tenant must be accepted");
+});
+
+test("actionReceiptSchema: REFUSES contentHash not matching scheme:encoded format", () => {
+  const r = actionReceiptSchema.safeParse({ ...VALID_ACTION_RECEIPT,
+    contentHash: "just-some-string",
+  });
+  assert.equal(r.success, false, "unstructured contentHash must be rejected");
+});
+
+test("actionReceiptSchema: ACCEPTS valid sha256:base64 contentHash", () => {
+  const r = actionReceiptSchema.safeParse({ ...VALID_ACTION_RECEIPT,
+    contentHash: "sha256:YWJjMTIzZGVmCg==",
+  });
+  assert.equal(r.success, true, "valid scheme:encoded contentHash must be accepted");
+});
