@@ -248,6 +248,27 @@ test("linkSchema: validates a graph link with provenance", () => {
   assert.equal(linkSchema.safeParse({ source: "n1", target: "n2", predicate: "child_of", provenance: "observed" }).success, true);
 });
 
+
+test("validateGraphIntegrity: rejects excessively deep nested objects", () => {
+  // Build a deeply nested object
+  let deep = { value: 1 };
+  for (let i = 0; i < 200; i++) {
+    deep = { nested: deep };
+  }
+  const { valid, errors } = validateGraphIntegrity({
+    version: "1.0.0",
+    assertions: [{
+      id: "a1",
+      subject: "x",
+      predicate: "y",
+      object: deep,
+      provenance: "observed",
+      schemaValidity: "valid",
+    }],
+  });
+  assert.equal(valid, false);
+  assert.ok(errors.some((e) => /exceeded max depth/i.test(e)), "must reject deeply nested object: " + JSON.stringify(errors));
+});
 test("linkSchema: REFUSES link with fabricated provenance", () => {
   assert.equal(linkSchema.safeParse({ source: "n1", target: "n2", predicate: "child_of", provenance: "imaginary" }).success, false);
 });

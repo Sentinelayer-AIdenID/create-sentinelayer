@@ -129,7 +129,7 @@ export function classifyProvenance(assertion, ctx = {}) {
   if (!assertion || !assertion.id) return "unknown";
   if (ctx.derivedFrom && Array.isArray(ctx.derivedFrom) && ctx.derivedFrom.length > 0) return "derived";
   if (ctx.isVerified === true || ctx.hasReceipt === true) return "authoritative";
-  if (ctx.observedAt) return "observed";
+  if (ctx.observedAt && typeof ctx.observedAt === "string") return "observed";
   return "unknown";
 }
 
@@ -171,7 +171,13 @@ export function validateGraphIntegrity(graph) {
   return { valid: errors.length === 0, errors };
 }
 
-function _rejectFloats(value, path, errors) {
+const MAX_FLOAT_CHECK_DEPTH = 100;
+
+function _rejectFloats(value, path, errors, depth = 0) {
+  if (depth > MAX_FLOAT_CHECK_DEPTH) {
+    errors.push(`${path}: exceeded max depth ${MAX_FLOAT_CHECK_DEPTH}; possible circular or deeply nested structure`);
+    return;
+  }
   if (typeof value === "number") {
     if (!Number.isFinite(value)) {
       errors.push(`${path}: non-finite number not allowed`);
@@ -182,13 +188,13 @@ function _rejectFloats(value, path, errors) {
   }
   if (Array.isArray(value)) {
     for (let i = 0; i < value.length; i++) {
-      _rejectFloats(value[i], `${path}[${i}]`, errors);
+      _rejectFloats(value[i], `${path}[${i}]`, errors, depth + 1);
     }
     return;
   }
   if (value && typeof value === "object") {
     for (const key of Object.keys(value)) {
-      _rejectFloats(value[key], `${path}.${key}`, errors);
+      _rejectFloats(value[key], `${path}.${key}`, errors, depth + 1);
     }
   }
 }
