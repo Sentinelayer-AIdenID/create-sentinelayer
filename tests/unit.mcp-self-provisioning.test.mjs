@@ -173,6 +173,30 @@ test("stock MCP runtime refuses unbound or wider join/leave arguments and retain
   }
 });
 
+test("stock MCP runtime refuses a second display identity and an owner role before admission", async () => {
+  const api = await pendingAdmissionApi();
+  const fx = await fixture("attacker", api.url);
+  try {
+    for (const args of [
+      { sessionId: SID, agent: "attacker", name: "victim", goal: "Review the room", wait: false },
+      { sessionId: SID, agent: "attacker", name: "attacker", goal: "Review the room", wait: false },
+      { sessionId: SID, agent: "attacker", role: "owner", goal: "Review the room", wait: false },
+      { sessionId: SID, agent: "attacker", role: "daemon", goal: "Review the room", wait: false },
+    ]) {
+      approvalRefused(await fx.call("sl.session.join", args), "sl.session.join");
+      assert.equal(
+        (await fx.runtime.handlers["sl.session.join"](args)).reason,
+        "approval_required",
+        "the generated handler independently refuses untrusted join metadata",
+      );
+    }
+    assert.deepEqual(api.calls, [], "refused calls must not reach the admission API");
+  } finally {
+    await fx.close();
+    await api.close();
+  }
+});
+
 test("stock MCP runtime hides self-provisioning when the bridge kill switch is enabled", async () => {
   const fx = await fixture();
   try {
@@ -191,7 +215,7 @@ test("stock MCP runtime files a caller-bound pending admission request for human
   const fx = await fixture("attacker", api.url);
   try {
     const result = await fx.call("sl.session.join", {
-      sessionId: SID, agent: "attacker", model: "gpt-6.1-sol", goal: "Review the room", wait: false,
+      sessionId: SID, agent: "attacker", role: "reviewer", model: "gpt-6.1-sol", goal: "Review the room", wait: false,
     });
     assert.equal(result.error, undefined, JSON.stringify(result));
     assert.equal(result.result?.structuredContent?.json?.admission?.status, "pending", JSON.stringify(result));
@@ -202,6 +226,24 @@ test("stock MCP runtime files a caller-bound pending admission request for human
       ["POST", `/api/v1/sessions/${SID}/admissions`],
     ]);
     assert.equal(api.calls[0].authorization, "Bearer mcp-test-user-token-0000");
+    assert.equal(JSON.parse(api.calls[0].body).agentId, "attacker");
+  } finally {
+    await fx.close();
+    await api.close();
+  }
+});
+
+test("stock MCP runtime preserves legacy name-only self-join", async () => {
+  const api = await pendingAdmissionApi();
+  const fx = await fixture("attacker", api.url);
+  try {
+    const result = await fx.call("sl.session.join", {
+      sessionId: SID, name: "attacker", goal: "Review the room", wait: false,
+    });
+    assert.equal(result.result?.structuredContent?.json?.admission?.status, "pending", JSON.stringify(result));
+    assert.deepEqual(api.calls.map((call) => [call.method, call.url]), [
+      ["POST", `/api/v1/sessions/${SID}/admissions`],
+    ]);
     assert.equal(JSON.parse(api.calls[0].body).agentId, "attacker");
   } finally {
     await fx.close();

@@ -382,3 +382,12 @@
   through the stock runtime. A narrow exception must validate the trusted caller
   and each call's exact arguments at both gates, while leaving the generic CLI
   human-approval policy fail-closed.
+
+# 2026-10-24 - Caller binding includes identity-bearing metadata
+
+- Pattern: checking `agent` against the trusted caller still allowed `name` to
+  become an unrelated display identity, and an unvalidated `role` could exceed
+  the documented agent roles.
+- Rule: for privileged bridge exceptions, trace every accepted argument to its
+  downstream meaning. Reject a second identity-bearing label and restrict role
+  metadata before either the dispatcher or handler can launch the CLI.

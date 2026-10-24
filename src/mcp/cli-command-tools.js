@@ -22,6 +22,7 @@ const SELF_JOIN_INPUTS = new Set([
   "json", "timeoutMs", "timeout_ms",
 ]);
 const SELF_LEAVE_INPUTS = new Set(["sessionId", "agent", "reason", "path", "json", "timeoutMs", "timeout_ms"]);
+const SELF_JOIN_ROLES = new Set(["coder", "reviewer", "tester", "observer"]);
 
 export function selfProvisioningMcpInputSchema(tool) {
   const allowed = tool.name === "sl.session.join" ? SELF_JOIN_INPUTS : SELF_LEAVE_INPUTS;
@@ -360,8 +361,11 @@ export function approvedSelfProvisioningMcpCall(tool, input, { env = process.env
   if (Object.keys(input).some((key) => !allowedInputs.has(key))) return false;
   if (typeof input.sessionId !== "string" || !input.sessionId.trim()) return false;
   if (input.cancelAdmission !== undefined && typeof input.cancelAdmission !== "boolean") return false;
-  // --name is the legacy agent alias only in the absence of --agent; beside --agent it is a
-  // display label. Require one explicit identity and refuse ordinary joins without a goal.
+  // --name is the legacy agent alias only without --agent. Beside --agent it becomes an
+  // untrusted display label, so the bridge refuses both together.
+  if (name === "sl.session.join" && input.agent !== undefined && input.name !== undefined) return false;
+  if (name === "sl.session.join" && input.role !== undefined && !SELF_JOIN_ROLES.has(input.role)) return false;
+  // Require one explicit identity and refuse ordinary joins without a goal.
   const target = input.agent === undefined && name === "sl.session.join" ? input.name : input.agent;
   if (typeof target !== "string" || !target.trim()) return false;
   try {
