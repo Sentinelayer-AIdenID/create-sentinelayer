@@ -4231,3 +4231,13 @@ Review: The new test failed on `refundWindow` before the correction. Final focus
 - [x] Run focused tests, static check, diff review, and commit local successor for independent review.
 
 Review: Four command-level cases failed on the replayed PR before repair. The corrected real leave action refuses attacker-to-victim requests before changing the victim roster and permits same-agent and direct-human leaves. Bridged admission cancellation rejects a mismatched `--agent` or legacy `--name` before the action reads local pending state; same-agent calls proceed to ordinary pending-state validation. Nine related unit files pass 239/239; static check passes 418 files, docs validation passes. No live remote cancellation, push, or hosted gate is claimed.
+
+## PR853 stock MCP self-provisioning follow-up (local, unpublished)
+
+- [x] Trace dispatcher and generated-handler approval policy, and specify a two-layer exception for exactly self-join/self-leave.
+- [x] Reproduce stock-runtime tools/list and tools/call failures before the change.
+- [x] Require host caller identity, exact generated command metadata, and per-call identity match at both gates; retain approval refusal for other CLI commands.
+- [x] Prove real stock-runtime allowed and rejected calls, including attacker-to-victim and ordinary owner/control tools.
+- [x] Run focused/static/docs checks, inspect diff, commit local successor, and report exact head/tree for independent review. No push.
+
+Review: Fail-first stock-runtime tests saw both tools hidden and same-agent admission cancellation rejected before dispatch. The repaired runtime advertises only join/leave among generated CLI tools when a canonical trusted caller is present; its dispatcher and generated handler both validate the same exact command and call arguments. A loopback API test proves self-join files a pending request for room-owner approval, and a real CLI child self-leaves without altering another agent's roster. Cross-agent leave/cancel, malformed/unbound arguments, absent or noncanonical caller, the bridge kill switch, and owner/control commands are refused before execution. Nine focused files pass 134/134; static check passes 418 files; docs validation and diff check pass. No general MCP per-call human-approval receipt was added, and no remote push or hosted gate is claimed.

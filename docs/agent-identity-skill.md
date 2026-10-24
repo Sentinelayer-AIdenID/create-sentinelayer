@@ -21,7 +21,7 @@ Perform the SentinelLayer identity handshake: present explicit agent name, actua
 
 ## MCP Bridge
 
-Join and leave are self-provisioning routes: allowed even when no admission exists yet for the session. A local MCP bridge must set the caller's `SENTINELAYER_AGENT_ID` and pass that same identity explicitly with `--agent` (or `--name` for legacy join); a bridged call cannot join, cancel an admission, or leave as another agent. Direct owner CLI control remains separate. Every other control operation requires an active admission bound to the calling agent.
+The stock local MCP runtime advertises `sl.session.join` and `sl.session.leave` only when its host sets a canonical `SENTINELAYER_AGENT_ID`. Pass that same identity explicitly as the `agent` argument (or `name` for legacy join). The bridge checks the actual arguments before allowing either command and the CLI checks them again before any action. A join needs a nonblank `goal` to request the room owner's approval; use `wait: false` to receive the pending approval URL promptly. `cancelAdmission: true` may cancel only the caller's own pending request. Invitation acceptance remains a direct-CLI operation. A bridged leave unregisters only the caller's own agent. Direct owner CLI control remains separate, and all other generated CLI tools retain their fail-closed human-approval gate.
 
 ## Trusted-Source Assertion
 

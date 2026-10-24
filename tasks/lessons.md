@@ -372,3 +372,13 @@
   units, and bare numbers on both assertion and entity paths. Reserve monetary
   enforcement for amount-bearing names such as `priceNumber` and explicit
   compact aliases; keep nested facts and untyped numbers under validation.
+
+# 2026-10-24 - CLI route permission is not MCP tool availability
+
+- Pattern: classifying join/leave as self-provisioning at the CLI guard did not make
+  the generated MCP tools usable; the stock dispatcher hid every approval-gated
+  CLI tool and its handler independently refused calls.
+- Rule: when promising a bridged capability, test `tools/list` and `tools/call`
+  through the stock runtime. A narrow exception must validate the trusted caller
+  and each call's exact arguments at both gates, while leaving the generic CLI
+  human-approval policy fail-closed.

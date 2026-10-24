@@ -4,8 +4,10 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 import { createAgentEvent } from "../events/schema.js";
 import {
+  approvedSelfProvisioningMcpCall,
   buildCliCommandMcpTools,
   createCliCommandMcpToolHandlers,
+  selfProvisioningMcpInputSchema,
 } from "./cli-command-tools.js";
 import { appendToStream, readStream } from "../session/stream.js";
 import { listFileLocks, lockFile, unlockFile } from "../session/file-locks.js";
@@ -1698,15 +1700,26 @@ export const SESSION_MCP_TOOLS = Object.freeze([
   },
 ]);
 
-function toMcpTool(tool) {
+function toMcpTool(tool, { selfProvisioning = false } = {}) {
+  const security = selfProvisioning
+    ? { ...tool.security, requires_human_approval: false, runtime_blocked: false }
+    : tool.security;
+  if (selfProvisioning) delete security.runtime_block_reason;
+  const selfProvisioningDetail = tool.name === "sl.session.join"
+    ? "A goal requests room-owner admission approval; use wait:false to return the pending URL. Cancellation affects only this agent's pending request."
+    : "It unregisters only this agent.";
   return cleanObject({
     name: tool.name,
     title: tool.title,
-    description: tool.description,
-    inputSchema: tool.inputSchema,
+    description: selfProvisioning
+      ? `${tool.description} Only the host's caller agent may use this tool. ${selfProvisioningDetail}`
+      : tool.description,
+    inputSchema: selfProvisioning ? selfProvisioningMcpInputSchema(tool) : tool.inputSchema,
     annotations: tool.annotations,
-    security: tool.security,
-    metadata: tool.metadata,
+    security,
+    metadata: selfProvisioning
+      ? { ...tool.metadata, approvalRequired: false, approvalPolicy: "caller_bound_self_provisioning" }
+      : tool.metadata,
   });
 }
 
@@ -1744,14 +1757,15 @@ function jsonRpcError(id, code, message, data = undefined) {
   });
 }
 
-// The dispatcher enforces each tool's published policy before its handler runs. A tool that
-// requires human approval is refused: approval would have to be server-validated and bound to the
-// call's arguments, and no such approval exists yet. A runtime-blocked tool is refused too. Refused
-// tools are not advertised by tools/list, and a call to one gets a specific JSON-RPC error.
+// The dispatcher enforces each tool's published policy before its handler runs. Ordinary CLI
+// tools still require human approval, which the bridge cannot validate. The two self-provisioning
+// commands have a narrowly validated caller-bound policy; every call checks its actual arguments.
+// Refused tools are not advertised by tools/list, and a call gets a specific JSON-RPC error.
 export const MCP_HUMAN_APPROVAL_REQUIRED = Object.freeze({ code: -32001, reason: "human_approval_required" });
 export const MCP_TOOL_BLOCKED = Object.freeze({ code: -32002, reason: "tool_blocked" });
 
-function toolRefusal(tool) {
+function toolRefusal(tool, input, { env = process.env, forListing = false } = {}) {
+  if (approvedSelfProvisioningMcpCall(tool, input, { env, forListing })) return "";
   const security = isPlainObject(tool?.security) ? tool.security : {};
   if (security.requires_human_approval === true) return MCP_HUMAN_APPROVAL_REQUIRED.reason;
   if (tool?.metadata?.bridge === "cli-command" && security.requires_human_approval !== false) {
@@ -1789,6 +1803,7 @@ export async function handleMcpJsonRpcMessage(
     targetPath = process.cwd(),
     handlers = createSessionMcpToolHandlers({ targetPath }),
     tools = SESSION_MCP_TOOLS,
+    env = process.env,
   } = {}
 ) {
   if (!isPlainObject(message)) {
@@ -1832,7 +1847,10 @@ export async function handleMcpJsonRpcMessage(
   if (method === "tools/list") {
     if (isNotification) return null;
     return jsonRpcSuccess(id, {
-      tools: tools.filter((tool) => !toolRefusal(tool)).map((tool) => toMcpTool(tool)),
+      tools: tools.filter((tool) => !toolRefusal(tool, undefined, { env, forListing: true }))
+        .map((tool) => toMcpTool(tool, {
+          selfProvisioning: approvedSelfProvisioningMcpCall(tool, undefined, { env, forListing: true }),
+        })),
     });
   }
 
@@ -1842,7 +1860,7 @@ export async function handleMcpJsonRpcMessage(
     const args = isPlainObject(message.params?.arguments) ? message.params.arguments : {};
     const handler = handlers[toolName];
     const tool = (Array.isArray(tools) ? tools : []).find((candidate) => normalizeString(candidate?.name) === toolName);
-    const refusal = typeof handler === "function" && tool ? toolRefusal(tool) : "";
+    const refusal = typeof handler === "function" && tool ? toolRefusal(tool, args, { env }) : "";
     if (refusal) {
       return refusalError(id, toolName, tool, refusal);
     }
@@ -1889,6 +1907,7 @@ export async function handleMcpJsonRpcMessage(
 
 export async function createSessionMcpRuntime({
   targetPath = process.cwd(),
+  env = process.env,
   sessionHandlers = createSessionMcpToolHandlers({ targetPath }),
   sessionTools = SESSION_MCP_TOOLS,
   buildCliCommandMcpToolsFn = buildCliCommandMcpTools,
@@ -1899,9 +1918,14 @@ export async function createSessionMcpRuntime({
     tools: [...sessionTools, ...commandTools],
     handlers: {
       ...sessionHandlers,
-      ...createCliCommandMcpToolHandlersFn(commandTools, { targetPath }),
+      ...createCliCommandMcpToolHandlersFn(commandTools, {
+        targetPath,
+        env,
+        approve: (tool, input) => approvedSelfProvisioningMcpCall(tool, input, { env }),
+      }),
     },
     commandToolCount: commandTools.length,
+    env,
   };
 }
 
