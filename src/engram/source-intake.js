@@ -33,8 +33,12 @@ export class SourceIntakeError extends Error {
   }
 }
 
+const OWN_ERRORS = new WeakSet();
+
 function reject(code) {
-  throw new SourceIntakeError(code);
+  const error = new SourceIntakeError(code);
+  OWN_ERRORS.add(error);
+  throw error;
 }
 
 function approvedUrl(raw, allowedOrigins) {
@@ -87,8 +91,10 @@ async function boundedBytes(body, limit) {
  * `authorize` must consult the real tenant policy and is called again before
  * returning captured bytes; `sources` and
  * `allowedOrigins` must be maintained by the site owner, not by page content.
- * `read` receives only that registered URL and must not follow redirects. Its
- * result must report the final URL, status, media type and byte stream.
+ * `read` receives the approved URL and immutable source version, and must not
+ * follow redirects. It must report the actual version of the returned bytes,
+ * not echo the requested version; only the trusted connector can make that
+ * assertion. Its result must also report the final URL, status and media type.
  */
 export async function captureSourceBytes({
   sourceId,
@@ -143,7 +149,7 @@ export async function captureSourceBytes({
 
   let response;
   try {
-    response = await read({ sourceId, tenantScope, url, maxBytes });
+    response = await read({ sourceId, tenantScope, url, version: approved.version, maxBytes });
   } catch {
     reject("source_unavailable");
   }
@@ -151,7 +157,7 @@ export async function captureSourceBytes({
   try {
     declaredLength = response?.contentLength;
     if (
-      response?.status !== 200 || response.url !== url ||
+      response?.status !== 200 || response.url !== url || response.version !== approved.version ||
       typeof response.mediaType !== "string" ||
       response.mediaType.split(";", 1)[0].trim().toLowerCase() !== approved.mediaType.toLowerCase() ||
       (declaredLength !== undefined &&
@@ -165,7 +171,7 @@ export async function captureSourceBytes({
   try {
     bytes = await boundedBytes(response.body, maxBytes);
   } catch (error) {
-    if (error instanceof SourceIntakeError) throw error;
+    if (OWN_ERRORS.has(error)) throw error;
     reject("source_unavailable");
   }
   if (declaredLength !== undefined && declaredLength !== bytes.length) {

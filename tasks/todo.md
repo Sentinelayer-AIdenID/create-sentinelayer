@@ -48,6 +48,16 @@ The staged local review scan covered all four changed files: P1 0, nonblocking P
 
 The two new cases failed 2/9 on the published parent and pass 9/9 after the correction. A registry change during `read` can no longer relabel or release captured bytes. This correction does not implement a network reader, DNS/redirect enforcement, extraction or persistence and does not complete EW04. No push or owner-branch change.
 
+## EW04 immutable read-version and stream-error correction — 2026-10-24
+
+- [x] Fail first on registry ABA that restores the approved value but returns bytes from another source version; also fail on an async iterator throwing private `SourceIntakeError` text.
+- [x] Bind the approved source version to the trusted reader request/response and sanitize untrusted stream failures without masking module-owned size/type refusals.
+- [x] Run focused and relevant tests plus static check, then commit a local direct child of `f0e05150` for independent re-review.
+
+### Review
+
+The two review cases failed on `f0e05150` and pass after the correction. The trusted reader must return the actual version of the bytes; a missing or different response version now fails closed, including a registry v1→v2→v1 cycle. Errors from an untrusted body iterator or getter cannot export an arbitrary `SourceIntakeError` message. Focused source-intake tests pass 11/11, related ENGRAM tests pass 270/270, and `npm run check` passes 417 files. This correction cannot itself verify a dishonest reader or replace a real DNS/redirect-safe connector, extraction and persisted readback; EW04 remains open.
+
 ### Gate regression correction
 
 Same-environment A/B proved the Omar diff E2E failure was patch-triggered, not

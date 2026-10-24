@@ -25,7 +25,7 @@ function fixture(overrides = {}) {
     sources: new Map([[sourceId, source]]),
     allowedOrigins: new Set(["https://aidenid.com"]),
     authorize: async () => true,
-    read: async () => ({ status: 200, url, mediaType: "text/plain; charset=utf-8", contentLength: body.length, body }),
+    read: async () => ({ status: 200, url, version: source.version, mediaType: "text/plain; charset=utf-8", contentLength: body.length, body }),
     capturedAt: () => "2026-10-24T00:00:00.000Z",
     ...overrides,
   };
@@ -40,14 +40,14 @@ test("public owner source yields bounded bytes and exact EW02 SourceSnapshot", a
   let requested;
   const result = await captureSourceBytes(fixture({ read: async (request) => {
     requested = request;
-    return { status: 200, url, mediaType: "text/plain; charset=utf-8", contentLength: body.length, body };
+    return { status: 200, url, version: source.version, mediaType: "text/plain; charset=utf-8", contentLength: body.length, body };
   } }));
   assert.equal(sourceSnapshotSchema.safeParse(result.snapshot).success, true);
   assert.deepEqual(result.bytes, body);
   assert.equal(result.snapshot.contentHash, `sha256:${createHash("sha256").update(body).digest("hex")}`);
   assert.equal(result.snapshot.version, source.version);
   assert.equal(result.snapshot.tenantScope, tenantScope);
-  assert.deepEqual(requested, { sourceId, tenantScope, url, maxBytes: 256 * 1024 });
+  assert.deepEqual(requested, { sourceId, tenantScope, url, version: source.version, maxBytes: 256 * 1024 });
   assert.deepEqual(result.snapshot.metadata, {
     origin: "https://aidenid.com", mediaType: "text/plain", byteLength: body.length,
   });
@@ -101,12 +101,14 @@ test("redirect, changed URL, unexpected media type and bad declared length are d
     { status: 302 },
     { url: "https://aidenid.com/private" },
     { url: "http://127.0.0.1/" },
+    { version: "git:wrong-version" },
+    { version: undefined },
     { mediaType: "text/html" },
     { contentLength: body.length + 1 },
     { contentLength: 999999 },
   ]) {
     await rejectsCode(fixture({ read: async () => ({
-      status: 200, url, mediaType: "text/plain", contentLength: body.length, body, ...change,
+      status: 200, url, version: source.version, mediaType: "text/plain", contentLength: body.length, body, ...change,
     }) }), "source_rejected");
   }
 });
@@ -123,7 +125,7 @@ test("streaming over the byte cap stops the reader and stores no snapshot", asyn
     }
   }
   await rejectsCode(fixture({ maxBytes: 8, read: async () => ({
-    status: 200, url, mediaType: "text/plain", body: stream(),
+    status: 200, url, version: source.version, mediaType: "text/plain", body: stream(),
   }) }), "source_too_large");
   assert.equal(closed, true);
 });
@@ -132,23 +134,23 @@ test("reader exceptions, malformed UTF-8 and credential-like content never leak 
   const secret = "ghp_" + "abcdefghijklmnopqrstuvwxyz1234567890";
   await rejectsCode(fixture({ read: async () => { throw Error(`reader failed: ${secret}`); } }), "source_unavailable");
   await rejectsCode(fixture({ read: async () => ({
-    status: 200, url, mediaType: "text/plain", body: Buffer.from([0xff]),
+    status: 200, url, version: source.version, mediaType: "text/plain", body: Buffer.from([0xff]),
   }) }), "source_rejected");
   await rejectsCode(fixture({ read: async () => ({
-    status: 200, url, mediaType: "text/plain", body: Buffer.from(secret),
+    status: 200, url, version: source.version, mediaType: "text/plain", body: Buffer.from(secret),
   }) }), "source_rejected");
   await rejectsCode(fixture({ read: async () => ({
-    status: 200, url, mediaType: "text/plain", body: Buffer.from("Authorization: Bearer abcdefghijklmnopqrstuvwxyz123456"),
+    status: 200, url, version: source.version, mediaType: "text/plain", body: Buffer.from("Authorization: Bearer abcdefghijklmnopqrstuvwxyz123456"),
   }) }), "source_rejected");
   await rejectsCode(fixture({ read: async () => ({
-    status: 200, url, mediaType: "text/plain", body: Buffer.from("api_key: abcdefghijklmnopqrstuvwxyz123456"),
+    status: 200, url, version: source.version, mediaType: "text/plain", body: Buffer.from("api_key: abcdefghijklmnopqrstuvwxyz123456"),
   }) }), "source_rejected");
   const namedOnly = Buffer.from("Set AIDENID_API_KEY in the server environment.");
   const named = await captureSourceBytes(fixture({ read: async () => ({
-    status: 200, url, mediaType: "text/plain", body: namedOnly,
+    status: 200, url, version: source.version, mediaType: "text/plain", body: namedOnly,
   }) }));
   assert.deepEqual(named.bytes, namedOnly);
-  const throwingMetadata = { status: 200, url, mediaType: "text/plain", body };
+  const throwingMetadata = { status: 200, url, version: source.version, mediaType: "text/plain", body };
   Object.defineProperty(throwingMetadata, "contentLength", { get() { throw Error(`private: ${secret}`); } });
   await rejectsCode(fixture({ read: async () => throwingMetadata }), "source_rejected");
 });
@@ -175,7 +177,7 @@ test("in-flight source changes cannot relabel captured bytes", async () => {
       allowedOrigins,
       read: async () => {
         mutate({ record, sources, allowedOrigins });
-        return { status: 200, url, mediaType: record.mediaType, body };
+        return { status: 200, url, version: source.version, mediaType: record.mediaType, body };
       },
     }), code, label);
   }
@@ -187,7 +189,38 @@ test("in-flight tenant policy revocation denies the captured source", async () =
     authorize: async () => permitted,
     read: async () => {
       permitted = false;
-      return { status: 200, url, mediaType: "text/plain", body };
+      return { status: 200, url, version: source.version, mediaType: "text/plain", body };
     },
   }), "source_access_denied");
+});
+
+test("trusted reader's actual version rejects bytes from a registry ABA", async () => {
+  const record = { ...source };
+  let requestedVersion;
+  await rejectsCode(fixture({
+    sources: new Map([[sourceId, record]]),
+    read: async (request) => {
+      requestedVersion = request.version;
+      record.version = "git:replacement";
+      const actualVersion = record.version;
+      record.version = source.version;
+      return { status: 200, url, mediaType: "text/plain", version: actualVersion,
+        body: Buffer.from("bytes from replacement version") };
+    },
+  }), "source_rejected");
+  assert.equal(requestedVersion, source.version);
+});
+
+test("untrusted async stream errors cannot export their private message", async () => {
+  async function* hostileStream() {
+    throw new SourceIntakeError("private_error_detail");
+  }
+  await rejectsCode(fixture({ read: async () => ({
+    status: 200, url, version: source.version, mediaType: "text/plain", body: hostileStream(),
+  }) }), "source_unavailable");
+  const throwingBody = { status: 200, url, version: source.version, mediaType: "text/plain" };
+  Object.defineProperty(throwingBody, "body", {
+    get() { throw new SourceIntakeError("private_error_detail"); },
+  });
+  await rejectsCode(fixture({ read: async () => throwingBody }), "source_unavailable");
 });
