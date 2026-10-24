@@ -295,7 +295,7 @@ test("credential with no issuing authority is refused", async () => {
 // 4. Leave is self-only, never reveals another agent
 // ===========================================================================
 
-test("leave is classified as self-provisioning and only affects the requesting agent", () => {
+test("leave is classified as self-provisioning; command behavior is covered separately", () => {
   assert.equal(sessionRouteClass("cli:session leave"), "self-provisioning");
   assert.deepEqual(
     [...SELF_PROVISIONING_TOOLS].sort(),

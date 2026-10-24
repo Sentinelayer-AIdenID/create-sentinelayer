@@ -4222,3 +4222,12 @@ Review correction: An independent review caught broad compact suffix matching mi
 - [ ] Independent warden review and publication; keep PR862 draft until accepted gates pass.
 
 Review: The new test failed on `refundWindow` before the correction. Final focused ENGRAM contracts pass 224/224; a bounded full unit run passes 2,733 tests with three skips and no failures. Final static check passes 418 files, docs validation and package dry-run pass, and the diff check is clean. The first highly parallel full run failed five unrelated billing/Omar/session tests while the Windows host ran over 130 Node processes; all those files passed 25/25 in isolation before the bounded full rerun. No hosted gate or merge is claimed by this local successor.
+
+## PR853 self-provisioning caller binding (local repair)
+
+- [x] Replay `cae80a9` on current main after #864 in an isolated branch.
+- [x] Add fail-first command-level attacker-to-victim tests for bridged leave and admission cancellation, with same-agent and direct-human controls.
+- [x] Bind bridged self-provisioning to the trusted caller and reject ambiguous or cross-agent identity before action.
+- [x] Run focused tests, static check, diff review, and commit local successor for independent review.
+
+Review: Four command-level cases failed on the replayed PR before repair. The corrected real leave action refuses attacker-to-victim requests before changing the victim roster and permits same-agent and direct-human leaves. Bridged admission cancellation rejects a mismatched `--agent` or legacy `--name` before the action reads local pending state; same-agent calls proceed to ordinary pending-state validation. Nine related unit files pass 239/239; static check passes 418 files, docs validation passes. No live remote cancellation, push, or hosted gate is claimed.

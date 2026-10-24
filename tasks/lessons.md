@@ -1,5 +1,9 @@
 # Lessons
 
+## 2026-10-24
+
+- A route allow-list proves only that a command name is admitted. For self-provisioning commands that accept an agent target, bind the parsed target to a trusted bridge caller before dispatch, and test the real action with different caller and target identities. A label-only test cannot prove a leave is self-only or a pending cancellation cannot cross agents.
+
 ## 2026-09-28
 
 - A broad-suite failure after a patch is not a baseline issue without a same-environment A/B proof. Faster optional work can expose concurrency bugs: creation must share the stream writer's lock, re-read under that lock, and preserve an already-created room rather than resetting metadata.

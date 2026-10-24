@@ -225,7 +225,11 @@ test("session join through the bridge in an agent context with no stored admissi
   await withEmptyHome(async (homeDir) => {
     const joinAction = parsedAction(
       ["session", "join"],
-      { args: ["new-session-id"], opts: { agent: "bridge-agent", goal: "test", scope: "session.read", ttl: "2h" } },
+      {
+        args: ["new-session-id"],
+        opts: { agent: "bridge-agent", goal: "test", scope: "session.read", ttl: "2h" },
+        sources: { agent: "cli", goal: "cli", scope: "cli", ttl: "cli" },
+      },
     );
     // Must NOT throw — join is self-provisioning and must be allowed
     await guard(joinAction, homeDir);

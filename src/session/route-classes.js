@@ -10,9 +10,10 @@
 //                      posting, replying, reading/polling, message actions and reactions,
 //                      attention requests. Runs as before; the server's admission mode
 //                      decides whether a room accepts it.
-//   self-provisioning  joining and leaving: commands an agent runs to establish or tear
-//                      down its own admission. Allowed even when no admission exists yet
-//                      for the session; every other route that needs one then uses it.
+//   self-provisioning  joining and leaving: commands an agent runs before it has, or
+//                      after it loses, an admission. The CLI bridge requires an explicit
+//                      target matching its trusted caller id; every other route that
+//                      needs an admission then uses it.
 //   control            leases, locks, guards, tickets, checkpoints, listeners, room setup
 //                      and everything else that is not plain data-plane traffic. Refused
 //                      unless the session's admission binds it.
