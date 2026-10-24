@@ -143,7 +143,7 @@ export async function captureSourceBytes({
   }
   const url = approvedUrl(approved.url, allowedOrigins);
   if (typeof approved.version !== "string" || !approved.version ||
-      !["api", "ingest", "import"].includes(approved.sourceType) ||
+      (approved.sourceType !== "api" && approved.sourceType !== "ingest" && approved.sourceType !== "import") ||
       !TEXT_TYPES.has(approved.mediaType) ||
       typeof read !== "function") reject("source_not_approved");
 
