@@ -6,6 +6,7 @@ import process from "node:process";
 
 import { bridgeAllowedInputs } from "./bridge-inputs.js";
 import { buildSentinelayerCliRegistryTemplate } from "./cli-registry.js";
+import { assertCanonicalAgentId, canonicalAgentId } from "../session/admission-auth.js";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_TIMEOUT_MS = 300_000;
@@ -15,6 +16,22 @@ const BRIDGE_DISABLED_ENV = "SENTINELAYER_MCP_CLI_BRIDGE_DISABLED";
 const CLI_PATH_SEGMENT_RE = /^[a-zA-Z0-9][a-zA-Z0-9-]*$/;
 const CLI_OPTION_FLAG_RE = /^--?[a-zA-Z0-9][a-zA-Z0-9-]*$/;
 const BLOCKED_COMMAND_PATHS = new Set(["mcp.server.run"]);
+const SELF_JOIN_INPUTS = new Set([
+  "sessionId", "agent", "name", "role", "model", "path", "goal", "deliverable", "stopWhen",
+  "scope", "ttl", "provider", "wait", "waitSeconds", "cancelAdmission", "autoGrant",
+  "json", "timeoutMs", "timeout_ms",
+]);
+const SELF_LEAVE_INPUTS = new Set(["sessionId", "agent", "reason", "path", "json", "timeoutMs", "timeout_ms"]);
+const SELF_JOIN_ROLES = new Set(["coder", "reviewer", "tester", "observer"]);
+
+export function selfProvisioningMcpInputSchema(tool) {
+  const allowed = tool.name === "sl.session.join" ? SELF_JOIN_INPUTS : SELF_LEAVE_INPUTS;
+  const schema = tool.inputSchema || {};
+  return {
+    ...schema,
+    properties: Object.fromEntries(Object.entries(schema.properties || {}).filter(([name]) => allowed.has(name))),
+  };
+}
 const SENSITIVE_COMMAND_PATHS = new Set([
   "auth.login",
   "auth.logout",
@@ -314,6 +331,52 @@ function validateBridgeToolInput(tool = {}, input = {}) {
     return `unsupported_input_value:${dashKey}`;
   }
   return "";
+}
+
+// The generated CLI registry requires human approval by default. These two commands have a
+// narrower, server-validated policy: an agent can request its own owner-approved admission or
+// unregister itself. The host supplies the caller id, never the MCP arguments. Validate again
+// in the handler after the dispatcher checks it, so neither gate alone can authorize a spawn.
+export function approvedSelfProvisioningMcpCall(tool, input, { env = process.env, forListing = false } = {}) {
+  const name = tool?.name;
+  if (name !== "sl.session.join" && name !== "sl.session.leave") return false;
+  if (validateBridgeToolDefinition(tool) || isBridgeDisabled(env)) return false;
+  if (tool.metadata?.blocked || tool.metadata?.blockedReason) return false;
+  if (tool.metadata?.approvalRequired !== true ||
+      tool.security?.requires_human_approval !== true || tool.security?.runtime_blocked !== true ||
+      tool.security?.runtime_block_reason !== "approval_required") return false;
+  if (tool.metadata.cliPath.join(".") !== name.slice(3)) return false;
+  if (tool.metadata.positional?.length !== 1 || tool.metadata.positional[0].name !== "sessionId" ||
+      !tool.metadata.options?.some((option) => option.name === "agent" && option.flag === "--agent")) return false;
+  const caller = env?.SENTINELAYER_AGENT_ID;
+  if (typeof caller !== "string" || !caller.trim()) return false;
+  try {
+    assertCanonicalAgentId(caller, "SENTINELAYER_AGENT_ID");
+  } catch {
+    return false;
+  }
+  if (forListing) return true;
+  if (!isPlainObject(input) || validateBridgeToolInput(tool, input)) return false;
+  const allowedInputs = name === "sl.session.join" ? SELF_JOIN_INPUTS : SELF_LEAVE_INPUTS;
+  if (Object.keys(input).some((key) => !allowedInputs.has(key))) return false;
+  if (typeof input.sessionId !== "string" || !input.sessionId.trim()) return false;
+  if (input.cancelAdmission !== undefined && typeof input.cancelAdmission !== "boolean") return false;
+  // --name is the legacy agent alias only without --agent. Beside --agent it becomes an
+  // untrusted display label, so the bridge refuses both together.
+  if (name === "sl.session.join" && input.agent !== undefined && input.name !== undefined) return false;
+  if (name === "sl.session.join" && input.role !== undefined && !SELF_JOIN_ROLES.has(input.role)) return false;
+  // Require one explicit identity and refuse ordinary joins without a goal.
+  const target = input.agent === undefined && name === "sl.session.join" ? input.name : input.agent;
+  if (typeof target !== "string" || !target.trim()) return false;
+  try {
+    assertCanonicalAgentId(target, "self-provisioning target");
+  } catch {
+    return false;
+  }
+  if (canonicalAgentId(target) !== canonicalAgentId(caller)) return false;
+  if (name === "sl.session.join" && input.cancelAdmission !== true &&
+      (typeof input.goal !== "string" || !input.goal.trim())) return false;
+  return true;
 }
 
 // Positional and option values are copied into argv verbatim, and a value that starts with

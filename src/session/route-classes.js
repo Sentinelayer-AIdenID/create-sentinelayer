@@ -10,9 +10,13 @@
 //                      posting, replying, reading/polling, message actions and reactions,
 //                      attention requests. Runs as before; the server's admission mode
 //                      decides whether a room accepts it.
-//   control            leases, locks, guards, tickets, checkpoints, joining and leaving,
-//                      listeners, room setup and everything else that is not plain
-//                      data-plane traffic. Refused unless the session's admission binds it.
+//   self-provisioning  joining and leaving: commands an agent runs before it has, or
+//                      after it loses, an admission. The CLI bridge requires an explicit
+//                      target matching its trusted caller id; every other route that
+//                      needs an admission then uses it.
+//   control            leases, locks, guards, tickets, checkpoints, listeners, room setup
+//                      and everything else that is not plain data-plane traffic. Refused
+//                      unless the session's admission binds it.
 //   owner              room owner actions. Refused in an agent context.
 //   exempt-local       sends no request (a local store or built-in constants only).
 //
@@ -66,8 +70,8 @@ export const SESSION_ROUTE_CLASSES = Object.freeze({
   "cli:session ticket release": "control",
   "cli:session ticket renew": "control",
   "cli:session ticket submit": "control",
-  "cli:session join": "control",
-  "cli:session leave": "control",
+  "cli:session join": "self-provisioning",
+  "cli:session leave": "self-provisioning",
   "cli:session stop-listener": "control",
   "cli:session listeners": "control",
   "cli:session set-title": "control",
@@ -100,6 +104,11 @@ export const SESSION_ROUTE_CLASSES = Object.freeze({
 /** The compatibility list for rooms that don't require admission, as one named view of the table. */
 export const LEGACY_DATA_PLANE_TOOLS = Object.freeze(
   Object.keys(SESSION_ROUTE_CLASSES).filter((route) => SESSION_ROUTE_CLASSES[route] === "legacy-data-plane"),
+);
+
+/** Routes an agent may use to establish or tear down its own admission. */
+export const SELF_PROVISIONING_TOOLS = Object.freeze(
+  Object.keys(SESSION_ROUTE_CLASSES).filter((route) => SESSION_ROUTE_CLASSES[route] === "self-provisioning"),
 );
 
 export function sessionRouteClass(route) {
