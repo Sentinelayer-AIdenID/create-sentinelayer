@@ -288,18 +288,37 @@ const MONEY_FIELD_NAMES = new Set([
   "shipping_cost", "shippingCost", "ShippingCost",
 ]);
 
+// Other predicates may name the same monetary fact in camel/snake case.
+// Match the monetary noun at the end so totalCount and totalWeight remain
+// ordinary quantities rather than being misclassified as prices.
+const MONEY_FIELD_SUFFIXES = new Set([
+  "amount", "price", "cost", "fee", "total", "subtotal", "balance",
+  "payment", "revenue", "expense", "charge", "refund", "budget", "profit",
+]);
+
+// A quantity is explicitly non-monetary. Currency codes and unambiguous
+// currency words cannot turn a binary float into a monetary total.
+const MONEY_UNIT_WORDS = new Set([
+  "money", "currency", "dollar", "dollars", "cent", "cents", "euro",
+  "euros", "yen", "yuan", "won", "rupee", "rupees", "peso", "pesos",
+  "franc", "francs", "dinar", "dinars", "dirham", "dirhams",
+]);
+
 /** Explicit non-money numeric fact. Bare JSON numbers are ambiguous. */
 export const quantitySchema = z.object({
   kind: z.literal("quantity"),
   value: z.number().finite(),
   unit: z.string().regex(/^[a-z][a-z0-9/_-]*$/),
 }).strict().refine(
-  ({ unit }) => currencyExponent(unit.toUpperCase()) === null,
+  ({ unit }) => unit.split(/[/_-]/).every((token) =>
+    currencyExponent(token.toUpperCase()) === null && !MONEY_UNIT_WORDS.has(token)),
   { message: "currency units require a canonical money object", path: ["unit"] },
 );
 
 function isMoneyFieldName(key) {
-  return MONEY_FIELD_NAMES.has(key);
+  if (MONEY_FIELD_NAMES.has(key)) return true;
+  const words = key.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase().split(/[^a-z0-9]+/);
+  return MONEY_FIELD_SUFFIXES.has(words.at(-1));
 }
 
 /**

@@ -14,6 +14,19 @@ import { sourceSnapshotSchema } from "./source-snapshot.js";
 import { capabilityVersionSchema } from "./capability.js";
 import { CONTRACT_VERSIONS } from "./versions.js";
 
+// Bounds are bare SemVer versions of the named capability, inclusive.
+const VERSION_RE = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
+const boundVersionSchema = z.string().regex(VERSION_RE);
+
+function compareVersions(left, right) {
+  const a = left.split(".").map(BigInt);
+  const b = right.split(".").map(BigInt);
+  for (let i = 0; i < 3; i++) {
+    if (a[i] !== b[i]) return a[i] < b[i] ? -1 : 1;
+  }
+  return 0;
+}
+
 /**
  * A delegation reference: what agent or capability is delegated, with
  * constraints and version requirements.
@@ -22,9 +35,25 @@ export const delegationReferenceSchema = z.object({
   delegateId: z.string().min(1),
   capability: capabilityVersionSchema,
   constraints: z.record(z.string(), z.json()).optional(),
-  minVersion: z.string().optional(),
-  maxVersion: z.string().optional(),
-}).strict();
+  minVersion: boundVersionSchema.optional(),
+  maxVersion: boundVersionSchema.optional(),
+}).strict().superRefine((delegation, ctx) => {
+  const capabilityVersion = delegation.capability.split("@").at(-1);
+  if (!VERSION_RE.test(capabilityVersion)) return;
+  if (delegation.minVersion && VERSION_RE.test(delegation.minVersion) &&
+      compareVersions(capabilityVersion, delegation.minVersion) < 0) {
+    ctx.addIssue({ code: "custom", path: ["minVersion"], message: "delegated capability is below minVersion" });
+  }
+  if (delegation.maxVersion && VERSION_RE.test(delegation.maxVersion) &&
+      compareVersions(capabilityVersion, delegation.maxVersion) > 0) {
+    ctx.addIssue({ code: "custom", path: ["maxVersion"], message: "delegated capability is above maxVersion" });
+  }
+  if (delegation.minVersion && delegation.maxVersion &&
+      VERSION_RE.test(delegation.minVersion) && VERSION_RE.test(delegation.maxVersion) &&
+      compareVersions(delegation.minVersion, delegation.maxVersion) > 0) {
+    ctx.addIssue({ code: "custom", path: ["maxVersion"], message: "maxVersion must not precede minVersion" });
+  }
+});
 
 /**
  * A task context pack: the minimal validated context for a parallel agent.

@@ -79,9 +79,9 @@ export const evidenceRecordSchema = z.object({
   expiresAt: z.string().datetime().optional(),
   /** Model confidence in the evidence interpretation */
   modelConfidence: z.enum(["high", "medium", "low", "unavailable"]).optional(),
-  /** Whether the evidence has been independently verified */
+  /** Sender's verification claim; parsing this boolean does not establish trust */
   independentlyVerified: z.boolean().optional(),
-  /** Verifier identity — who attested this evidence is not screenshot-inferred */
+  /** Claimed verifier identity; authenticate it through a trusted runtime source */
   verifiedBy: z.string().min(1).optional(),
 }).strict().superRefine((record, ctx) => {
   if (record.address.capturedAt && Date.parse(record.address.capturedAt) > Date.parse(record.collectedAt)) {
