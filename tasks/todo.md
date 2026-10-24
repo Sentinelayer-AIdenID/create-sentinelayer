@@ -38,6 +38,16 @@ The EW02 contract and EW04 intake tests pass 207/207; `npm run check` passes 417
 
 The staged local review scan covered all four changed files: P1 0, nonblocking P2 2 because `docs/spec.md` does not enumerate these ENGRAM paths, plus P3 new-file scope. No scanner finding attributes a credential or unsafe operation to this slice. The spec-scope warnings need a reviewer disposition or scoped spec update at publication. Exact-head Omar/Audit and hosted gates remain for the later PR after EW02 lands.
 
+## EW04 source-record race correction — 2026-10-24
+
+- [x] Add fail-first registry version/tenant/visibility and authorization-revocation tests against published `5be706dc`.
+- [x] Pin approved source metadata; recheck current registry, origin allowlist and policy before returning a snapshot.
+- [x] Run 9/9 focused tests, 268/268 related ENGRAM tests, `npm run check` (417 files), and `git diff --check`; commit a local direct child for independent review.
+
+### Review
+
+The two new cases failed 2/9 on the published parent and pass 9/9 after the correction. A registry change during `read` can no longer relabel or release captured bytes. This correction does not implement a network reader, DNS/redirect enforcement, extraction or persistence and does not complete EW04. No push or owner-branch change.
+
 ### Gate regression correction
 
 Same-environment A/B proved the Omar diff E2E failure was patch-triggered, not

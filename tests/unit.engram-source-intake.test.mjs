@@ -31,9 +31,9 @@ function fixture(overrides = {}) {
   };
 }
 
-async function rejectsCode(options, code) {
+async function rejectsCode(options, code, label) {
   await assert.rejects(captureSourceBytes(options), (error) =>
-    error instanceof SourceIntakeError && error.code === code && error.message === code);
+    error instanceof SourceIntakeError && error.code === code && error.message === code, label);
 }
 
 test("public owner source yields bounded bytes and exact EW02 SourceSnapshot", async () => {
@@ -151,4 +151,43 @@ test("reader exceptions, malformed UTF-8 and credential-like content never leak 
   const throwingMetadata = { status: 200, url, mediaType: "text/plain", body };
   Object.defineProperty(throwingMetadata, "contentLength", { get() { throw Error(`private: ${secret}`); } });
   await rejectsCode(fixture({ read: async () => throwingMetadata }), "source_rejected");
+});
+
+test("in-flight source changes cannot relabel captured bytes", async () => {
+  const cases = [
+    ["version", ({ record }) => { record.version = "git:replacement"; }],
+    ["source type", ({ record }) => { record.sourceType = "api"; }],
+    ["tenant", ({ record }) => { record.tenantScope = "tenant:other"; }],
+    ["visibility", ({ record }) => { record.visibility = "private"; }],
+    ["URL", ({ record }) => { record.url = "https://aidenid.com/other.txt"; }],
+    ["media type", ({ record }) => { record.mediaType = "text/html"; }, "source_rejected"],
+    ["registry replacement", ({ record, sources }) => {
+      sources.set(sourceId, { ...record, version: "git:replacement" });
+    }],
+    ["origin revocation", ({ allowedOrigins }) => { allowedOrigins.clear(); }],
+  ];
+  for (const [label, mutate, code = "source_not_approved"] of cases) {
+    const record = { ...source };
+    const sources = new Map([[sourceId, record]]);
+    const allowedOrigins = new Set(["https://aidenid.com"]);
+    await rejectsCode(fixture({
+      sources,
+      allowedOrigins,
+      read: async () => {
+        mutate({ record, sources, allowedOrigins });
+        return { status: 200, url, mediaType: record.mediaType, body };
+      },
+    }), code, label);
+  }
+});
+
+test("in-flight tenant policy revocation denies the captured source", async () => {
+  let permitted = true;
+  await rejectsCode(fixture({
+    authorize: async () => permitted,
+    read: async () => {
+      permitted = false;
+      return { status: 200, url, mediaType: "text/plain", body };
+    },
+  }), "source_access_denied");
 });

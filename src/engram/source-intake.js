@@ -52,6 +52,19 @@ function approvedUrl(raw, allowedOrigins) {
   return url.href;
 }
 
+function unchangedApprovedSource(current, approved, allowedOrigins) {
+  try {
+    return current?.tenantScope === approved.tenantScope &&
+      current.visibility === approved.visibility &&
+      current.version === approved.version &&
+      current.sourceType === approved.sourceType &&
+      current.mediaType === approved.mediaType &&
+      approvedUrl(current.url, allowedOrigins) === approved.url;
+  } catch {
+    return false;
+  }
+}
+
 async function boundedBytes(body, limit) {
   if (body instanceof Uint8Array) {
     if (body.byteLength > limit) reject("source_too_large");
@@ -71,7 +84,8 @@ async function boundedBytes(body, limit) {
 
 /**
  * Capture a registered source into an EW02 SourceSnapshot and bounded bytes.
- * `authorize` must consult the real tenant policy; `sources` and
+ * `authorize` must consult the real tenant policy and is called again before
+ * returning captured bytes; `sources` and
  * `allowedOrigins` must be maintained by the site owner, not by page content.
  * `read` receives only that registered URL and must not follow redirects. Its
  * result must report the final URL, status, media type and byte stream.
@@ -104,14 +118,27 @@ export async function captureSourceBytes({
   }
   if (permitted !== true) reject("source_access_denied");
 
-  const source = sources instanceof Map ? sources.get(sourceId) : undefined;
-  if (!source || source.tenantScope !== tenantScope || source.visibility !== "public") {
+  let approved;
+  try {
+    const source = sources instanceof Map ? sources.get(sourceId) : undefined;
+    approved = source && Object.freeze({
+      tenantScope: source.tenantScope,
+      visibility: source.visibility,
+      url: source.url,
+      version: source.version,
+      sourceType: source.sourceType,
+      mediaType: source.mediaType,
+    });
+  } catch {
     reject("source_not_approved");
   }
-  const url = approvedUrl(source.url, allowedOrigins);
-  if (typeof source.version !== "string" || !source.version ||
-      !["api", "ingest", "import"].includes(source.sourceType) ||
-      !TEXT_TYPES.has(source.mediaType) ||
+  if (!approved || approved.tenantScope !== tenantScope || approved.visibility !== "public") {
+    reject("source_not_approved");
+  }
+  const url = approvedUrl(approved.url, allowedOrigins);
+  if (typeof approved.version !== "string" || !approved.version ||
+      !["api", "ingest", "import"].includes(approved.sourceType) ||
+      !TEXT_TYPES.has(approved.mediaType) ||
       typeof read !== "function") reject("source_not_approved");
 
   let response;
@@ -126,7 +153,7 @@ export async function captureSourceBytes({
     if (
       response?.status !== 200 || response.url !== url ||
       typeof response.mediaType !== "string" ||
-      response.mediaType.split(";", 1)[0].trim().toLowerCase() !== source.mediaType.toLowerCase() ||
+      response.mediaType.split(";", 1)[0].trim().toLowerCase() !== approved.mediaType.toLowerCase() ||
       (declaredLength !== undefined &&
         (!Number.isSafeInteger(declaredLength) || declaredLength < 0 || declaredLength > maxBytes))
     ) reject("source_rejected");
@@ -158,15 +185,32 @@ export async function captureSourceBytes({
   try {
     snapshot = sourceSnapshotSchema.parse({
       sourceId,
-      sourceType: source.sourceType,
-      version: source.version,
+      sourceType: approved.sourceType,
+      version: approved.version,
       capturedAt: capturedAt(),
       tenantScope,
       contentHash: `sha256:${createHash("sha256").update(bytes).digest("hex")}`,
-      metadata: { origin: new URL(url).origin, mediaType: source.mediaType, byteLength: bytes.length },
+      metadata: { origin: new URL(url).origin, mediaType: approved.mediaType, byteLength: bytes.length },
     });
   } catch {
     reject("source_rejected");
   }
+
+  // A read may outlive owner policy or source-version changes. Never return
+  // bytes with a snapshot from a different approved record or revoked grant.
+  let stillPermitted = false;
+  try {
+    stillPermitted = await authorize({ tenantScope, sourceId });
+  } catch {
+    reject("source_access_denied");
+  }
+  if (stillPermitted !== true) reject("source_access_denied");
+  let current;
+  try {
+    current = sources.get(sourceId);
+  } catch {
+    reject("source_not_approved");
+  }
+  if (!unchangedApprovedSource(current, approved, allowedOrigins)) reject("source_not_approved");
   return { snapshot, bytes };
 }
