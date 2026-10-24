@@ -4156,3 +4156,18 @@ Review evidence:
 ### Review
 
 Local proof: PyYAML parsed all three jobs; contract and forbidden-surface self-tests passed; 14 focused tests passed; `npm run check` passed 405 files. The default workflow is currently disabled on GitHub, so this worktree did not trigger an Omar run. Independent warden review and hosted exact-head gate remain before merge.
+
+# 2026-10-24 - PR866 local Lighthouse fallback
+
+## Plan
+
+- [x] Replace the `npx lighthouse@12` fallback with the installed, pinned Lighthouse 13 CLI via the current Node executable.
+- [x] Update the invocation test to prove literal URL and credential handling, offline local execution, and graceful absence of the package.
+- [x] Run focused tests, repository checks, and review the diff before a local commit.
+
+## Review
+
+- Clean `npm ci`: 213 packages, zero vulnerabilities. The installed CLI reports 13.5.0.
+- Focused runtime-audit tests: 15/15 pass. `npm run check`: 405 files pass. Docs validation passes; `git diff --check` is clean.
+- Full `npm run verify` reaches an inherited E2E assertion at `tests/e2e.test.mjs:1379`: help text now names `Sentinelayer-AIdenID`, while the test expects `mrrCarter`. The same focused assertion fails on untouched PR866 head `48604c4`.
+- No paid model call or hosted gate run; branch awaits independent review.
