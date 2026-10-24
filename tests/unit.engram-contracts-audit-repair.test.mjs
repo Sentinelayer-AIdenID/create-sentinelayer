@@ -1,4 +1,4 @@
-import './setup-env.mjs';
+import "./setup-env.mjs";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
