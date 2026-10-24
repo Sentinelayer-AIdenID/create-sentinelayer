@@ -620,6 +620,13 @@ function ensureLocalSignedTag(tag, expectedTargetSha) {
   const resolveArgs = ["rev-parse", "--verify", "--end-of-options", `refs/tags/${tag}`];
   let tagObjectSha = tryRun("git", ["--no-replace-objects", ...resolveArgs])?.trim();
   if (!tagObjectSha) {
+    // Never create a tag on anything but the exact commit: `git tag -s` accepts a tree, blob or tag object, and a
+    // failed later check would leave a stray local tag that blocks every retry. Resolve with replacements disabled,
+    // peel to a commit, and require the full OID to be the input itself (no abbreviation, no peeled tag).
+    const resolved = tryRun("git", ["--no-replace-objects", "rev-parse", "--verify", "--end-of-options", `${expectedTargetSha}^{commit}`])?.trim();
+    if (resolved !== expectedTargetSha || rawGit(["cat-file", "-t", expectedTargetSha], { capture: true }).trim() !== "commit") {
+      throw new Error("Expected release target must be an existing commit object named by its full SHA; no tag was created.");
+    }
     rawGit(["tag", "-s", tag, expectedTargetSha, "-m", `sentinelayer-cli ${tag}`]);
     tagObjectSha = rawGit(resolveArgs, { capture: true }).trim();
   }

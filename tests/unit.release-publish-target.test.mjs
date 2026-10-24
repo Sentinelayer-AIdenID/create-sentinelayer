@@ -80,6 +80,14 @@ test("release helper refuses malformed captured target before creating a tag or 
   assert.equal(result.pushed, false);assert.ok(result.error);assert.equal(result.target, "");
 });
 
+test("release helper refuses a full-length non-commit target (a tree) before creating any tag", async () => {
+  const result = await runFixture("tree-expected");
+  assert.equal(result.pushed, false);
+  assert.ok(result.error, "a tree OID must be refused");
+  assert.equal(result.calls.some(c => c.command === "git" && c.args.includes("tag") && c.args.includes("-s")), false, "no tag may be created");
+  assert.equal(result.calls.some(c => c.command === "gh" && c.args[0] === "release"), false);
+});
+
 test("release helper still refuses missing captured target, unsigned tags and lightweight tags before push", async () => {
   for (const mode of ["missing-expected", "unsigned-existing", "lightweight-existing"]) {
     const result = await runFixture(mode);

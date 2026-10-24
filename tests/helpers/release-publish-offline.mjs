@@ -29,6 +29,7 @@ cp.spawnSync = (command, args, options) => {
     }
     if (mode === "malformed-expected" && args[0] === "rev-parse" && ["HEAD", "origin/main"].includes(args[1])) return result("not-a-sha\n");
     if (mode === "missing-expected" && args[0] === "rev-parse" && ["HEAD", "origin/main"].includes(args[1])) return result("\n");
+    if (mode === "tree-expected" && args[0] === "rev-parse" && ["HEAD", "origin/main"].includes(args[1])) return result(`${git(["rev-parse", `${expected}^{tree}`])}\n`);
     const allowed = new Set(["status", "rev-parse", "cat-file", "config", "tag", "verify-tag"]);
     if (!allowed.has(args[0])) throw new Error("Unexpected Git command refused");
     if (options.cwd !== root) throw new Error("Unexpected Git worktree refused");
@@ -41,7 +42,7 @@ cp.spawnSync = (command, args, options) => {
     if (endpoint === "users/fixture-actor/ssh_signing_keys") return result(JSON.stringify([publicKey]));
     if (endpoint.startsWith("repos/fixture/repository/actions/workflows/release-please.yml/runs?")) {
       if (mode === "moving-head") git(["update-ref", "HEAD", previous]);
-      return result(JSON.stringify({ workflow_runs: [{ id: 1, run_number: 1, run_attempt: 1, conclusion: "success", event: "push", head_branch: "main", head_sha: mode === "malformed-expected" ? "not-a-sha" : expected, path: ".github/workflows/release-please.yml", name: "Release Please", actor: { login: "fixture-actor" } }] }));
+      return result(JSON.stringify({ workflow_runs: [{ id: 1, run_number: 1, run_attempt: 1, conclusion: "success", event: "push", head_branch: "main", head_sha: mode === "malformed-expected" ? "not-a-sha" : mode === "tree-expected" ? git(["rev-parse", `${expected}^{tree}`]) : expected, path: ".github/workflows/release-please.yml", name: "Release Please", actor: { login: "fixture-actor" } }] }));
     }
     if (endpoint === "repos/fixture/repository/git/ref/tags/v1.0.0") {
       return pushed ? result(JSON.stringify({ object: { type: "tag", sha: pushedObject } })) : result("", 1);
