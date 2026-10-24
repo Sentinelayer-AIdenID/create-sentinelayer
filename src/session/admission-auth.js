@@ -125,7 +125,8 @@ export function assertUnambiguousIdentityOptions(args = []) {
 //   target  -- a human acts ON that agent (stop its listener, kill or unregister
 //              it): it stays on the human's own credential, so an owner can always
 //              recover from a misbehaving or expired agent
-//   control -- join: the human's control plane; it scopes its own post-claim steps
+//   control -- a human control-plane action, not performed on an agent's credential
+//   self-provisioning -- join/leave on the caller's own identity through the MCP bridge
 // A `session` subcommand missing from this table fails CLOSED when an admission
 // is stored for its (session, agent): new commands must be classified.
 export const SESSION_AGENT_PRINCIPAL = Object.freeze({
@@ -167,9 +168,9 @@ export const SESSION_AGENT_PRINCIPAL = Object.freeze({
   "access revoke": "control",
   kill: "target",
   "stop-listener": "target",
-  leave: "target",
+  leave: "self-provisioning",
   "guard-uninstall": "target",
-  join: "control",
+  join: "self-provisioning",
 });
 const SESSION_COMMAND_GROUPS = new Set(["access", "checkpoint", "ticket"]);
 
@@ -219,6 +220,7 @@ export async function resolveAgentAdmissionTarget(args = [], { env = process.env
   }
   const principal = SESSION_AGENT_PRINCIPAL[command];
   if (principal === "target" || principal === "control") return null;
+  if (principal === "self-provisioning") return null;
   const flagAgent = optionValue(args, "--agent");
   // A subcommand outside the table that names NO agent is a human command (archive,
   // members, ...): it is not agent-attributed, whatever SENTINELAYER_AGENT_ID says.
@@ -270,6 +272,8 @@ function parsedSessionAction(actionCommand) {
 // admission), by the command's class in SESSION_ROUTE_CLASSES:
 //   - exempt-local: runs as before
 //   - owner: refused
+//   - self-provisioning join/leave: require the trusted bridge agent id and an explicit
+//     matching target before any command action (including cancellation) can run;
 //   - a session the command will use (its --session or --id value, given or defaulted, or any
 //     operand) stores an admission, in any state: the action must be running in that
 //     session's admission scope, or it is refused before it runs
@@ -277,17 +281,38 @@ function parsedSessionAction(actionCommand) {
 //     unclassified commands are refused
 async function assertBridgedRoute(action, { env, homeDir }) {
   if (env.SENTINELAYER_MCP_BRIDGE !== "1") return;
-  const agentContext =
-    Boolean(String(env.SENTINELAYER_AGENT_ID || "").trim()) || (await hasStoredAdmissionCredentials({ homeDir }));
-  if (!agentContext) return;
   const routeClass = sessionRouteClass(action.route);
   const refuse = (why) => {
+    const context = routeClass === "self-provisioning"
+      ? "may act only as the bridge caller: "
+      : "runs for an agent here and needs an admission it can bind to: ";
     throw new AdmissionCredentialRefused(
-      `\`sl ${action.route.slice("cli:".length)}\` runs for an agent here and needs an admission it can bind to: ` +
+      `\`sl ${action.route.slice("cli:".length)}\` ${context}` +
         `${why}. It will not fall back to other credentials.`,
       { reason: "bridged_route_refused" },
     );
   };
+  if (routeClass === "self-provisioning") {
+    // These routes run before an admission exists, so their only local caller binding is
+    // the trusted agent id supplied by the MCP host. The target must be explicit:
+    // `leave` otherwise defaults to cli-user, and `join --cancel-admission` can mutate
+    // another agent's pending request under the host's account credential.
+    const caller = String(env.SENTINELAYER_AGENT_ID || "").trim();
+    const target = action.route === "cli:session join"
+      ? action.given("agent") || action.given("name")
+      : action.given("agent");
+    if (!caller) refuse("no trusted caller agent id is set");
+    if (!target) refuse("an explicit --agent is required (or --name for join)");
+    assertCanonicalAgentId(caller, "SENTINELAYER_AGENT_ID");
+    assertCanonicalAgentId(target, "self-provisioning target");
+    if (canonicalAgentId(caller) !== canonicalAgentId(target)) {
+      refuse(`agent "${target}" differs from caller "${caller}"`);
+    }
+    return;
+  }
+  const agentContext =
+    Boolean(String(env.SENTINELAYER_AGENT_ID || "").trim()) || (await hasStoredAdmissionCredentials({ homeDir }));
+  if (!agentContext) return;
   if (routeClass === "exempt-local") return;
   if (routeClass === "owner") refuse("owner actions are not available to agents");
   const named = [action.opts.session, action.opts.id, ...action.operands]

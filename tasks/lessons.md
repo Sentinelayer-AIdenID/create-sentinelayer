@@ -1,5 +1,9 @@
 # Lessons
 
+## 2026-10-24
+
+- A route allow-list proves only that a command name is admitted. For self-provisioning commands that accept an agent target, bind the parsed target to a trusted bridge caller before dispatch, and test the real action with different caller and target identities. A label-only test cannot prove a leave is self-only or a pending cancellation cannot cross agents.
+
 ## 2026-09-28
 
 - A broad-suite failure after a patch is not a baseline issue without a same-environment A/B proof. Faster optional work can expose concurrency bugs: creation must share the stream writer's lock, re-read under that lock, and preserve an already-created room rather than resetting metadata.
@@ -358,6 +362,35 @@
   proof-of-possession claim -> AIdenID email/purpose job -> live session-bound
   receipt. Owner controls must remain on the human credential; admitted agent
   work must remain on the scoped credential and never fall back to the human.
+
+# 2026-10-24 - Field names do not determine whether typed metadata is money
+
+- Pattern: treating every typed quantity under a monetary prefix as an amount
+  rejected valid `refundWindow` days, `paymentTerms` days, and `costCenter`
+  counts. String metadata tests alone did not expose the rule.
+- Rule: test each semantic metadata exception with strings, supported typed
+  units, and bare numbers on both assertion and entity paths. Reserve monetary
+  enforcement for amount-bearing names such as `priceNumber` and explicit
+  compact aliases; keep nested facts and untyped numbers under validation.
+
+# 2026-10-24 - CLI route permission is not MCP tool availability
+
+- Pattern: classifying join/leave as self-provisioning at the CLI guard did not make
+  the generated MCP tools usable; the stock dispatcher hid every approval-gated
+  CLI tool and its handler independently refused calls.
+- Rule: when promising a bridged capability, test `tools/list` and `tools/call`
+  through the stock runtime. A narrow exception must validate the trusted caller
+  and each call's exact arguments at both gates, while leaving the generic CLI
+  human-approval policy fail-closed.
+
+# 2026-10-24 - Caller binding includes identity-bearing metadata
+
+- Pattern: checking `agent` against the trusted caller still allowed `name` to
+  become an unrelated display identity, and an unvalidated `role` could exceed
+  the documented agent roles.
+- Rule: for privileged bridge exceptions, trace every accepted argument to its
+  downstream meaning. Reject a second identity-bearing label and restrict role
+  metadata before either the dispatcher or handler can launch the CLI.
 
 # 2026-10-21 - Serialize complete credential-store operations
 

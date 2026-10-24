@@ -494,22 +494,63 @@ export async function withAdmissionCredentialLock(filePath, run, { timeoutMs = 1
   }
 }
 
-async function recoverAndStore(auth, sid, agent, admissionId, key, fingerprint, deps, homeDir, now, rejectedToken = null) {
+// Persist noAutoGrant on a cached credential when the caller requests it.
+// Never downgrade: noAutoGrant=false on an already-true credential is a no-op.
+async function persistNoAutoGrantIfNeeded(credential, noAutoGrant, sid, agent, homeDir) {
+  if (noAutoGrant && !credential.noAutoGrant) {
+    const updated = { ...credential, noAutoGrant: true };
+    await writeSecretFile(admissionCredentialPath(sid, agent, { homeDir }), updated);
+    return updated;
+  }
+  return credential;
+}
+
+async function recoverAndStore(auth, sid, agent, admissionId, key, fingerprint, deps, homeDir, now, rejectedToken = null, noAutoGrant = false, statePath = null) {
   return withAdmissionCredentialLock(admissionCredentialPath(sid, agent, { homeDir }), async () => {
+    const effectiveNoAutoGrant = noAutoGrant || await pendingNoAutoGrantAtPath(statePath, admissionId, fingerprint);
     // Another process may have completed recovery while this process waited.
     const current = await readAdmissionCredentialState(sid, agent, { homeDir, now: now() });
     if (current.state === "live" && current.credential.admissionId === admissionId &&
         current.credential.requestFingerprint === fingerprint && current.credential.publicKey === key.publicKey &&
         current.credential.apiUrl === auth.apiUrl && current.credential.token !== rejectedToken) {
-      return redacted({ status: "active", reused: true, stored: current.credential, sid, agent, homeDir });
+      const updated = await persistNoAutoGrantIfNeeded(current.credential, effectiveNoAutoGrant, sid, agent, homeDir);
+      return redacted({ status: "active", reused: true, stored: updated, sid, agent, homeDir });
     }
     const claimed = await recoverCredential(auth, sid, agent, admissionId, key, deps, now);
-    const stored = await storeClaimedCredential(claimed, { auth, sid, agent, key, fingerprint, homeDir, now });
+    const stored = await storeClaimedCredential(claimed, { auth, sid, agent, key, fingerprint, homeDir, now, noAutoGrant: effectiveNoAutoGrant });
     return { ...redacted({ status: "active", reused: true, stored, claimed, sid, agent, homeDir }), recovered: true };
   });
 }
 
-async function storeClaimedCredential(claimed, { auth, sid, agent, key, fingerprint, homeDir, now }) {
+async function pendingNoAutoGrantAtPath(statePath, admissionId, fingerprint) {
+  if (!statePath) return false;
+  const state = await readJsonFile(statePath);
+  return state?.admissionId === admissionId && state.requestFingerprint === fingerprint && state.noAutoGrant === true;
+}
+
+// Pending writers share the credential lock with claim/recovery. Merge the
+// opt-out monotonically so a waiter holding an older snapshot cannot erase it.
+async function writePendingAdmissionState(statePath, state, sid, agent, homeDir, now) {
+  return withAdmissionCredentialLock(admissionCredentialPath(sid, agent, { homeDir }), async () => {
+    const latest = await readJsonFile(statePath);
+    const sameRequest = latest?.admissionId === state.admissionId &&
+      latest.requestFingerprint === state.requestFingerprint;
+    state.noAutoGrant = state.noAutoGrant === true || (sameRequest && latest.noAutoGrant === true);
+    const current = await readAdmissionCredentialState(sid, agent, { homeDir, now: now() });
+    if (current.state === "live" && current.credential.admissionId === state.admissionId &&
+        current.credential.requestFingerprint === state.requestFingerprint &&
+        current.credential.publicKey === state.publicKey && current.credential.apiUrl === state.apiUrl) {
+      const stored = await persistNoAutoGrantIfNeeded(current.credential, state.noAutoGrant, sid, agent, homeDir);
+      if (sameRequest) await fsp.rm(statePath, { force: true });
+      return stored;
+    }
+    await fsp.mkdir(path.dirname(statePath), { recursive: true });
+    await fsp.writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`);
+    return null;
+  });
+}
+
+async function storeClaimedCredential(claimed, { auth, sid, agent, key, fingerprint, homeDir, now, noAutoGrant = false }) {
   if (!String(claimed?.credential?.token || "").startsWith("sladm_")) {
     throw new Error("Admission did not return a scoped agent credential.");
   }
@@ -538,6 +579,11 @@ async function storeClaimedCredential(claimed, { auth, sid, agent, key, fingerpr
     grant,
     correlation: claimed.correlation,
     storedAt: new Date(now()).toISOString(),
+    // Preserve an existing noAutoGrant opt-out: recovery/replacement without
+    // the flag must not clear a previously persisted refusal. Only an explicit
+    // `noAutoGrant: true` overrides (never downgrades).
+    // Preserve existing opt-out regardless of credential state (live, expired, revoked).
+    noAutoGrant: noAutoGrant || (previous.credential?.noAutoGrant === true),
   };
   await writeSecretFile(admissionCredentialPath(sid, agent, { homeDir }), stored);
   return stored;
@@ -579,6 +625,7 @@ export async function runAdmissionJoin(
     wait = true,
     recoverActive = false,
     waitTimeoutMs = 15 * 60_000,
+    noAutoGrant = false,
     targetPath = process.cwd(),
     homeDir,
     origin = SESSION_MUTATION_ORIGIN,
@@ -624,7 +671,26 @@ export async function runAdmissionJoin(
   // which answers with the existing grant (same purpose) or a conflict (new one).
   const held = await readAdmissionCredentialState(sid, agent, { homeDir, now: now() });
   if (!recoverActive && held.state === "live" && held.credential.requestFingerprint === fingerprint) {
-    return redacted({ status: "active", reused: true, stored: held.credential, sid, agent, homeDir });
+    const fastPathCredential = await withAdmissionCredentialLock(
+      admissionCredentialPath(sid, agent, { homeDir }),
+      async () => {
+        // Reread under lock: a concurrent recovery may have rotated the token.
+        const current = await readAdmissionCredentialState(sid, agent, { homeDir, now: now() });
+        if (current.state === "live" && current.credential.requestFingerprint === fingerprint) {
+          const cred = await persistNoAutoGrantIfNeeded(current.credential, noAutoGrant, sid, agent, homeDir);
+          return cred;
+        }
+        // Credential changed under us; re-read one final time under the
+        // held lock. If another writer replaced the credential, fail rather
+        // than returning a stale snapshot.
+        const retry = await readAdmissionCredentialState(sid, agent, { homeDir, now: now() });
+        if (retry.state === "live" && retry.credential.requestFingerprint === fingerprint) {
+          const cred = await persistNoAutoGrantIfNeeded(retry.credential, noAutoGrant, sid, agent, homeDir);
+          return cred;
+        }
+        throw new Error("Admission credential changed during join; retry the join.");
+      });
+    return redacted({ status: "active", reused: true, stored: fastPathCredential, sid, agent, homeDir });
   }
   if (recoverActive && held.credential?.admissionId) {
     if (held.credential.requestFingerprint !== fingerprint || held.credential.publicKey !== key.publicKey ||
@@ -634,7 +700,7 @@ export async function runAdmissionJoin(
     // Go directly to recovery, never file a new request after a refused cached
     // bearer. A revoked/expired grant must be refused, not reopened as pending.
     return recoverAndStore(auth, sid, agent, held.credential.admissionId, key, fingerprint, deps, homeDir, now,
-      held.credential.token);
+      held.credential.token, noAutoGrant);
   }
 
   const statePath = admissionStatePath(targetPath, sid, agent);
@@ -647,6 +713,14 @@ export async function runAdmissionJoin(
     );
   }
   const resumable = inFlight && state.publicKey === key.publicKey;
+  // An opt-out made while approval is pending must survive a later invocation
+  // that resumes the same request without repeating the flag.
+  const pendingNoAutoGrant = Boolean(noAutoGrant || (resumable && state.noAutoGrant === true));
+  if (resumable && pendingNoAutoGrant && state.noAutoGrant !== true) {
+    state.noAutoGrant = true;
+    const stored = await writePendingAdmissionState(statePath, state, sid, agent, homeDir, now);
+    if (stored) return redacted({ status: "active", reused: true, stored, sid, agent, homeDir });
+  }
 
   if (!resumable) {
     const created = await mutate(
@@ -675,11 +749,28 @@ export async function runAdmissionJoin(
       held.credential.admissionId === created.admissionId
     ) {
       // The server judged this request covered by the grant we already hold.
-      return redacted({ status: "active", reused: true, stored: held.credential, sid, agent, homeDir });
+      // Lock and reread: a concurrent recovery may have rotated the token.
+      const fastPathCredential = await withAdmissionCredentialLock(
+        admissionCredentialPath(sid, agent, { homeDir }),
+        async () => {
+          const current = await readAdmissionCredentialState(sid, agent, { homeDir, now: now() });
+          if (current.state === "live" && current.credential?.admissionId === created.admissionId) {
+            return persistNoAutoGrantIfNeeded(current.credential, noAutoGrant, sid, agent, homeDir);
+          }
+          // Credential changed under us; re-read one final time under
+          // the held lock. If another writer replaced the credential, fail
+          // rather than writing a stale snapshot.
+          const retry = await readAdmissionCredentialState(sid, agent, { homeDir, now: now() });
+          if (retry.state === "live" && retry.credential?.admissionId === created.admissionId) {
+            return persistNoAutoGrantIfNeeded(retry.credential, noAutoGrant, sid, agent, homeDir);
+          }
+          throw new Error("Admission credential changed during join; retry the join.");
+        });
+    return redacted({ status: "active", reused: true, stored: fastPathCredential, sid, agent, homeDir });
     }
     if (created?.status === "active" && created?.reused) {
       const recovered = await recoverAndStore(auth, sid, agent, created.admissionId, key, fingerprint, deps, homeDir, now,
-        recoverActive && held.state === "live" ? held.credential.token : null);
+        recoverActive && held.state === "live" ? held.credential.token : null, pendingNoAutoGrant, statePath);
       await fsp.rm(statePath, { force: true });
       return recovered;
     }
@@ -693,9 +784,10 @@ export async function runAdmissionJoin(
       approveUrl: created.approveUrl || null,
       pendingExpiresAt: created.pendingExpiresAt || null,
       requestedAt: new Date(now()).toISOString(),
+      noAutoGrant: pendingNoAutoGrant,
     };
-    await fsp.mkdir(path.dirname(statePath), { recursive: true });
-    await fsp.writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`);
+    const stored = await writePendingAdmissionState(statePath, state, sid, agent, homeDir, now);
+    if (stored) return redacted({ status: "active", reused: true, stored, sid, agent, homeDir });
   }
 
   if (!wait) {
@@ -737,7 +829,8 @@ export async function runAdmissionJoin(
       identity: polled.identity || null,
     });
     if (now() >= deadline) {
-      await fsp.writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`);
+      const stored = await writePendingAdmissionState(statePath, state, sid, agent, homeDir, now);
+      if (stored) return redacted({ status: "active", reused: true, stored, sid, agent, homeDir });
       return {
         status: polled.status === "approved" ? "approved" : "pending",
         phase,
@@ -759,7 +852,7 @@ export async function runAdmissionJoin(
   }
   if (polled.status === "active") {
     const recovered = await recoverAndStore(auth, sid, agent, state.admissionId, key, fingerprint, deps, homeDir, now,
-      recoverActive && held.state === "live" ? held.credential.token : null);
+      recoverActive && held.state === "live" ? held.credential.token : null, pendingNoAutoGrant, statePath);
     await fsp.rm(statePath, { force: true });
     return recovered;
   }
@@ -768,11 +861,13 @@ export async function runAdmissionJoin(
   // cover it through publication, or a delayed first claim could overwrite a
   // recovered replacement. Refresh the nonce only after obtaining this lock.
   const result = await withAdmissionCredentialLock(admissionCredentialPath(sid, agent, { homeDir }), async () => {
+    const claimNoAutoGrant = pendingNoAutoGrant || await pendingNoAutoGrantAtPath(statePath, state.admissionId, fingerprint);
     const current = await readAdmissionCredentialState(sid, agent, { homeDir, now: now() });
     if (current.state === "live" && current.credential.admissionId === state.admissionId &&
         current.credential.requestFingerprint === fingerprint && current.credential.publicKey === key.publicKey &&
         current.credential.apiUrl === auth.apiUrl) {
-      return redacted({ status: "active", reused: true, stored: current.credential, sid, agent, homeDir });
+      const stored = await persistNoAutoGrantIfNeeded(current.credential, claimNoAutoGrant, sid, agent, homeDir);
+      return redacted({ status: "active", reused: true, stored, sid, agent, homeDir });
     }
     const fresh = await checkedTransport(requestRead)(admissionMemberUrl(auth.apiUrl, sid, state.admissionId), {
       method: "GET", credential: auth.credential,
@@ -782,7 +877,7 @@ export async function runAdmissionJoin(
     }
     if (fresh.status === "active") {
       const recovered = await recoverCredential(auth, sid, agent, state.admissionId, key, deps, now);
-      const stored = await storeClaimedCredential(recovered, { auth, sid, agent, key, fingerprint, homeDir, now });
+      const stored = await storeClaimedCredential(recovered, { auth, sid, agent, key, fingerprint, homeDir, now, noAutoGrant: claimNoAutoGrant });
       return { ...redacted({ status: "active", reused: true, stored, claimed: recovered, sid, agent, homeDir }), recovered: true };
     }
     const fields = fresh?.claim?.preimage;
@@ -800,7 +895,7 @@ export async function runAdmissionJoin(
       { nonce: fields.nonce, signature: signature.toString("base64url") },
       { ...deps, operationName: "session.admission_claim" }
     );
-    const stored = await storeClaimedCredential(claimed, { auth, sid, agent, key, fingerprint, homeDir, now });
+    const stored = await storeClaimedCredential(claimed, { auth, sid, agent, key, fingerprint, homeDir, now, noAutoGrant: claimNoAutoGrant });
     return redacted({ status: "active", reused: false, stored, claimed, sid, agent, homeDir });
   });
   await fsp.rm(statePath, { force: true });
