@@ -399,6 +399,59 @@ test("--no-wait returns pending with the approve URL immediately", async () => {
   assert.equal(api.calls.filter((c) => c.method === "GET").length, 0);
 });
 
+test("a pending noAutoGrant request keeps its opt-out when resumed without the flag", async () => {
+  const dirs = await scratch();
+  const api = fakeApi({ onPoll: (adm) => { adm.status = "approved"; } });
+  const pending = await runAdmissionJoin(SID, base(api, dirs, { noAutoGrant: true, wait: false }));
+  assert.equal(pending.status, "pending");
+  assert.equal((await readAdmissionCredentialState(SID, "builder-1", dirs)).state, "none");
+
+  const resumed = await runAdmissionJoin(SID, base(api, dirs));
+  assert.equal(resumed.status, "active");
+  assert.equal(api.calls.filter((call) => call.method === "POST" && call.url.endsWith("/admissions")).length, 1);
+  const stored = await readAdmissionCredentialState(SID, "builder-1", dirs);
+  assert.equal(stored.state, "live");
+  assert.equal(stored.credential.noAutoGrant, true);
+});
+
+test("an opt-out added while pending survives another resume without the flag", async () => {
+  const dirs = await scratch();
+  const api = fakeApi({ onPoll: (adm) => { adm.status = "approved"; } });
+  await runAdmissionJoin(SID, base(api, dirs, { wait: false }));
+  const stillPending = await runAdmissionJoin(SID, base(api, dirs, { noAutoGrant: true, wait: false }));
+  assert.equal(stillPending.status, "pending");
+
+  const resumed = await runAdmissionJoin(SID, base(api, dirs));
+  assert.equal(resumed.status, "active");
+  const stored = await readAdmissionCredentialState(SID, "builder-1", dirs);
+  assert.equal(stored.credential.noAutoGrant, true);
+});
+
+test("a concurrent first claim applies the later caller's noAutoGrant opt-out", async () => {
+  const dirs = await scratch();
+  const api = fakeApi({ onPoll: (adm) => { if (adm.status === "pending") adm.status = "approved"; } });
+  await runAdmissionJoin(SID, base(api, dirs, { wait: false }));
+
+  let otherClaimed = false;
+  const requestRead = async (...args) => {
+    const approved = await api.requestRead(...args);
+    if (!otherClaimed) {
+      otherClaimed = true;
+      const first = await runAdmissionJoin(SID, base(api, dirs));
+      assert.equal(first.status, "active");
+    }
+    // The opted-out caller received approval before the other claim completed.
+    return approved;
+  };
+  const second = await runAdmissionJoin(SID, base(api, dirs, { noAutoGrant: true, requestRead }));
+  assert.equal(otherClaimed, true);
+  assert.equal(second.status, "active");
+  assert.equal(second.reused, true);
+  assert.equal(api.calls.filter((call) => call.url.endsWith("/claim")).length, 1);
+  const stored = await readAdmissionCredentialState(SID, "builder-1", dirs);
+  assert.equal(stored.credential.noAutoGrant, true);
+});
+
 test("a re-run resumes the same request instead of filing a new one", async () => {
   const dirs = await scratch();
   const api = fakeApi();

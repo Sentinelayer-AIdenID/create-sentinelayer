@@ -684,6 +684,13 @@ export async function runAdmissionJoin(
     );
   }
   const resumable = inFlight && state.publicKey === key.publicKey;
+  // An opt-out made while approval is pending must survive a later invocation
+  // that resumes the same request without repeating the flag.
+  const pendingNoAutoGrant = Boolean(noAutoGrant || (resumable && state.noAutoGrant === true));
+  if (resumable && pendingNoAutoGrant && state.noAutoGrant !== true) {
+    state.noAutoGrant = true;
+    await fsp.writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`);
+  }
 
   if (!resumable) {
     const created = await mutate(
@@ -733,7 +740,7 @@ export async function runAdmissionJoin(
     }
     if (created?.status === "active" && created?.reused) {
       const recovered = await recoverAndStore(auth, sid, agent, created.admissionId, key, fingerprint, deps, homeDir, now,
-        recoverActive && held.state === "live" ? held.credential.token : null, noAutoGrant);
+        recoverActive && held.state === "live" ? held.credential.token : null, pendingNoAutoGrant);
       await fsp.rm(statePath, { force: true });
       return recovered;
     }
@@ -747,6 +754,7 @@ export async function runAdmissionJoin(
       approveUrl: created.approveUrl || null,
       pendingExpiresAt: created.pendingExpiresAt || null,
       requestedAt: new Date(now()).toISOString(),
+      noAutoGrant: pendingNoAutoGrant,
     };
     await fsp.mkdir(path.dirname(statePath), { recursive: true });
     await fsp.writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`);
@@ -813,7 +821,7 @@ export async function runAdmissionJoin(
   }
   if (polled.status === "active") {
     const recovered = await recoverAndStore(auth, sid, agent, state.admissionId, key, fingerprint, deps, homeDir, now,
-      recoverActive && held.state === "live" ? held.credential.token : null, noAutoGrant);
+      recoverActive && held.state === "live" ? held.credential.token : null, pendingNoAutoGrant);
     await fsp.rm(statePath, { force: true });
     return recovered;
   }
@@ -826,7 +834,8 @@ export async function runAdmissionJoin(
     if (current.state === "live" && current.credential.admissionId === state.admissionId &&
         current.credential.requestFingerprint === fingerprint && current.credential.publicKey === key.publicKey &&
         current.credential.apiUrl === auth.apiUrl) {
-      return redacted({ status: "active", reused: true, stored: current.credential, sid, agent, homeDir });
+      const stored = await persistNoAutoGrantIfNeeded(current.credential, pendingNoAutoGrant, sid, agent, homeDir);
+      return redacted({ status: "active", reused: true, stored, sid, agent, homeDir });
     }
     const fresh = await checkedTransport(requestRead)(admissionMemberUrl(auth.apiUrl, sid, state.admissionId), {
       method: "GET", credential: auth.credential,
@@ -836,7 +845,7 @@ export async function runAdmissionJoin(
     }
     if (fresh.status === "active") {
       const recovered = await recoverCredential(auth, sid, agent, state.admissionId, key, deps, now);
-      const stored = await storeClaimedCredential(recovered, { auth, sid, agent, key, fingerprint, homeDir, now, noAutoGrant });
+      const stored = await storeClaimedCredential(recovered, { auth, sid, agent, key, fingerprint, homeDir, now, noAutoGrant: pendingNoAutoGrant });
       return { ...redacted({ status: "active", reused: true, stored, claimed: recovered, sid, agent, homeDir }), recovered: true };
     }
     const fields = fresh?.claim?.preimage;
@@ -854,7 +863,7 @@ export async function runAdmissionJoin(
       { nonce: fields.nonce, signature: signature.toString("base64url") },
       { ...deps, operationName: "session.admission_claim" }
     );
-    const stored = await storeClaimedCredential(claimed, { auth, sid, agent, key, fingerprint, homeDir, now, noAutoGrant });
+    const stored = await storeClaimedCredential(claimed, { auth, sid, agent, key, fingerprint, homeDir, now, noAutoGrant: pendingNoAutoGrant });
     return redacted({ status: "active", reused: false, stored, claimed, sid, agent, homeDir });
   });
   await fsp.rm(statePath, { force: true });
