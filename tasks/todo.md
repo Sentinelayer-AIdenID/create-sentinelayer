@@ -4145,3 +4145,34 @@ Review evidence:
 - [x] Focused proof: 81/81 deterministic tests; exact old runtime fails all 16 selected refusal controls; syntax 405/405; Git diff check clean. No network/provider/real-key reads.
 - [ ] Independent/root review of the frozen correction overlay before commit/push.
 - [ ] Final ship requirements: npm run verify; required Omar/audit and hosted gates under root custody. No live TypeSafe activation or spending in correction preparation.
+
+# 2026-10-24 — EW11 isolated identity/delegation prep (`prep/ew11-identity-20261024`)
+
+## Plan
+
+- [x] Read authenticated EW11 ticket 6801b326 and verify no dispatched EW11 owner or PR overlaps this prep.
+- [x] Base a new worktree on EW02 PR862 commit bd7f1910c51ff309652d00e206e8c89b0c9cce7e and inspect AIdenID identity/delegation seams.
+- [x] Add a bounded verifier that accepts only trusted server-verified credential claims and server-loaded delegation records, checks issuer/audience/tenant/action/resource/time/revocation and prevents child scope/TTL expansion.
+- [x] Keep missing credentials anonymous for public-read policy; never authorize a protected operation from a claimed name, behavior signal, or pack reference.
+- [x] Add fail-first permitted/denied tests and verify no raw credentials or secrets appear in results.
+- [x] Run focused tests, repository check and proportional verification; commit locally and report unmet full-ticket requirements. Do not publish a PR until EW02 merges and warden reviews.
+
+## Review
+
+EW11 ticket 6801b326-7089-4bc5-a6b5-a730571fa581 remains an unaccepted original ticket.
+This branch is a read-only scope verifier seam, not live AIdenID integration or
+endpoint authorization. Its trusted adapters are not yet wired to AIdenID's
+credential verifier, grant store, and revocation service. Publisher-manifest
+trust, transaction consent/confirmation, atomic spending, policy enforcement,
+real server receipts, and independent security review remain for the owner.
+
+Evidence: fail-first missing-module test, then 9/9 focused tests; `npm run check`
+417 files and `docs:build` pass; `npm pack --dry-run` includes principal.js.
+`npm run verify` stopped after E2E 134/136: the unchanged bd7f191 base reproduces
+both failures (hard-coded CLI help URL and legacy Senti grant-presence fixture
+503). Separate coverage ran 2,724 tests, 2,719 passed, 2 failed, 3 skipped:
+Windows EBUSY temp cleanup and the EW02 inherited quote-style safety check.
+The EW02 owner fixed the latter in direct child 959c2d7; this prep intentionally
+stays based on requested bd7f191 until the foundation merges. The room
+orchestrator minted an external EW11 owner while this local prep was underway;
+handoff this commit rather than publish a competing PR.

@@ -30,6 +30,7 @@ export { createMemoryTools } from "./tools.js";
 export { runEngramSla } from "./sla.js";
 export * from "./contracts/index.js";
 export { ingestDocumentIntoNamespace } from "./ingest-document.js";
+export { createDelegatedPrincipalVerifier } from "./principal.js";
 
 import { createStore } from "./store.js";
 import { createLocalConsent } from "./namespace.js";
