@@ -505,19 +505,48 @@ async function persistNoAutoGrantIfNeeded(credential, noAutoGrant, sid, agent, h
   return credential;
 }
 
-async function recoverAndStore(auth, sid, agent, admissionId, key, fingerprint, deps, homeDir, now, rejectedToken = null, noAutoGrant = false) {
+async function recoverAndStore(auth, sid, agent, admissionId, key, fingerprint, deps, homeDir, now, rejectedToken = null, noAutoGrant = false, statePath = null) {
   return withAdmissionCredentialLock(admissionCredentialPath(sid, agent, { homeDir }), async () => {
+    const effectiveNoAutoGrant = noAutoGrant || await pendingNoAutoGrantAtPath(statePath, admissionId, fingerprint);
     // Another process may have completed recovery while this process waited.
     const current = await readAdmissionCredentialState(sid, agent, { homeDir, now: now() });
     if (current.state === "live" && current.credential.admissionId === admissionId &&
         current.credential.requestFingerprint === fingerprint && current.credential.publicKey === key.publicKey &&
         current.credential.apiUrl === auth.apiUrl && current.credential.token !== rejectedToken) {
-      const updated = await persistNoAutoGrantIfNeeded(current.credential, noAutoGrant, sid, agent, homeDir);
+      const updated = await persistNoAutoGrantIfNeeded(current.credential, effectiveNoAutoGrant, sid, agent, homeDir);
       return redacted({ status: "active", reused: true, stored: updated, sid, agent, homeDir });
     }
     const claimed = await recoverCredential(auth, sid, agent, admissionId, key, deps, now);
-    const stored = await storeClaimedCredential(claimed, { auth, sid, agent, key, fingerprint, homeDir, now, noAutoGrant });
+    const stored = await storeClaimedCredential(claimed, { auth, sid, agent, key, fingerprint, homeDir, now, noAutoGrant: effectiveNoAutoGrant });
     return { ...redacted({ status: "active", reused: true, stored, claimed, sid, agent, homeDir }), recovered: true };
+  });
+}
+
+async function pendingNoAutoGrantAtPath(statePath, admissionId, fingerprint) {
+  if (!statePath) return false;
+  const state = await readJsonFile(statePath);
+  return state?.admissionId === admissionId && state.requestFingerprint === fingerprint && state.noAutoGrant === true;
+}
+
+// Pending writers share the credential lock with claim/recovery. Merge the
+// opt-out monotonically so a waiter holding an older snapshot cannot erase it.
+async function writePendingAdmissionState(statePath, state, sid, agent, homeDir, now) {
+  return withAdmissionCredentialLock(admissionCredentialPath(sid, agent, { homeDir }), async () => {
+    const latest = await readJsonFile(statePath);
+    const sameRequest = latest?.admissionId === state.admissionId &&
+      latest.requestFingerprint === state.requestFingerprint;
+    state.noAutoGrant = state.noAutoGrant === true || (sameRequest && latest.noAutoGrant === true);
+    const current = await readAdmissionCredentialState(sid, agent, { homeDir, now: now() });
+    if (current.state === "live" && current.credential.admissionId === state.admissionId &&
+        current.credential.requestFingerprint === state.requestFingerprint &&
+        current.credential.publicKey === state.publicKey && current.credential.apiUrl === state.apiUrl) {
+      const stored = await persistNoAutoGrantIfNeeded(current.credential, state.noAutoGrant, sid, agent, homeDir);
+      if (sameRequest) await fsp.rm(statePath, { force: true });
+      return stored;
+    }
+    await fsp.mkdir(path.dirname(statePath), { recursive: true });
+    await fsp.writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`);
+    return null;
   });
 }
 
@@ -689,7 +718,8 @@ export async function runAdmissionJoin(
   const pendingNoAutoGrant = Boolean(noAutoGrant || (resumable && state.noAutoGrant === true));
   if (resumable && pendingNoAutoGrant && state.noAutoGrant !== true) {
     state.noAutoGrant = true;
-    await fsp.writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`);
+    const stored = await writePendingAdmissionState(statePath, state, sid, agent, homeDir, now);
+    if (stored) return redacted({ status: "active", reused: true, stored, sid, agent, homeDir });
   }
 
   if (!resumable) {
@@ -740,7 +770,7 @@ export async function runAdmissionJoin(
     }
     if (created?.status === "active" && created?.reused) {
       const recovered = await recoverAndStore(auth, sid, agent, created.admissionId, key, fingerprint, deps, homeDir, now,
-        recoverActive && held.state === "live" ? held.credential.token : null, pendingNoAutoGrant);
+        recoverActive && held.state === "live" ? held.credential.token : null, pendingNoAutoGrant, statePath);
       await fsp.rm(statePath, { force: true });
       return recovered;
     }
@@ -756,8 +786,8 @@ export async function runAdmissionJoin(
       requestedAt: new Date(now()).toISOString(),
       noAutoGrant: pendingNoAutoGrant,
     };
-    await fsp.mkdir(path.dirname(statePath), { recursive: true });
-    await fsp.writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`);
+    const stored = await writePendingAdmissionState(statePath, state, sid, agent, homeDir, now);
+    if (stored) return redacted({ status: "active", reused: true, stored, sid, agent, homeDir });
   }
 
   if (!wait) {
@@ -799,7 +829,8 @@ export async function runAdmissionJoin(
       identity: polled.identity || null,
     });
     if (now() >= deadline) {
-      await fsp.writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`);
+      const stored = await writePendingAdmissionState(statePath, state, sid, agent, homeDir, now);
+      if (stored) return redacted({ status: "active", reused: true, stored, sid, agent, homeDir });
       return {
         status: polled.status === "approved" ? "approved" : "pending",
         phase,
@@ -821,7 +852,7 @@ export async function runAdmissionJoin(
   }
   if (polled.status === "active") {
     const recovered = await recoverAndStore(auth, sid, agent, state.admissionId, key, fingerprint, deps, homeDir, now,
-      recoverActive && held.state === "live" ? held.credential.token : null, pendingNoAutoGrant);
+      recoverActive && held.state === "live" ? held.credential.token : null, pendingNoAutoGrant, statePath);
     await fsp.rm(statePath, { force: true });
     return recovered;
   }
@@ -830,11 +861,12 @@ export async function runAdmissionJoin(
   // cover it through publication, or a delayed first claim could overwrite a
   // recovered replacement. Refresh the nonce only after obtaining this lock.
   const result = await withAdmissionCredentialLock(admissionCredentialPath(sid, agent, { homeDir }), async () => {
+    const claimNoAutoGrant = pendingNoAutoGrant || await pendingNoAutoGrantAtPath(statePath, state.admissionId, fingerprint);
     const current = await readAdmissionCredentialState(sid, agent, { homeDir, now: now() });
     if (current.state === "live" && current.credential.admissionId === state.admissionId &&
         current.credential.requestFingerprint === fingerprint && current.credential.publicKey === key.publicKey &&
         current.credential.apiUrl === auth.apiUrl) {
-      const stored = await persistNoAutoGrantIfNeeded(current.credential, pendingNoAutoGrant, sid, agent, homeDir);
+      const stored = await persistNoAutoGrantIfNeeded(current.credential, claimNoAutoGrant, sid, agent, homeDir);
       return redacted({ status: "active", reused: true, stored, sid, agent, homeDir });
     }
     const fresh = await checkedTransport(requestRead)(admissionMemberUrl(auth.apiUrl, sid, state.admissionId), {
@@ -845,7 +877,7 @@ export async function runAdmissionJoin(
     }
     if (fresh.status === "active") {
       const recovered = await recoverCredential(auth, sid, agent, state.admissionId, key, deps, now);
-      const stored = await storeClaimedCredential(recovered, { auth, sid, agent, key, fingerprint, homeDir, now, noAutoGrant: pendingNoAutoGrant });
+      const stored = await storeClaimedCredential(recovered, { auth, sid, agent, key, fingerprint, homeDir, now, noAutoGrant: claimNoAutoGrant });
       return { ...redacted({ status: "active", reused: true, stored, claimed: recovered, sid, agent, homeDir }), recovered: true };
     }
     const fields = fresh?.claim?.preimage;
@@ -863,7 +895,7 @@ export async function runAdmissionJoin(
       { nonce: fields.nonce, signature: signature.toString("base64url") },
       { ...deps, operationName: "session.admission_claim" }
     );
-    const stored = await storeClaimedCredential(claimed, { auth, sid, agent, key, fingerprint, homeDir, now, noAutoGrant: pendingNoAutoGrant });
+    const stored = await storeClaimedCredential(claimed, { auth, sid, agent, key, fingerprint, homeDir, now, noAutoGrant: claimNoAutoGrant });
     return redacted({ status: "active", reused: false, stored, claimed, sid, agent, homeDir });
   });
   await fsp.rm(statePath, { force: true });

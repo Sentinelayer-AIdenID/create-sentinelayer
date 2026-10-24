@@ -427,6 +427,33 @@ test("an opt-out added while pending survives another resume without the flag", 
   assert.equal(stored.credential.noAutoGrant, true);
 });
 
+test("a stale waiter timeout cannot erase a newer pending noAutoGrant opt-out", async () => {
+  const dirs = await scratch();
+  const api = fakeApi();
+  await runAdmissionJoin(SID, base(api, dirs, { wait: false }));
+
+  let optedOut = false;
+  const requestRead = async (...args) => {
+    const pending = await api.requestRead(...args);
+    if (!optedOut) {
+      optedOut = true;
+      const resumed = await runAdmissionJoin(SID, base(api, dirs, { noAutoGrant: true, wait: false }));
+      assert.equal(resumed.status, "pending");
+    }
+    return pending;
+  };
+  const timedOut = await runAdmissionJoin(SID, base(api, dirs, { requestRead, waitTimeoutMs: 0 }));
+  assert.equal(timedOut.status, "pending");
+  assert.equal(optedOut, true);
+
+  const adm = [...api.admissions.values()][0];
+  adm.status = "approved";
+  const claimed = await runAdmissionJoin(SID, base(api, dirs));
+  assert.equal(claimed.status, "active");
+  const stored = await readAdmissionCredentialState(SID, "builder-1", dirs);
+  assert.equal(stored.credential.noAutoGrant, true);
+});
+
 test("a concurrent first claim applies the later caller's noAutoGrant opt-out", async () => {
   const dirs = await scratch();
   const api = fakeApi({ onPoll: (adm) => { if (adm.status === "pending") adm.status = "approved"; } });
