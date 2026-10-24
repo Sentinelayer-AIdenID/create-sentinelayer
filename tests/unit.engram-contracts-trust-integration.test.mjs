@@ -81,6 +81,7 @@ test("a trusted receipt/evidence source binds the actual price; a valid wrong-pr
   assert.equal(validateNotScreenshotInferred({ ...address, contentHash: `sha256:${"0".repeat(64)}` }, { verifySource }).valid, false);
   assert.equal(validateNotScreenshotInferred({ ...address, locator: "rec-unrelated" }, { verifySource }).valid, false);
   assert.equal(validateNotScreenshotInferred({ ...address, tenantScope: "tenant/beta" }, { verifySource }).valid, false);
+  assert.equal(validateNotScreenshotInferred({ ...address, sourceVersion: "2.0.0" }, { verifySource }).valid, false);
   assert.equal(validateNotScreenshotInferred({ ...address, verifiedBy: "self" }, { verifySource }).valid, false);
 
   trustedStore.set(receipt.receiptId, { receipt, payload: `${payload}tampered`, pinned });

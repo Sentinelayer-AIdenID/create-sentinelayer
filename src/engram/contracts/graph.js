@@ -18,7 +18,7 @@
  */
 
 import { z } from "zod";
-import { moneySchema, currencyExponent } from "./money.js";
+import { moneySchema } from "./money.js";
 import { GRAPH_SCHEMA_VERSION } from "./versions.js";
 
 /**
@@ -305,12 +305,41 @@ const MONEY_FIELD_SUFFIXES = new Set([
   "payment", "revenue", "expense", "charge", "refund", "budget", "profit",
 ]);
 
+// Price/cost nouns remain monetary with a qualifier (basePriceRate); total
+// and tax need a non-money measure exception (totalCount, taxRate). A bare
+// transaction noun such as "order" or "invoice" is an entity, not an amount.
+const STRONG_MONEY_FIELD_TOKENS = new Set([
+  "amount", "price", "cost", "fee", "subtotal", "balance", "payment",
+  "revenue", "expense", "charge", "refund", "budget", "profit", "vat",
+]);
+const TRANSACTION_VALUE_TOKENS = new Set(["sale", "purchase", "invoice", "order"]);
+const NON_MONETARY_MEASURE_TERMINALS = new Set([
+  "count", "weight", "length", "duration", "item", "items", "unit", "units", "ratio", "rate",
+  "percent", "percentage", "temperature", "volume", "area", "distance",
+  "height", "width", "score", "index",
+]);
+const NON_MONETARY_METADATA_TERMINALS = new Set([
+  "id", "label", "name", "status", "type", "currency", "code",
+  "reference", "number", "timestamp", "method", "description", "source", "version",
+]);
+
 // A quantity is explicitly non-monetary. Currency codes and unambiguous
 // currency words cannot turn a binary float into a monetary total.
 const MONEY_UNIT_WORDS = new Set([
-  "money", "currency", "dollar", "dollars", "cent", "cents", "euro",
+  "dollar", "dollars", "cent", "cents", "euro",
   "euros", "yen", "yuan", "won", "rupee", "rupees", "peso", "pesos",
   "franc", "francs", "dinar", "dinars", "dirham", "dirhams",
+  "buck", "bucks",
+]);
+
+// Quantity units are intentionally closed in this protocol version. An open
+// string lets new currency names and slang bypass the canonical money type.
+const NON_MONETARY_UNITS = new Set([
+  "count", "ratio", "percent", "percentage", "celsius", "fahrenheit", "kelvin",
+  "ms", "millisecond", "milliseconds", "s", "second", "seconds", "min", "minute", "minutes",
+  "hour", "hours", "day", "days", "byte", "bytes", "request", "requests",
+  "g", "gram", "grams", "kg", "kilogram", "kilograms", "mm", "cm", "m", "km",
+  "meter", "meters", "meters_per_second", "liter", "liters", "pixel", "pixels",
 ]);
 
 /** Explicit non-money numeric fact. Bare JSON numbers are ambiguous. */
@@ -318,16 +347,20 @@ export const quantitySchema = z.object({
   kind: z.literal("quantity"),
   value: z.number().finite(),
   unit: z.string().regex(/^[a-z][a-z0-9/_-]*$/),
-}).strict().refine(
-  ({ unit }) => unit.split(/[/_-]/).every((token) =>
-    currencyExponent(token.toUpperCase()) === null && !MONEY_UNIT_WORDS.has(token)),
-  { message: "currency units require a canonical money object", path: ["unit"] },
-);
+}).strict().refine(({ unit }) => NON_MONETARY_UNITS.has(unit), {
+  message: "quantity unit must be a supported non-monetary unit; currency requires canonical money",
+  path: ["unit"],
+});
 
 function isMoneyFieldName(key) {
   if (MONEY_FIELD_NAMES.has(key)) return true;
   const words = key.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase().split(/[^a-z0-9]+/);
-  return MONEY_FIELD_SUFFIXES.has(words.at(-1));
+  const suffix = words.at(-1);
+  if (NON_MONETARY_METADATA_TERMINALS.has(suffix)) return false;
+  if (words.some((word) => STRONG_MONEY_FIELD_TOKENS.has(word) || MONEY_UNIT_WORDS.has(word))) return true;
+  if (suffix === "value" && words.slice(0, -1).some((word) => TRANSACTION_VALUE_TOKENS.has(word))) return true;
+  return words.some((word) => word === "total" || word === "tax") &&
+    !NON_MONETARY_MEASURE_TERMINALS.has(suffix);
 }
 
 /**

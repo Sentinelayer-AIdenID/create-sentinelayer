@@ -30,6 +30,22 @@ test('money aliases cannot disguise binary floats as quantities', () => {
   assert.equal(validateGraphIntegrity(graphWith('saleValue', dollars)).valid, false);
   const count = { kind: 'quantity', value: 2, unit: 'count' };
   assert.equal(quantitySchema.safeParse(count).success, true);
+  for (const unit of ['bucks', 'aed']) {
+    const disguisedMoney = { kind: 'quantity', value: 19.99, unit };
+    assert.equal(quantitySchema.safeParse(disguisedMoney).success, false, unit);
+    assert.equal(validateGraphIntegrity(graphWith('totalDollars', disguisedMoney)).valid, false, unit);
+  }
+  assert.equal(validateGraphIntegrity(graphWith('totalDollars', count)).valid, false,
+    'currency-qualified predicates require canonical money even when the quantity unit is nonmonetary');
+  for (const predicate of ['totalUSD', 'priceInCAD', 'balanceJPY']) {
+    assert.equal(validateGraphIntegrity(graphWith(predicate, count)).valid, false, predicate);
+  }
+  for (const predicate of ['pricePerUnit', 'totalTax', 'purchasePriceBeforeTax', 'saleValue']) {
+    assert.equal(validateGraphIntegrity(graphWith(predicate, count)).valid, false, predicate);
+  }
+  for (const predicate of ['basePriceRate', 'pricePerUnits', 'totalDollarsRate']) {
+    assert.equal(validateGraphIntegrity(graphWith(predicate, count)).valid, false, predicate);
+  }
   for (const predicate of ['grandTotal', 'purchase_total']) {
     assert.equal(validateGraphIntegrity(graphWith(predicate, dollars)).valid, false, predicate);
     assert.equal(validateGraphIntegrity(graphWith(predicate, count)).valid, false, predicate);
@@ -46,6 +62,18 @@ test('nonmoney count and temperature quantities remain valid', () => {
   assert.equal(validateGraphIntegrity(graphWith('temperature', {
     kind: 'quantity', value: 36.6, unit: 'celsius',
   })).valid, true);
+  assert.equal(validateGraphIntegrity(graphWith('metadata', {
+    displayCurrency: 'USD', selectedTry: true,
+  })).valid, true, 'currency labels and ISO-looking boolean keys are metadata, not amounts');
+  assert.equal(validateGraphIntegrity(graphWith('taxRate', {
+    kind: 'quantity', value: 0.15, unit: 'ratio',
+  })).valid, true);
+  for (const predicate of ['order', 'invoice', 'purchase', 'sale']) {
+    assert.equal(validateGraphIntegrity(graphWith(predicate, { status: 'placed' })).valid, true, predicate);
+  }
+  for (const unit of ['ms', 'km', 'pixel', 'meters_per_second']) {
+    assert.equal(quantitySchema.safeParse({ kind: 'quantity', value: 1, unit }).success, true, unit);
+  }
 });
 
 test('delegation version bounds must be ordered and include the delegated version', () => {

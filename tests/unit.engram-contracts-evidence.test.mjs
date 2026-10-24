@@ -65,10 +65,46 @@ test("evidencePageSchema: validates paginated list", () => {
 test("evidenceFreshnessSchema: validates freshness with coverage", () => {
   assert.equal(evidenceFreshnessSchema.safeParse({
     asOf: "2026-10-23T00:00:00Z",
+    evaluatedAt: "2026-10-23T00:30:00Z",
     coverage: { totalAssertions: 100, evidenced: 85, ratio: 0.85 },
     staleAfterMs: 3600000,
     isStale: false,
   }).success, true);
+});
+
+test("evidenceFreshnessSchema: a stale claim requires an evaluation time and agrees with its TTL", () => {
+  const base = {
+    asOf: "2026-10-23T00:00:00Z",
+    coverage: { totalAssertions: 1, evidenced: 1, ratio: 1 },
+    staleAfterMs: 1000,
+    isStale: false,
+  };
+  assert.equal(evidenceFreshnessSchema.safeParse(base).success, false,
+    "a freshness claim with no evaluation time is unverifiable");
+  assert.equal(evidenceFreshnessSchema.safeParse({
+    ...base, evaluatedAt: "2026-10-23T01:00:00Z",
+  }).success, false, "an hour-old claim cannot be fresh after one second");
+  assert.equal(evidenceFreshnessSchema.safeParse({
+    ...base, evaluatedAt: "2026-10-23T00:00:00.999Z",
+  }).success, true);
+  assert.equal(evidenceFreshnessSchema.safeParse({
+    ...base, evaluatedAt: "2026-10-23T00:00:01.000Z", isStale: true,
+  }).success, true);
+  assert.equal(evidenceFreshnessSchema.safeParse({
+    asOf: "2026-10-24T00:00:00Z", evaluatedAt: "2026-10-23T00:00:00Z",
+    coverage: base.coverage,
+  }).success, false, "evaluation cannot precede the evidence watermark without a stale claim either");
+});
+
+test("evidenceAddressSchema: a hash does not replace the producing source version", () => {
+  assert.equal(evidenceAddressSchema.safeParse({
+    scheme: "https", locator: "api.example.test/item/7", contentHash: "sha256:abc123",
+    tenantScope: "tenant/acme", verifiedBy: "trusted-verifier",
+  }).success, false);
+  assert.equal(evidenceAddressSchema.safeParse({
+    scheme: "https", locator: "api.example.test/item/7", contentHash: "sha256:abc123",
+    sourceVersion: " ", tenantScope: "tenant/acme", verifiedBy: "trusted-verifier",
+  }).success, false, "whitespace is not a source version");
 });
 
 test("validateNotScreenshotInferred: REJECTS screenshot scheme", () => {
@@ -100,11 +136,12 @@ test("validateNotScreenshotInferred: ACCEPTS address with sourceVersion", () => 
   assert.equal(result.valid, true);
 });
 
-test("validateNotScreenshotInferred: ACCEPTS address with contentHash", () => {
+test("validateNotScreenshotInferred: ACCEPTS versioned address with contentHash", () => {
   const result = validateNotScreenshotInferred({
     scheme: "file",
     locator: "/data/ev.json",
     contentHash: "abc123",
+    sourceVersion: "v1",
     tenantScope: "tenant/acme",
     verifiedBy: "trusted-verifier",
   }, { verifySource: (address) => address.locator === "/data/ev.json" });

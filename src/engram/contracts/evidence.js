@@ -41,7 +41,8 @@ export const evidenceAddressSchema = z.object({
   /** When this evidence was captured */
   capturedAt: z.string().datetime().optional(),
   /** Source version that produced this evidence */
-  sourceVersion: z.string().min(1).optional(),
+  sourceVersion: z.string().min(1).refine((value) => value.trim() === value && value.trim().length > 0,
+    "sourceVersion must be nonblank and unpadded"),
   /** Tenant scope of the evidence */
   tenantScope: z.string().min(1),
   /** Whether the evidence is still reachable */
@@ -50,16 +51,13 @@ export const evidenceAddressSchema = z.object({
   verifiedBy: z.string().min(1).optional(),
 }).strict().refine(
   (addr) => {
-    // At least one of sourceVersion or contentHash must be present to
-    // guard against screenshot-inferred evidence.
-    if (!addr.sourceVersion && !addr.contentHash) return false;
     // Require a verifier identity as metadata, but do not treat this string as
     // proof of independent verification.
     if (!addr.verifiedBy) return false;
     return true;
   },
   {
-    message: "evidence address must claim sourceVersion or contentHash and verifiedBy; a trusted source must verify the claim",
+    message: "evidence address must claim verifiedBy; a trusted source must verify the source version and claim",
     path: ["verifiedBy"],
   },
 );
@@ -134,6 +132,8 @@ export const evidenceMigrationPolicySchema = z.object({
  */
 export const evidenceFreshnessSchema = z.object({
   asOf: z.string().datetime(),
+  /** Time at which the stale claim was evaluated; required when isStale is supplied. */
+  evaluatedAt: z.string().datetime().optional(),
   coverage: z.object({
     totalAssertions: z.number().int().nonnegative(),
     evidenced: z.number().int().nonnegative(),
@@ -149,7 +149,24 @@ export const evidenceFreshnessSchema = z.object({
   }),
   staleAfterMs: z.number().int().positive().optional(),
   isStale: z.boolean().optional(),
-}).strict();
+}).strict().superRefine((freshness, ctx) => {
+  if (freshness.evaluatedAt && Date.parse(freshness.evaluatedAt) < Date.parse(freshness.asOf)) {
+    ctx.addIssue({ code: "custom", path: ["evaluatedAt"],
+      message: "evaluatedAt cannot precede asOf" });
+    return;
+  }
+  if (freshness.isStale === undefined) return;
+  if (!freshness.evaluatedAt || freshness.staleAfterMs === undefined) {
+    ctx.addIssue({ code: "custom", path: ["isStale"],
+      message: "isStale requires evaluatedAt and staleAfterMs" });
+    return;
+  }
+  const ageMs = Date.parse(freshness.evaluatedAt) - Date.parse(freshness.asOf);
+  if (ageMs < 0 || freshness.isStale !== (ageMs >= freshness.staleAfterMs)) {
+    ctx.addIssue({ code: "custom", path: ["isStale"],
+      message: "isStale must agree with asOf, evaluatedAt and staleAfterMs" });
+  }
+});
 
 /**
  * Error types for evidence operations.
