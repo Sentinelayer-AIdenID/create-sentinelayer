@@ -1367,6 +1367,7 @@ test("CLI non-interactive mode fails fast when interview payload is missing", as
 test("CLI flags: --help and --version return successfully", async () => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-e2e-"));
   try {
+    const pkg = JSON.parse(await readFile(path.resolve(__dirname, "..", "package.json"), "utf-8"));
     const helpResult = await runCli({
       cwd: tempRoot,
       env: { ...process.env },
@@ -1376,14 +1377,13 @@ test("CLI flags: --help and --version return successfully", async () => {
     assert.match(helpResult.stdout, /Usage:/);
     assert.match(helpResult.stdout, /--non-interactive/);
     assert.match(helpResult.stdout, /Examples:/);
-    assert.match(helpResult.stdout, /github\.com\/mrrCarter\/create-sentinelayer#readme/);
+    assert.ok(helpResult.stdout.includes(pkg.homepage), "CLI help must point to the package homepage");
 
     const versionResult = await runCli({
       cwd: tempRoot,
       env: { ...process.env },
       args: ["--version"],
     });
-    const pkg = JSON.parse(await readFile(path.resolve(__dirname, "..", "package.json"), "utf-8"));
     assert.equal(versionResult.code, 0, versionResult.stderr || versionResult.stdout);
     assert.equal(versionResult.stdout.trim(), pkg.version);
   } finally {

@@ -29,6 +29,7 @@ import {
 } from "../src/session/admission.js";
 import { canonicalPreimage } from "../src/session/admission-preimage.js";
 import { createSessionMutationCsrfToken } from "../src/session/invitations.js";
+import { resolveSessionPaths } from "../src/session/paths.js";
 import { bearerOf } from "./credential-probe.mjs";
 
 const SID = "e9e8dc5e-8d57-4603-975f-09156e3b4473";
@@ -397,6 +398,143 @@ test("--no-wait returns pending with the approve URL immediately", async () => {
   assert.equal(result.status, "pending");
   assert.ok(result.approveUrl);
   assert.equal(api.calls.filter((c) => c.method === "GET").length, 0);
+});
+
+test("a pending noAutoGrant request keeps its opt-out when resumed without the flag", async () => {
+  const dirs = await scratch();
+  const api = fakeApi({ onPoll: (adm) => { adm.status = "approved"; } });
+  const pending = await runAdmissionJoin(SID, base(api, dirs, { noAutoGrant: true, wait: false }));
+  assert.equal(pending.status, "pending");
+  assert.equal((await readAdmissionCredentialState(SID, "builder-1", dirs)).state, "none");
+
+  const resumed = await runAdmissionJoin(SID, base(api, dirs));
+  assert.equal(resumed.status, "active");
+  assert.equal(api.calls.filter((call) => call.method === "POST" && call.url.endsWith("/admissions")).length, 1);
+  const stored = await readAdmissionCredentialState(SID, "builder-1", dirs);
+  assert.equal(stored.state, "live");
+  assert.equal(stored.credential.noAutoGrant, true);
+});
+
+test("an opt-out added while pending survives another resume without the flag", async () => {
+  const dirs = await scratch();
+  const api = fakeApi({ onPoll: (adm) => { adm.status = "approved"; } });
+  await runAdmissionJoin(SID, base(api, dirs, { wait: false }));
+  const stillPending = await runAdmissionJoin(SID, base(api, dirs, { noAutoGrant: true, wait: false }));
+  assert.equal(stillPending.status, "pending");
+
+  const resumed = await runAdmissionJoin(SID, base(api, dirs));
+  assert.equal(resumed.status, "active");
+  const stored = await readAdmissionCredentialState(SID, "builder-1", dirs);
+  assert.equal(stored.credential.noAutoGrant, true);
+});
+
+test("a stale waiter timeout cannot erase a newer pending noAutoGrant opt-out", async () => {
+  const dirs = await scratch();
+  const api = fakeApi();
+  await runAdmissionJoin(SID, base(api, dirs, { wait: false }));
+
+  let optedOut = false;
+  const requestRead = async (...args) => {
+    const pending = await api.requestRead(...args);
+    if (!optedOut) {
+      optedOut = true;
+      const resumed = await runAdmissionJoin(SID, base(api, dirs, { noAutoGrant: true, wait: false }));
+      assert.equal(resumed.status, "pending");
+    }
+    return pending;
+  };
+  const timedOut = await runAdmissionJoin(SID, base(api, dirs, { requestRead, waitTimeoutMs: 0 }));
+  assert.equal(timedOut.status, "pending");
+  assert.equal(optedOut, true);
+
+  const adm = [...api.admissions.values()][0];
+  adm.status = "approved";
+  const claimed = await runAdmissionJoin(SID, base(api, dirs));
+  assert.equal(claimed.status, "active");
+  const stored = await readAdmissionCredentialState(SID, "builder-1", dirs);
+  assert.equal(stored.credential.noAutoGrant, true);
+});
+
+test("a concurrent first claim applies the later caller's noAutoGrant opt-out", async () => {
+  const dirs = await scratch();
+  const api = fakeApi({ onPoll: (adm) => { if (adm.status === "pending") adm.status = "approved"; } });
+  await runAdmissionJoin(SID, base(api, dirs, { wait: false }));
+
+  let otherClaimed = false;
+  const requestRead = async (...args) => {
+    const approved = await api.requestRead(...args);
+    if (!otherClaimed) {
+      otherClaimed = true;
+      const first = await runAdmissionJoin(SID, base(api, dirs));
+      assert.equal(first.status, "active");
+    }
+    // The opted-out caller received approval before the other claim completed.
+    return approved;
+  };
+  const second = await runAdmissionJoin(SID, base(api, dirs, { noAutoGrant: true, requestRead }));
+  assert.equal(otherClaimed, true);
+  assert.equal(second.status, "active");
+  assert.equal(second.reused, true);
+  assert.equal(api.calls.filter((call) => call.url.endsWith("/claim")).length, 1);
+  const stored = await readAdmissionCredentialState(SID, "builder-1", dirs);
+  assert.equal(stored.credential.noAutoGrant, true);
+});
+
+test("a pending opt-out added after a waiter's snapshot survives that waiter's first claim", async () => {
+  const dirs = await scratch();
+  const api = fakeApi({ onPoll: (adm) => { if (adm.status === "pending") adm.status = "approved"; } });
+  await runAdmissionJoin(SID, base(api, dirs, { wait: false }));
+
+  let optedOut = false;
+  const requestRead = async (...args) => {
+    const approved = await api.requestRead(...args);
+    if (!optedOut) {
+      optedOut = true;
+      const pending = await runAdmissionJoin(SID, base(api, dirs, { noAutoGrant: true, wait: false }));
+      assert.equal(pending.status, "pending", "the opting-out caller never claims the admission");
+    }
+    return approved;
+  };
+  const claimed = await runAdmissionJoin(SID, base(api, dirs, { requestRead }));
+  assert.equal(optedOut, true);
+  assert.equal(claimed.status, "active");
+  assert.equal(api.calls.filter((call) => call.url.endsWith("/claim")).length, 1);
+  const stored = await readAdmissionCredentialState(SID, "builder-1", dirs);
+  assert.equal(stored.credential.noAutoGrant, true,
+    "the claiming waiter must reread the later opt-out while holding the credential lock");
+});
+
+test("a pending opt-out added after a waiter's snapshot survives recovery of an external claim", async () => {
+  const dirs = await scratch();
+  const api = fakeApi({ onPoll: (adm) => { if (adm.status === "pending") adm.status = "approved"; } });
+  await runAdmissionJoin(SID, base(api, dirs, { wait: false }));
+  const statePath = path.join(resolveSessionPaths(SID, { targetPath: dirs.targetPath }).sessionDir,
+    "admissions", "builder-1.json");
+  const pendingState = await fsp.readFile(statePath, "utf8");
+
+  // Model a claim from another process: the server is active, while this
+  // workspace still has its pending record and no local credential.
+  await runAdmissionJoin(SID, base(api, dirs));
+  await fsp.unlink(admissionCredentialPath(SID, "builder-1", dirs));
+  await fsp.writeFile(statePath, pendingState);
+
+  let optedOut = false;
+  const requestRead = async (...args) => {
+    const active = await api.requestRead(...args);
+    if (!optedOut) {
+      optedOut = true;
+      const pending = await runAdmissionJoin(SID, base(api, dirs, { noAutoGrant: true, wait: false }));
+      assert.equal(pending.status, "pending", "the opting-out caller never recovers the credential");
+    }
+    return active;
+  };
+  const recovered = await runAdmissionJoin(SID, base(api, dirs, { requestRead }));
+  assert.equal(optedOut, true);
+  assert.equal(recovered.status, "active");
+  assert.equal(recovered.recovered, true);
+  const stored = await readAdmissionCredentialState(SID, "builder-1", dirs);
+  assert.equal(stored.credential.noAutoGrant, true,
+    "the recovering waiter must reread the later opt-out while holding the credential lock");
 });
 
 test("a re-run resumes the same request instead of filing a new one", async () => {
@@ -801,4 +939,187 @@ test("publishing a key NEVER replaces an existing identity (the property the rac
   assert.equal(JSON.parse(await fsp.readFile(keyPath, "utf8")).publicKey, "first");
   const leftovers = (await fsp.readdir(path.dirname(keyPath))).filter((name) => name.endsWith(".tmp"));
   assert.deepEqual(leftovers, [], "no temp files left behind");
+});
+
+// --- noAutoGrant persistence on cached/reused credentials ---
+
+test("noAutoGrant is persisted on reused live credential (fast path, !recoverActive)", async () => {
+  const dirs = await scratch();
+  const api = fakeApi({
+    onPoll: (adm) => { adm.status = "approved"; },
+    reportsIdentityReadiness: true,
+  });
+  // First join without noAutoGrant
+  await runAdmissionJoin(SID, base(api, dirs, { noAutoGrant: false }));
+  const credPath = admissionCredentialPath(SID, "builder-1", dirs);
+  let stored = JSON.parse(await fsp.readFile(credPath, "utf8"));
+  assert.equal(stored.noAutoGrant || false, false, "initial credential has noAutoGrant false");
+
+  // Second join WITH noAutoGrant (identical fingerprint -> fast path)
+  const result = await runAdmissionJoin(SID, base(api, dirs, { noAutoGrant: true }));
+  assert.equal(result.reused, true);
+  // Read back: noAutoGrant should now be true
+  stored = JSON.parse(await fsp.readFile(credPath, "utf8"));
+  assert.equal(stored.noAutoGrant, true, "fast path must persist noAutoGrant on reused credential");
+});
+
+test("noAutoGrant false does not overwrite existing true on fast-path reuse", async () => {
+  const dirs = await scratch();
+  const api = fakeApi({
+    onPoll: (adm) => { adm.status = "approved"; },
+    reportsIdentityReadiness: true,
+  });
+  // First join WITH noAutoGrant
+  await runAdmissionJoin(SID, base(api, dirs, { noAutoGrant: true }));
+  const credPath = admissionCredentialPath(SID, "builder-1", dirs);
+  let stored = JSON.parse(await fsp.readFile(credPath, "utf8"));
+  assert.equal(stored.noAutoGrant, true, "initial credential has noAutoGrant true");
+
+  // Second join WITHOUT noAutoGrant (fast path)
+  const result = await runAdmissionJoin(SID, base(api, dirs, { noAutoGrant: false }));
+  assert.equal(result.reused, true);
+  // Read back: noAutoGrant should still be true (not downgraded)
+  stored = JSON.parse(await fsp.readFile(credPath, "utf8"));
+  assert.equal(stored.noAutoGrant, true, "noAutoGrant must not be downgraded from true to false on reuse");
+});
+
+
+test("noAutoGrant is persisted on reused live credential (recoverAndStore path)", async () => {
+  const dirs = await scratch();
+  const api = fakeApi({
+    onPoll: (adm) => { adm.status = "approved"; },
+    reportsIdentityReadiness: true,
+  });
+  // First join without noAutoGrant
+  await runAdmissionJoin(SID, base(api, dirs, { noAutoGrant: false }));
+  const credPath = admissionCredentialPath(SID, "builder-1", dirs);
+  let stored = JSON.parse(await fsp.readFile(credPath, "utf8"));
+  assert.equal(stored.noAutoGrant || false, false, "initial credential has noAutoGrant false");
+
+  // Force token change to ensure recoverAndStore takes the store path (not reuse)
+  // We do this by using recoverActive which goes through recovery and calls recoverAndStore
+  const result = await runAdmissionJoin(SID, base(api, dirs, { noAutoGrant: true, recoverActive: true }));
+  assert.equal(result.recovered, true, "recovery happened");
+  // After recovery, noAutoGrant should be persisted
+  stored = JSON.parse(await fsp.readFile(credPath, "utf8"));
+  assert.equal(stored.noAutoGrant, true, "recoverAndStore must persist noAutoGrant after recovery");
+});
+test("noAutoGrant survives recovery when caller omits the flag (do not clear existing opt-out)", async () => {
+  const dirs = await scratch();
+  const api = fakeApi({
+    onPoll: (adm) => { adm.status = "approved"; },
+    reportsIdentityReadiness: true,
+  });
+  // First join WITH noAutoGrant=true to set the opt-out
+  await runAdmissionJoin(SID, base(api, dirs, { noAutoGrant: true }));
+  const credPath = admissionCredentialPath(SID, "builder-1", dirs);
+  let stored = JSON.parse(await fsp.readFile(credPath, "utf8"));
+  assert.equal(stored.noAutoGrant, true, "initial credential has noAutoGrant true");
+
+  // Recover WITHOUT repeating noAutoGrant — the existing opt-out must survive
+  const result = await runAdmissionJoin(SID, base(api, dirs, { noAutoGrant: false, recoverActive: true }));
+  // Recovery still happened
+  assert.equal(result.recovered, true, "recovery happened");
+  stored = JSON.parse(await fsp.readFile(credPath, "utf8"));
+  assert.equal(stored.noAutoGrant, true,
+    "existing noAutoGrant opt-out must survive recovery even when caller omits the flag");
+});
+
+
+
+
+
+
+
+test("noAutoGrant survives storeClaimedCredential even when previous credential is not live (expired/revoked)", async () => {
+  // Regression: storeClaimedCredential previously checked previous.state === "live"
+  // before preserving noAutoGrant. An expired/revoked credential with noAutoGrant=true
+  // would lose its opt-out on recovery, allowing later auto-grant on IDENTITY_FORGERY.
+  const dirs = await scratch();
+  const api = fakeApi({
+    onPoll: (adm) => { adm.status = "approved"; },
+    reportsIdentityReadiness: true,
+  });
+  // First join WITH noAutoGrant=true to set the opt-out
+  await runAdmissionJoin(SID, base(api, dirs, { noAutoGrant: true }));
+  const credPath = admissionCredentialPath(SID, "builder-1", dirs);
+  let stored = JSON.parse(await fsp.readFile(credPath, "utf8"));
+  assert.equal(stored.noAutoGrant, true, "initial credential has noAutoGrant true");
+
+  // Force the credential to appear expired by overwriting expiresAt
+  stored.expiresAt = 1; // long-expired
+  stored.token = "sladm_expired";
+  await fsp.writeFile(credPath, JSON.stringify(stored));
+
+  // Now recover without repeating noAutoGrant — the opt-out must survive
+  // even though the previous credential state is NOT "live"
+  const result = await runAdmissionJoin(SID, base(api, dirs, { noAutoGrant: false, recoverActive: true }));
+  assert.equal(result.recovered, true, "recovery happened");
+  stored = JSON.parse(await fsp.readFile(credPath, "utf8"));
+  assert.equal(stored.noAutoGrant, true,
+    "noAutoGrant opt-out must survive recovery even when previous credential was expired");
+});
+
+test("second fast-path (server-reused) locks against concurrent token rotation", async () => {
+  // Regression: when the server responds reused=true for an in-flight admission
+  // and the local credential is live with matching admissionId, the second
+  // fast-path wrote held.credential without a lock. A concurrent recovery could
+  // rotate the token, and this path would restore the stale one.
+  //
+  // To bypass the first fast path (which also has fingerprint match), we keep
+  // the credential file live but modify its stored fingerprint so the first
+  // fast-path fingerprint check fails. The server has the same agent+key in
+  // memory and returns reused=true. The second fast path then fires.
+  const dirs = await scratch();
+  const api = fakeApi({ onPoll: (adm) => { adm.status = "approved"; } });
+  const first = await runAdmissionJoin(SID, base(api, dirs));
+  assert.equal(first.status, "active");
+  const credPath = admissionCredentialPath(SID, "builder-1", dirs);
+  const firstStored = JSON.parse(await fsp.readFile(credPath, "utf8"));
+  assert.ok(firstStored.token, "first join stored a token");
+
+  // Modify the stored fingerprint so the first fast path (which compares
+  // held.credential.requestFingerprint === fingerprint) does not match.
+  firstStored.requestFingerprint = firstStored.requestFingerprint + "_stale";
+  await fsp.writeFile(credPath, JSON.stringify(firstStored));
+
+  // Simulate a concurrent writer that replaces the credential entirely
+  // between the server response and the lock acquisition. The transport
+  // wrapper replaces the credential with a different live one (different
+  // admissionId) after the server responds reused.
+  let rotatedToken;
+  let rotationDone = false;
+  const transport = async (url, options) => {
+    const result = await api.requestMutation(url, options);
+    if (result?.reused && !rotationDone) {
+      // Replace the credential with a different live one, simulating a
+      // concurrent recovery with a rotated token and different admissionId.
+      rotatedToken = "sladm_" + "R".repeat(43);
+      const rotated = {
+        token: rotatedToken,
+        sessionId: SID.toLowerCase(),
+        agentId: "builder-1",
+        publicKey: firstStored.publicKey,
+        apiUrl: firstStored.apiUrl,
+        requestFingerprint: "different_fingerprint_xyz",
+        admissionId: "different-adm-id",
+        identity: firstStored.identity,
+        grant: firstStored.grant,
+        correlation: firstStored.correlation,
+        expiresAt: firstStored.expiresAt + 7200,
+        storedAt: new Date().toISOString(),
+      };
+      await fsp.writeFile(credPath, JSON.stringify(rotated));
+      rotationDone = true;
+    }
+    return result;
+  };
+
+  // The join must throw because the credential changed (admissionId mismatch)
+  // and the fix rejects stale fallback instead of silently writing it.
+  await assert.rejects(
+    () => runAdmissionJoin(SID, base(api, dirs, { requestMutation: transport })),
+    /Admission credential changed during join/,
+    "must throw when credential changes under lock instead of writing stale snapshot"
+  );
 });

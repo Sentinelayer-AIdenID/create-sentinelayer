@@ -2904,6 +2904,33 @@ async function sessionListenAgent(options) {
   return { sessionId: resolveSessionIdOption(options), agentId: normalizeAgentId(options.agent, "cli-user") };
 }
 
+
+/**
+ * Build the admission-join options object from parsed Commander options.
+ * Extracted so tests can assert the full derivation from CLI flag to
+ * runAdmissionJoin input without network I/O.
+ */
+export function buildAdmissionJoinOptions(options, overrides = {}) {
+  const waitSeconds = Number.parseInt(String(options.waitSeconds ?? "900"), 10);
+  return {
+    agentId: overrides.agentId ?? "",
+    displayName: overrides.displayName ?? "",
+    model: options.model,
+    provider: options.provider,
+    goal: options.goal,
+    deliverables: options.deliverable || [],
+    stopConditions: options.stopWhen || [],
+    actions: parseAdmissionScope(options.scope),
+    ttlSeconds: parseAdmissionTtlSeconds(options.ttl),
+    wait: options.wait !== false,
+    recoverActive: Boolean(options.recoverAdmission),
+    noAutoGrant: options.autoGrant === false,
+    waitTimeoutMs: (Number.isFinite(waitSeconds) && waitSeconds >= 0 ? waitSeconds : 900) * 1000,
+    targetPath: overrides.targetPath ?? process.cwd(),
+    onPending: overrides.onPending ?? (() => {}),
+  };
+}
+
 export function registerSessionCommand(program) {
   const session = program
     .command("session")
@@ -3439,6 +3466,7 @@ export function registerSessionCommand(program) {
     .option("--wait-seconds <n>", "How long to wait for approval before returning pending", "900")
     .option("--cancel-admission", "Cancel this workspace's pending admission request for the session")
     .option("--recover-admission", "Recover a live admission with the retained agent key; requires the unchanged --goal/scope/ttl")
+    .option("--no-auto-grant", "Skip auto-grant on 403 IDENTITY_FORGERY; fail immediately instead")
     .option("--json", "Emit machine-readable output")
     .action(async (sessionId, options, command) => {
       const normalizedSessionId = normalizeString(sessionId);
@@ -3527,20 +3555,9 @@ export function registerSessionCommand(program) {
         if (!admissionAgent) {
           throw new Error("--goal requires --agent <id>: admission is requested for one named agent.");
         }
-        const waitSeconds = Number.parseInt(String(options.waitSeconds ?? "900"), 10);
-        admissionJoinOptions = {
+        admissionJoinOptions = buildAdmissionJoinOptions(options, {
           agentId: admissionAgent,
           displayName: legacyName && explicitAgent ? legacyName : "",
-          model: options.model,
-          provider: options.provider,
-          goal: options.goal,
-          deliverables: options.deliverable || [],
-          stopConditions: options.stopWhen || [],
-          actions: parseAdmissionScope(options.scope),
-          ttlSeconds: parseAdmissionTtlSeconds(options.ttl),
-          wait: options.wait !== false,
-          recoverActive: Boolean(options.recoverAdmission),
-          waitTimeoutMs: (Number.isFinite(waitSeconds) && waitSeconds >= 0 ? waitSeconds : 900) * 1000,
           targetPath,
           onPending: ({ approveUrl, phase }) => {
             // stderr, so --json stdout stays a single parseable document.
@@ -3555,7 +3572,7 @@ export function registerSessionCommand(program) {
             else if (phase === "identity") console.log(pc.yellow(line));
             else console.log(line);
           },
-        };
+        });
         admission = await runAdmissionJoin(normalizedSessionId, admissionJoinOptions);
         if (admission.status !== "active") {
           // Only an ACTIVE admission joins. Pending, denied, cancelled or expired never
@@ -3884,6 +3901,7 @@ export function registerSessionCommand(program) {
     .option("--stdin", "Read the message body from stdin")
     .option("--force-cli-user", "Allow fallback sends as cli-user when no agent identity can be resolved")
     .option("--local-only", "Append only to the local session cache without remote send confirmation")
+    .option("--no-auto-grant", "Skip auto-grant on 403 IDENTITY_FORGERY; fail immediately instead")
     .option("--path <path>", "Workspace path for the session", ".")
     .option("--json", "Emit machine-readable output")
     .action(asAdmittedAgent(sessionSayAgent, async (sessionId, messageParts, options, command) => {
@@ -3962,6 +3980,7 @@ export function registerSessionCommand(program) {
         for (let attempt = 0; attempt < 2; attempt += 1) {
           remoteSync = await syncSessionEventToApi(normalizedSessionId, event, {
             targetPath,
+            noAutoGrant: options.autoGrant === false,
           });
           if (remoteSync?.synced) break;
         }
@@ -4024,6 +4043,7 @@ export function registerSessionCommand(program) {
     .option("--display-name <name>", "Human-readable agent display name")
     .option("--role <role>", "Agent role metadata: coder, reviewer, tester, observer", "coder")
     .option("--to <agent>", "Direct the message to a specific agent id")
+    .option("--no-auto-grant", "Skip auto-grant on 403 IDENTITY_FORGERY; fail immediately instead")
     .option("--path <path>", "Workspace path for the session", ".")
     .option("--json", "Emit machine-readable output")
     .action(async (sessionId, message, options, command) => {
@@ -4093,6 +4113,7 @@ export function registerSessionCommand(program) {
       }
       const remoteSync = await syncSessionEventToApi(normalizedSessionId, event, {
         targetPath,
+        noAutoGrant: options.autoGrant === false,
       });
       if (!remoteSync?.synced) {
         throw new Error(
@@ -4160,6 +4181,7 @@ export function registerSessionCommand(program) {
     .option("--proposal <text>", "Suggested remediation or next step")
     .option("--message-file <path>", "Read the observation summary from a UTF-8 file")
     .option("--stdin", "Read the observation summary from stdin")
+    .option("--no-auto-grant", "Skip auto-grant on 403 IDENTITY_FORGERY; fail immediately instead")
     .option("--path <path>", "Workspace path for the session", ".")
     .option("--json", "Emit machine-readable output")
     .action(async (sessionId, summaryParts, options, command) => {
@@ -4265,6 +4287,7 @@ export function registerSessionCommand(program) {
       }
       const remoteSync = await syncSessionEventToApi(normalizedSessionId, event, {
         targetPath,
+        noAutoGrant: options.autoGrant === false,
       });
       if (!remoteSync?.synced) {
         throw new Error(
@@ -7299,7 +7322,19 @@ export function registerSessionCommand(program) {
   // an ACTOR command: the runCli choke point runs it on the agent's admission.
   const ticket = session
     .command("ticket")
-    .description("The room's shared backlog: list, claim, renew, release and submit tickets");
+    .description("The room's shared backlog: list, claim, renew, release and submit tickets")
+    .addHelpText("after", `
+Workflow:
+  sl session ticket list <sessionId> --available --json
+  sl session ticket claim <sessionId> <ticketId> --expected-version <version>
+  sl session ticket renew <sessionId> <ticketId>
+  sl session ticket submit <sessionId> <ticketId> --sha <commit> --evidence-file evidence.json
+
+The evidence file is a JSON array of re-checkable claims. Submit means in_review,
+not done. Use release --reason "handoff" when you cannot continue.
+Agent work requires that agent's live admission; --agent is not authorization.
+Guide: https://sentinelayer.com/docs/senti/overview/
+`);
 
   // Ticket work is attributed by the CREDENTIAL, never by a label: the lease routes take the
   // holder from authentication alone. So an agent identity is allowed only with that agent's

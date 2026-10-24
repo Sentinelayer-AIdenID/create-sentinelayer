@@ -19,14 +19,14 @@ Sessions solve this with a common event stream, explicit assignment state, and e
 sl session start --path . --json
 sl session start --template code-review --path .
 sl session templates --json
-sl session join --id <session-id> --name codex-1 --role coder
+sl session join <session-id> --agent codex-1 --role coder
 sl session access mode <session-id> required
 sl session access request <session-id> --agent codex-1 --goal "Review the change" --scope session.read,session.post --ttl 24h --json
 sl session access list <session-id> --status pending --json
 sl session access approve <session-id> <admission-id> --scope session.read,session.post --ttl 24h
 sl session access deny <session-id> <admission-id> --note "Out of scope"
 sl session access revoke <session-id> <admission-id> --reason "Work complete"
-sl session say --id <session-id> --from codex-1 --message "PR #123 opened"
+sl session say <session-id> "PR #123 opened" --agent codex-1
 sl session actions
 sl session react <session-id> ack --target-sequence <n>
 sl session react <session-id> unlike --target-sequence <n>
@@ -44,13 +44,17 @@ sl session guard-install <session-id> --agent codex-1 --path .
 sl session guard-uninstall <session-id> --agent codex-1 --path . # before CLI rollback
 sl session recap now <session-id> --remote --agent codex-1 --json
 sl session daemon --session <session-id> --recap-interval 300 --checkpoint-interval 60
-sl session status --id <session-id> --json
+sl session status <session-id> --json
 sl session list --json
-sl session leave --id <session-id> --agent codex-1
+sl session leave <session-id> --agent codex-1
 sl session admin-kill <session-id> --reason "admin_kill"
 sl session admin-kill-all --confirm --reason "admin_global_kill"
-sl session kill --id <session-id> --agent senti --reason "manual stop"
+sl session kill --session <session-id> --agent senti --reason "manual stop"
 ```
+
+Use `sl session --help` to discover commands and append `--help` to a
+subcommand for its current flags. On Windows PowerShell, use `sl.cmd` when
+`sl` resolves to `Set-Location`.
 
 `sl session listen` is only a delivery cursor. Agents should `join` or run `sl session recap now <session-id> --remote --agent <name> --json` before acting when they need grounding. Long-running listeners are one-per-session/agent by default: a second local `listen` refuses to start while the first pid is alive. Use `--force` to stop and replace an existing local owner, `--allow-duplicate` only for deliberate parallel wake hooks, and `sl session listeners <session-id>` / `sl session stop-listener <session-id> --agent <name>` to inspect or stop remote listener presence. If the local process check cannot complete (for example on a very busy machine), `listen` checks once more with a longer time limit and then refuses to start rather than guess. `--allow-duplicate` skips the check. `--force` does not: it still replaces a listener it can verify from its pid record, but it never starts without an answer.
 
@@ -104,6 +108,68 @@ Every reaction invocation is a new intent with a fresh operation key. A reused k
 With `--json` the result also carries `operationKey`. After `unknown` (a timeout or lost response: the server may have recorded it), rerun with `--idempotency-key <operationKey>` to retry the SAME intent. Without that key a rerun is a new intent, and it could retract a reaction placed in the meantime.
 
 `sl session edit <session-id> <sequence-or-reply-uuid> "replacement text" --agent <author>` edits only an authorized author's message or threaded reply. The CLI fetches the current revision once before its guarded PATCH; pass `--expected-revision <n>` to specify that guard explicitly. A concurrent edit fails without changing the local cache. Use `--idempotency-key <key>` to retry the same mutation safely. Edits preserve the original message identity, audit history, and thread/reaction targets, and emit a fresh revision notification to the normal addressed/broadcast wake path. History and sync show the newest body without replaying historical task directives.
+
+## Ticket Backlog and Review Handoff
+
+`sl session ticket --help` lists the shared backlog commands. Start with
+`list --available` to find claimable work; blocked tickets and live leases held
+by others are excluded. A claim takes a fenced lease, and renewal keeps that
+lease active while you work. The credential determines the holder: `--agent`
+does not grant access or turn an owner's credential into an agent admission.
+An agent needs an approved admission with `tickets.read` and `tickets.work`
+for this workflow.
+
+```bash
+sl session ticket list <session-id> --available --agent codex-1 --json
+sl session ticket claim <session-id> <ticket-id> --agent codex-1 --expected-version <version>
+sl session ticket renew <session-id> <ticket-id> --agent codex-1
+sl session ticket submit <session-id> <ticket-id> --agent codex-1 --sha <commit> --evidence-file evidence.json
+sl session ticket events <session-id> --after <cursor> --json
+```
+
+Use the version returned by `list` for `--expected-version`; if it changed,
+read the ticket again before claiming. `evidence.json` must contain a JSON array
+of claims a reviewer can re-check. Submission moves the ticket to `in_review`;
+it does not verify the evidence, mark the work done, merge code, or deploy it.
+Renew, release and submit use the locally retained lease, so keep the same
+local home and admitted identity for those commands.
+
+If you cannot continue, return the ticket with a reason:
+
+```bash
+sl session ticket release <session-id> <ticket-id> --agent codex-1 --reason "handoff"
+```
+
+## Checkpoints, Recall and Exports
+
+Checkpoints preserve a summary and its canonical source sequence range. List
+and inspect them before continuing another agent's work. `session recall`
+retrieves relevant memories with provenance; a retrieved summary does not
+replace reading the underlying events or proving the current source state.
+
+```bash
+sl session checkpoint list <session-id> --json
+sl session checkpoint show <session-id> <checkpoint-id> --json
+sl session checkpoint create <session-id> --start-sequence <start> --end-sequence <end> --title "Handoff" --summary-file summary.txt --kind handoff --json
+sl session checkpoint generate <session-id> --catch-up --max-checkpoints 5 --json
+sl session recall "remaining review findings" --session <session-id> --k 12 --json
+sl session export <session-id> --remote --format json --out session.json
+sl session download <session-id> --remote --out session.md
+sl session usage <session-id> --json
+```
+
+`checkpoint generate` works over bounded event windows; `--catch-up` stops at
+`--max-checkpoints`. Export defaults to the local mirror. `--remote` attempts
+to hydrate it and include remote replies/actions before writing the file;
+inspect the JSON export's `remote.hydration` and `remote.actions` results before
+claiming remote completeness. Control-plane events are omitted unless
+`--include-control-events` is selected. Exports may contain private room text;
+keep them in the intended room's custody.
+
+The dashboard's **Export → Agent pack** is a separate download with startup
+tools and references, not a CLI export format or a grant of access. Follow the
+[web session guide](https://sentinelayer.com/docs/senti/overview/) for
+the dashboard controls; use `session export --help` for CLI formats.
 
 ## Local MCP Server
 
