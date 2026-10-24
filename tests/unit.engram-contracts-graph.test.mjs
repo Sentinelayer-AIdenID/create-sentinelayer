@@ -161,7 +161,8 @@ test("entitySchema: REFUSES entity without tenantScope", () => {
 test("linkSchema: validates a graph link with provenance", () => {
   assert.equal(linkSchema.safeParse({
     source: "n1", target: "n2", predicate: "child_of", provenance: "observed",
-    tenantScope: "tenant/acme", capturedAt: "2026-10-23T00:00:00Z",
+    tenantScope: "tenant/acme", sourceId: "src-001", sourceVersion: "1.0.0",
+    capturedAt: "2026-10-23T00:00:00Z",
   }).success, true);
 });
 
@@ -209,7 +210,8 @@ test("graphSchema: validates a complete versioned graph", () => {
     ],
     links: [
       { source: "a1", target: "a2", predicate: "supports", provenance: "derived",
-        tenantScope: "tenant/acme", capturedAt: "2026-10-23T00:00:00Z" },
+        tenantScope: "tenant/acme", sourceId: "src-001", sourceVersion: "1.0.0",
+        capturedAt: "2026-10-23T00:00:00Z" },
     ],
     coverage: {
       totalAssertions: 2,

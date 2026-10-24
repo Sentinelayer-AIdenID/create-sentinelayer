@@ -88,6 +88,7 @@ test("negotiateCapability: matched when versions identical", () => {
   const result = negotiateCapability({
     capability: "engram-graph",
     clientVersion: "engram-graph@1.0.0",
+    tenantScope: "tenant/acme",
     serverCapabilities: [{ capability: "engram-graph", version: "engram-graph@1.0.0", status: "supported", source: { sourceId: "s1", sourceType: "adapter", version: "enrich-v2@1.0.0", tenantScope: "tenant/acme" } }],
   });
   assert.equal(result.result, "matched");
@@ -98,6 +99,7 @@ test("negotiateCapability: upgraded when server is ahead on minor", () => {
   const result = negotiateCapability({
     capability: "engram-graph",
     clientVersion: "engram-graph@1.0.0",
+    tenantScope: "tenant/acme",
     serverCapabilities: [{ capability: "engram-graph", version: "engram-graph@1.1.0", status: "supported", source: { sourceId: "s1", sourceType: "adapter", version: "enrich-v2@1.0.0", tenantScope: "tenant/acme" } }],
   });
   assert.equal(result.result, "upgraded");
@@ -107,6 +109,7 @@ test("negotiateCapability: downgraded when server is behind on minor", () => {
   const result = negotiateCapability({
     capability: "engram-graph",
     clientVersion: "engram-graph@1.2.0",
+    tenantScope: "tenant/acme",
     serverCapabilities: [{ capability: "engram-graph", version: "engram-graph@1.0.0", status: "supported", source: { sourceId: "s1", sourceType: "adapter", version: "enrich-v2@1.0.0", tenantScope: "tenant/acme" } }],
   });
   assert.equal(result.result, "downgraded");
@@ -116,6 +119,7 @@ test("negotiateCapability: incompatible when major version differs", () => {
   const result = negotiateCapability({
     capability: "engram-graph",
     clientVersion: "engram-graph@2.0.0",
+    tenantScope: "tenant/acme",
     serverCapabilities: [{ capability: "engram-graph", version: "engram-graph@1.0.0", status: "supported", source: { sourceId: "s1", sourceType: "adapter", version: "enrich-v2@1.0.0", tenantScope: "tenant/acme" } }],
   });
   assert.equal(result.result, "incompatible");
@@ -125,6 +129,7 @@ test("negotiateCapability: unknown when capability not registered", () => {
   const result = negotiateCapability({
     capability: "unknown-cap",
     clientVersion: "unknown-cap@1.0.0",
+    tenantScope: "tenant/acme",
     serverCapabilities: [{ capability: "engram-graph", version: "engram-graph@1.0.0", status: "supported", source: { sourceId: "s1", sourceType: "adapter", version: "enrich-v2@1.0.0", tenantScope: "tenant/acme" } }],
   });
   assert.equal(result.result, "unknown");
@@ -134,6 +139,7 @@ test("negotiateCapability: incompatible when capability is unsupported", () => {
   const result = negotiateCapability({
     capability: "old-cap",
     clientVersion: "old-cap@1.0.0",
+    tenantScope: "tenant/acme",
     serverCapabilities: [{ capability: "old-cap", version: "old-cap@1.0.0", status: "unsupported", source: { sourceId: "s1", sourceType: "adapter", version: "ev@1.0.0", tenantScope: "tenant/acme" } }],
   });
   assert.equal(result.result, "incompatible");
@@ -143,6 +149,7 @@ test("negotiateCapability: incompatible when capability is stale", () => {
   const result = negotiateCapability({
     capability: "stale-cap",
     clientVersion: "stale-cap@2.0.0",
+    tenantScope: "tenant/acme",
     serverCapabilities: [{ capability: "stale-cap", version: "stale-cap@1.0.0", status: "stale", source: { sourceId: "s1", sourceType: "adapter", version: "ev@1.0.0", tenantScope: "tenant/acme" } }],
   });
   assert.equal(result.result, "incompatible");
@@ -216,6 +223,7 @@ test("negotiateCapability: REJECTS misspelled status", () => {
   const result = negotiateCapability({
     capability: "c",
     clientVersion: "c@1.0.0",
+    tenantScope: "tenant/acme",
     serverCapabilities: [{ capability: "c", version: "c@1.0.0", status: "suported", source: { sourceId: "s1", sourceType: "adapter", version: "ev@1.0.0", tenantScope: "tenant/acme" } }],
   });
   assert.equal(result.result, "unknown", "misspelled status must be rejected: " + JSON.stringify(result));
@@ -227,6 +235,7 @@ test("negotiateCapability: REJECTS when version name does not match capability",
   const result = negotiateCapability({
     capability: "engram-graph",
     clientVersion: "engram-graph@1.0.0",
+    tenantScope: "tenant/acme",
     serverCapabilities: [{ capability: "wrong-cap", version: "wrong-cap@2.0.0", status: "supported", source: { sourceId: "s1", sourceType: "adapter", version: "ev@1.0.0", tenantScope: "tenant/acme" } }],
   });
   assert.equal(result.result, "unknown", "unrelated capability must be rejected");
@@ -236,6 +245,7 @@ test("negotiateCapability: REJECTS client version name mismatch", () => {
   const result = negotiateCapability({
     capability: "engram-graph",
     clientVersion: "other-cap@1.0.0",
+    tenantScope: "tenant/acme",
     serverCapabilities: [{ capability: "engram-graph", version: "engram-graph@1.0.0", status: "supported", source: { sourceId: "s1", sourceType: "adapter", version: "enrich-v2@1.0.0", tenantScope: "tenant/acme" } }],
   });
   assert.equal(result.result, "incompatible", "mismatched client version name must be rejected");

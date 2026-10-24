@@ -128,7 +128,15 @@ export const evidenceFreshnessSchema = z.object({
     totalAssertions: z.number().int().nonnegative(),
     evidenced: z.number().int().nonnegative(),
     ratio: z.number().min(0).max(1),
-  }).strict(),
+  }).strict().superRefine((coverage, ctx) => {
+    if (coverage.evidenced > coverage.totalAssertions) {
+      ctx.addIssue({ code: "custom", path: ["evidenced"], message: "evidenced cannot exceed totalAssertions" });
+    }
+    const expected = coverage.totalAssertions === 0 ? 0 : coverage.evidenced / coverage.totalAssertions;
+    if (Math.abs(coverage.ratio - expected) > 1e-9) {
+      ctx.addIssue({ code: "custom", path: ["ratio"], message: "ratio must match evidenced / totalAssertions" });
+    }
+  }),
   staleAfterMs: z.number().int().positive().optional(),
   isStale: z.boolean().optional(),
 }).strict();

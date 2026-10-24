@@ -312,7 +312,7 @@ test("actionReceiptSchema: REFUSES contentHash not matching scheme:encoded forma
 
 test("actionReceiptSchema: ACCEPTS valid sha256:base64 contentHash", () => {
   const r = actionReceiptSchema.safeParse({ ...VALID_ACTION_RECEIPT,
-    contentHash: "sha256:YWJjMTIzZGVmCg==",
+    contentHash: "sha256:nji40eArkmG6ZZyc3Od23mge2TYew/f4vFc/wTBwCOE=",
   });
-  assert.equal(r.success, true, "valid scheme:encoded contentHash must be accepted");
+  assert.equal(r.success, true, "complete SHA-256 base64 digest must be accepted");
 });

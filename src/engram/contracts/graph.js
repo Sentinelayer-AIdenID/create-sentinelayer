@@ -89,7 +89,7 @@ export const entitySchema = z.object({
 /**
  * A link between two graph entities.
  *
- * Links with non-unknown provenance require tenantScope and capturedAt.
+ * Links with non-unknown provenance require a versioned data source and time.
  * Authoritative links require an evidenceAddress.
  */
 export const linkSchema = z.object({
@@ -100,19 +100,21 @@ export const linkSchema = z.object({
   confidence: modelConfidenceSchema.optional(),
   evidenceAddress: z.string().min(1).optional(),
   tenantScope: z.string().min(1),
+  sourceId: z.string().min(1).optional(),
+  sourceVersion: z.string().min(1).optional(),
   capturedAt: z.string().datetime().optional(),
-}).strict().refine(
-  (data) => {
-    if (data.provenance === "authoritative" && !data.evidenceAddress) {
-      return false;
+}).strict().superRefine((link, ctx) => {
+  if (link.provenance !== "unknown") {
+    for (const field of ["sourceId", "sourceVersion", "capturedAt"]) {
+      if (!link[field]) {
+        ctx.addIssue({ code: "custom", path: [field], message: `non-unknown link requires ${field}` });
+      }
     }
-    if (data.provenance !== "unknown" && !data.capturedAt) {
-      return false;
-    }
-    return true;
-  },
-  { message: "all links require tenantScope; non-unknown provenance links require capturedAt; authoritative links require evidenceAddress", path: ["capturedAt"] },
-);
+  }
+  if (link.provenance === "authoritative" && !link.evidenceAddress) {
+    ctx.addIssue({ code: "custom", path: ["evidenceAddress"], message: "authoritative link requires evidenceAddress" });
+  }
+});
 
 /**
  * Freshness marker (R09 truth). Every assertion that can go stale must carry
