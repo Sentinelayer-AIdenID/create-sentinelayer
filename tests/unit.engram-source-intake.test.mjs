@@ -211,6 +211,25 @@ test("trusted reader's actual version rejects bytes from a registry ABA", async 
   assert.equal(requestedVersion, source.version);
 });
 
+test("a replayed error from an earlier call cannot be rewritten or rethrown as trusted", async () => {
+  let captured;
+  try {
+    await captureSourceBytes(fixture({ sources: new Map() }));
+  } catch (error) {
+    captured = error;
+  }
+  assert.ok(captured instanceof SourceIntakeError);
+  assert.ok(Object.isFrozen(captured), "internal errors are frozen");
+  assert.throws(() => { "use strict"; captured.message = "private_error_detail"; }, TypeError);
+  async function* replayingStream() {
+    throw captured;
+  }
+  // Even replayed unchanged, a stream-thrown error is re-raised as a FRESH error carrying only its allow-listed code.
+  await assert.rejects(captureSourceBytes(fixture({ read: async () => ({
+    status: 200, url, version: source.version, mediaType: "text/plain", body: replayingStream(),
+  }) })), (error) => error !== captured && error.code === "source_not_approved" && error.message === "source_not_approved");
+});
+
 test("untrusted async stream errors cannot export their private message", async () => {
   async function* hostileStream() {
     throw new SourceIntakeError("private_error_detail");

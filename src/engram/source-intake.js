@@ -34,9 +34,14 @@ export class SourceIntakeError extends Error {
 }
 
 const OWN_ERRORS = new WeakSet();
+const CODES = new Set([
+  "invalid_source_limit", "source_access_denied", "source_not_approved",
+  "source_rejected", "source_too_large", "source_unavailable",
+]);
 
 function reject(code) {
-  const error = new SourceIntakeError(code);
+  // Frozen: a caller that kept an error from an earlier call cannot rewrite its message or code and replay it.
+  const error = Object.freeze(new SourceIntakeError(code));
   OWN_ERRORS.add(error);
   throw error;
 }
@@ -171,7 +176,9 @@ export async function captureSourceBytes({
   try {
     bytes = await boundedBytes(response.body, maxBytes);
   } catch (error) {
-    if (OWN_ERRORS.has(error)) throw error;
+    // Never rethrow the caught object: a body stream can throw anything, including one of our own earlier errors.
+    // Re-raise only a fresh error carrying an allow-listed code.
+    if (OWN_ERRORS.has(error) && CODES.has(error.code)) reject(error.code);
     reject("source_unavailable");
   }
   if (declaredLength !== undefined && declaredLength !== bytes.length) {
