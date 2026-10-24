@@ -1082,8 +1082,12 @@ export async function syncSessionEventToApi(
           try {
             const cred = await readCredential(normalizedSessionId, agentId);
             storedNoAutoGrant = !!(cred?.credential?.noAutoGrant);
-          } catch {
-            // credential file absent or unreadable — no preference to apply
+          } catch (error) {
+            // Only a missing file means no preference. Any other read error
+            // (permissions, corruption, transient I/O) must fail closed: a
+            // 403 must NOT auto-grant because the preference is unreadable.
+            if (!error || error.code !== "ENOENT") throw error;
+            // credential file absent — no preference to apply
           }
           if (storedNoAutoGrant) {
             return { synced: false, reason: "api_403" };

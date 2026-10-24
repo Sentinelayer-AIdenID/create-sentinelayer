@@ -651,8 +651,15 @@ export async function runAdmissionJoin(
           const cred = await persistNoAutoGrantIfNeeded(current.credential, noAutoGrant, sid, agent, homeDir);
           return cred;
         }
-        // Credential changed under us; return the held snapshot unchanged.
-        return held.credential;
+        // Credential changed under us; re-read one final time under the
+        // held lock. If another writer replaced the credential, fail rather
+        // than returning a stale snapshot.
+        const retry = await readAdmissionCredentialState(sid, agent, { homeDir, now: now() });
+        if (retry.state === "live" && retry.credential.requestFingerprint === fingerprint) {
+          const cred = await persistNoAutoGrantIfNeeded(retry.credential, noAutoGrant, sid, agent, homeDir);
+          return cred;
+        }
+        throw new Error("Admission credential changed during join; retry the join.");
       });
     return redacted({ status: "active", reused: true, stored: fastPathCredential, sid, agent, homeDir });
   }
@@ -713,8 +720,14 @@ export async function runAdmissionJoin(
           if (current.state === "live" && current.credential?.admissionId === created.admissionId) {
             return persistNoAutoGrantIfNeeded(current.credential, noAutoGrant, sid, agent, homeDir);
           }
-          // Credential changed under us; fall back to held snapshot.
-          return persistNoAutoGrantIfNeeded(held.credential, noAutoGrant, sid, agent, homeDir);
+          // Credential changed under us; re-read one final time under
+          // the held lock. If another writer replaced the credential, fail
+          // rather than writing a stale snapshot.
+          const retry = await readAdmissionCredentialState(sid, agent, { homeDir, now: now() });
+          if (retry.state === "live" && retry.credential?.admissionId === created.admissionId) {
+            return persistNoAutoGrantIfNeeded(retry.credential, noAutoGrant, sid, agent, homeDir);
+          }
+          throw new Error("Admission credential changed during join; retry the join.");
         });
     return redacted({ status: "active", reused: true, stored: fastPathCredential, sid, agent, homeDir });
     }

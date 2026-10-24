@@ -927,38 +927,61 @@ test("second fast-path (server-reused) locks against concurrent token rotation",
   // and the local credential is live with matching admissionId, the second
   // fast-path wrote held.credential without a lock. A concurrent recovery could
   // rotate the token, and this path would restore the stale one.
+  //
+  // To bypass the first fast path (which also has fingerprint match), we keep
+  // the credential file live but modify its stored fingerprint so the first
+  // fast-path fingerprint check fails. The server has the same agent+key in
+  // memory and returns reused=true. The second fast path then fires.
   const dirs = await scratch();
   const api = fakeApi({ onPoll: (adm) => { adm.status = "approved"; } });
-  // Get a live credential first.
-  await runAdmissionJoin(SID, base(api, dirs));
+  const first = await runAdmissionJoin(SID, base(api, dirs));
+  assert.equal(first.status, "active");
   const credPath = admissionCredentialPath(SID, "builder-1", dirs);
+  const firstStored = JSON.parse(await fsp.readFile(credPath, "utf8"));
+  assert.ok(firstStored.token, "first join stored a token");
 
-  // Simulate a concurrent rotation happening just as we enter the fast path.
-  // We use a requestMutation wrapper that rotates the credential after the
-  // server responds reused, before persistNoAutoGrantIfNeeded writes.
+  // Modify the stored fingerprint so the first fast path (which compares
+  // held.credential.requestFingerprint === fingerprint) does not match.
+  firstStored.requestFingerprint = firstStored.requestFingerprint + "_stale";
+  await fsp.writeFile(credPath, JSON.stringify(firstStored));
+
+  // Simulate a concurrent writer that replaces the credential entirely
+  // between the server response and the lock acquisition. The transport
+  // wrapper replaces the credential with a different live one (different
+  // admissionId) after the server responds reused.
   let rotatedToken;
   let rotationDone = false;
   const transport = async (url, options) => {
     const result = await api.requestMutation(url, options);
     if (result?.reused && !rotationDone) {
-      // A concurrent recovery just rotated the token.
-      const current = JSON.parse(await fsp.readFile(credPath, "utf8"));
-      rotatedToken = current.token + "_rotated";
-      current.token = rotatedToken;
-      current.expiresAt = current.expiresAt + 3600;
-      await fsp.writeFile(credPath, JSON.stringify(current));
+      // Replace the credential with a different live one, simulating a
+      // concurrent recovery with a rotated token and different admissionId.
+      rotatedToken = "sladm_" + "R".repeat(43);
+      const rotated = {
+        token: rotatedToken,
+        sessionId: SID.toLowerCase(),
+        agentId: "builder-1",
+        publicKey: firstStored.publicKey,
+        apiUrl: firstStored.apiUrl,
+        requestFingerprint: "different_fingerprint_xyz",
+        admissionId: "different-adm-id",
+        identity: firstStored.identity,
+        grant: firstStored.grant,
+        correlation: firstStored.correlation,
+        expiresAt: firstStored.expiresAt + 7200,
+        storedAt: new Date().toISOString(),
+      };
+      await fsp.writeFile(credPath, JSON.stringify(rotated));
       rotationDone = true;
     }
     return result;
   };
 
-  const result = await runAdmissionJoin(SID, base(api, dirs, { requestMutation: transport }));
-  const stored = JSON.parse(await fsp.readFile(credPath, "utf8"));
-  // With the lock fix, the fast path rereads after acquiring the lock and
-  // sees the rotated token, so we either get the rotated token or the held
-  // one is from the lock-reread path. Without the lock, the stale held.credential
-  // would overwrite the rotated token.
-  // Regardless of which wins, the stored token must be valid (not the pre-rotation one).
-  assert.ok(stored.token, "credential token must be set after server-reused fast path");
-  // The credential file should have been written exactly once more (the lock path).
+  // The join must throw because the credential changed (admissionId mismatch)
+  // and the fix rejects stale fallback instead of silently writing it.
+  await assert.rejects(
+    () => runAdmissionJoin(SID, base(api, dirs, { requestMutation: transport })),
+    /Admission credential changed during join/,
+    "must throw when credential changes under lock instead of writing stale snapshot"
+  );
 });
