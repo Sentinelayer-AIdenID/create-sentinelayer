@@ -12,6 +12,7 @@
 // Money contract (§ step-9, step-10)
 export {
   moneySchema,
+  migrateLegacyMoney,
   minorUnitsSchema,
   decimalStringSchema,
   toMinorUnits,

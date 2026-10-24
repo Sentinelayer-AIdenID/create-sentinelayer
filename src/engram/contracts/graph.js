@@ -18,7 +18,7 @@
  */
 
 import { z } from "zod";
-import { moneySchema } from "./money.js";
+import { moneySchema, currencyExponent } from "./money.js";
 import { GRAPH_SCHEMA_VERSION } from "./versions.js";
 
 /**
@@ -186,6 +186,21 @@ export const graphSchema = z.object({
   freshness: freshnessSchema.optional(),
   generatedAt: z.string().datetime(),
 }).strict().superRefine((data, ctx) => {
+  const generatedAtMs = Date.parse(data.generatedAt);
+  const capturedByGeneration = (timestamp, path) => {
+    if (timestamp && Date.parse(timestamp) > generatedAtMs) {
+      ctx.addIssue({ code: "custom", path, message: "fact time cannot be after graph generatedAt" });
+    }
+  };
+  capturedByGeneration(data.freshness?.asOf, ["freshness", "asOf"]);
+  (data.entities ?? []).forEach((entity, i) => capturedByGeneration(entity.capturedAt, ["entities", i, "capturedAt"]));
+  data.assertions.forEach((assertion, i) => {
+    capturedByGeneration(assertion.source.capturedAt, ["assertions", i, "source", "capturedAt"]);
+    capturedByGeneration(assertion.evidenceRef?.verifiedAt, ["assertions", i, "evidenceRef", "verifiedAt"]);
+    capturedByGeneration(assertion.freshness?.asOf, ["assertions", i, "freshness", "asOf"]);
+  });
+  (data.links ?? []).forEach((link, i) => capturedByGeneration(link.capturedAt, ["links", i, "capturedAt"]));
+
   const nodeScopes = new Map();
   for (const [kind, nodes] of [["entities", data.entities ?? []], ["assertions", data.assertions]]) {
     nodes.forEach((node, i) => {
@@ -278,7 +293,10 @@ export const quantitySchema = z.object({
   kind: z.literal("quantity"),
   value: z.number().finite(),
   unit: z.string().regex(/^[a-z][a-z0-9/_-]*$/),
-}).strict();
+}).strict().refine(
+  ({ unit }) => currencyExponent(unit.toUpperCase()) === null,
+  { message: "currency units require a canonical money object", path: ["unit"] },
+);
 
 function isMoneyFieldName(key) {
   return MONEY_FIELD_NAMES.has(key);

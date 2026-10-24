@@ -15,26 +15,26 @@ import {
 import { graphSchema, validateGraphIntegrity, assertionSchema } from "../src/engram/contracts/graph.js";
 
 test("moneySchema: accepts integer minor units with currency and exponent", () => {
-  const result = moneySchema.safeParse({ amount: 199, currency: "USD", exponent: 2 });
+  const result = moneySchema.safeParse({ amount: 199, amountUnit: "minor_units", currency: "USD", exponent: 2 });
   assert.equal(result.success, true);
   assert.equal(result.data.amount, 199);
   assert.equal(result.data.currency, "USD");
 });
 
 test("moneySchema: accepts validated decimal string", () => {
-  const result = moneySchema.safeParse({ amount: "1.99", currency: "USD", exponent: 2 });
+  const result = moneySchema.safeParse({ amount: "1.99", amountUnit: "major_decimal", currency: "USD", exponent: 2 });
   assert.equal(result.success, true);
   assert.equal(result.data.amount, "1.99");
 });
 
 test("moneySchema: accepts negative amount for credit", () => {
-  const result = moneySchema.safeParse({ amount: -500, currency: "USD", exponent: 2 });
+  const result = moneySchema.safeParse({ amount: -500, amountUnit: "minor_units", currency: "USD", exponent: 2 });
   assert.equal(result.success, true);
   assert.equal(result.data.amount, -500);
 });
 
 test("moneySchema: REFUSES binary float (not integer minor units)", () => {
-  const result = moneySchema.safeParse({ amount: 1.99, currency: "USD" });
+  const result = moneySchema.safeParse({ amount: 1.99, amountUnit: "minor_units", currency: "USD" });
   assert.equal(result.success, false);
   const issues = result.error.issues.map((i) => i.message);
   const hasFloat = issues.some((m) => /binary floats/i.test(m));
@@ -42,42 +42,42 @@ test("moneySchema: REFUSES binary float (not integer minor units)", () => {
 });
 
 test("moneySchema: REFUSES NaN", () => {
-  const result = moneySchema.safeParse({ amount: NaN, currency: "USD" });
+  const result = moneySchema.safeParse({ amount: NaN, amountUnit: "minor_units", currency: "USD" });
   assert.equal(result.success, false);
 });
 
 test("moneySchema: REFUSES Infinity", () => {
-  const result = moneySchema.safeParse({ amount: Infinity, currency: "USD" });
+  const result = moneySchema.safeParse({ amount: Infinity, amountUnit: "minor_units", currency: "USD" });
   assert.equal(result.success, false);
 });
 
 test("moneySchema: REFUSES unsafe integer", () => {
-  const result = moneySchema.safeParse({ amount: 2 ** 53, currency: "USD" });
+  const result = moneySchema.safeParse({ amount: 2 ** 53, amountUnit: "minor_units", currency: "USD" });
   assert.equal(result.success, false);
 });
 
 test("moneySchema: REFUSES currency not matching ISO 4217 3-letter pattern", () => {
-  const result = moneySchema.safeParse({ amount: 100, currency: "us" });
+  const result = moneySchema.safeParse({ amount: 100, amountUnit: "minor_units", currency: "us" });
   assert.equal(result.success, false);
 });
 
 test("moneySchema: REFUSES exponent that contradicts known currency exponent", () => {
-  const result = moneySchema.safeParse({ amount: 100, currency: "USD", exponent: 3 });
+  const result = moneySchema.safeParse({ amount: 100, amountUnit: "minor_units", currency: "USD", exponent: 3 });
   assert.equal(result.success, false);
 });
 
 test("moneySchema: REFUSES decimal string with too many fractional digits for exponent", () => {
-  const result = moneySchema.safeParse({ amount: "1.999", currency: "USD", exponent: 2 });
+  const result = moneySchema.safeParse({ amount: "1.999", amountUnit: "major_decimal", currency: "USD", exponent: 2 });
   assert.equal(result.success, false);
 });
 
 test("moneySchema: accepts JPY with exponent 0", () => {
-  const result = moneySchema.safeParse({ amount: 500, currency: "JPY", exponent: 0 });
+  const result = moneySchema.safeParse({ amount: 500, amountUnit: "minor_units", currency: "JPY", exponent: 0 });
   assert.equal(result.success, true);
 });
 
 test("moneySchema: accepts BHD with exponent 3", () => {
-  const result = moneySchema.safeParse({ amount: 1000, currency: "BHD", exponent: 3 });
+  const result = moneySchema.safeParse({ amount: 1000, amountUnit: "minor_units", currency: "BHD", exponent: 3 });
   assert.equal(result.success, true);
 });
 
@@ -98,14 +98,14 @@ test("decimalStringSchema: REFUSES leading zeros on non-zero integer", () => {
 });
 
 test("toMinorUnits: converts decimal string to integer minor units", () => {
-  assert.equal(toMinorUnits({ amount: "1.99", currency: "USD", exponent: 2 }), 199);
-  assert.equal(toMinorUnits({ amount: "10.00", currency: "USD", exponent: 2 }), 1000);
-  assert.equal(toMinorUnits({ amount: "500", currency: "JPY", exponent: 0 }), 500);
-  assert.equal(toMinorUnits({ amount: -500, currency: "USD" }), -500);
+  assert.equal(toMinorUnits({ amount: "1.99", amountUnit: "major_decimal", currency: "USD", exponent: 2 }), 199);
+  assert.equal(toMinorUnits({ amount: "10.00", amountUnit: "major_decimal", currency: "USD", exponent: 2 }), 1000);
+  assert.equal(toMinorUnits({ amount: "500", amountUnit: "major_decimal", currency: "JPY", exponent: 0 }), 500);
+  assert.equal(toMinorUnits({ amount: -500, amountUnit: "minor_units", currency: "USD" }), -500);
 });
 
 test("toMinorUnits: returns null for non-finite values", () => {
-  assert.equal(toMinorUnits({ amount: "notanumber", currency: "USD" }), null);
+  assert.equal(toMinorUnits({ amount: "notanumber", amountUnit: "major_decimal", currency: "USD" }), null);
 });
 
 test("formatFromMinorUnits: formats minor units to decimal string", () => {
@@ -125,9 +125,9 @@ test("currencyExponent: returns known exponent for ISO codes", () => {
 });
 
 test("moneySchema round-trip: integer minor units -> format -> parse -> same integer", () => {
-  const original = { amount: 1999, currency: "USD", exponent: 2 };
+  const original = { amount: 1999, amountUnit: "minor_units", currency: "USD", exponent: 2 };
   const formatted = formatFromMinorUnits(original.amount, original.exponent);
-  const reparsed = moneySchema.safeParse({ amount: formatted, currency: original.currency, exponent: original.exponent });
+  const reparsed = moneySchema.safeParse({ amount: formatted, amountUnit: "major_decimal", currency: original.currency, exponent: original.exponent });
   assert.equal(reparsed.success, true);
   assert.equal(toMinorUnits(reparsed.data), 1999);
 });
@@ -139,7 +139,7 @@ test("wrong-price proof: structurally valid price is NOT factually verified", ()
   // structurally valid but NOT declared factually verified."
 
   const structurallyValid = moneySchema.safeParse({
-    amount: "999999.99",
+    amount: "999999.99", amountUnit: "major_decimal",
     currency: "USD",
     exponent: 2,
   });
@@ -190,7 +190,7 @@ test("wrong-price proof: graph-level price verification requires provenance", ()
         subject: "product/xyz",
         predicate: "Price",
         // Structurally valid money object — passes moneySchema
-        object: { amount: "999999.99", currency: "USD", exponent: 2 },
+        object: { amount: "999999.99", amountUnit: "major_decimal", currency: "USD", exponent: 2 },
         provenance: "observed",
         schemaValidity: "valid",
         source: {
@@ -235,7 +235,7 @@ test("wrong-price proof: observed price with no evidence is not treated as autho
     id: "assert-price-002",
     subject: "product/xyz",
     predicate: "Price",
-    object: { amount: "1.00", currency: "USD", exponent: 2 },
+    object: { amount: "1.00", amountUnit: "major_decimal", currency: "USD", exponent: 2 },
     provenance: "authoritative",
     schemaValidity: "valid",
     source: {
@@ -255,7 +255,7 @@ test("wrong-price proof: observed price with no evidence is not treated as autho
 // --- New tests for luna-judge P2 findings ---
 
 test("moneySchema: REFUSES unknown currency code with provided exponent", () => {
-  const result = moneySchema.safeParse({ amount: 100, currency: "ZZZ", exponent: 2 });
+  const result = moneySchema.safeParse({ amount: 100, amountUnit: "minor_units", currency: "ZZZ", exponent: 2 });
   assert.equal(result.success, false, "unknown currency ZZZ must be rejected");
   const messages = result.error.issues.map((i) => i.message);
   assert.ok(messages.some((m) => /not in the supported/i.test(m)),
@@ -263,20 +263,20 @@ test("moneySchema: REFUSES unknown currency code with provided exponent", () => 
 });
 
 test("moneySchema: REFUSES extra unsupported field (strict)", () => {
-  const result = moneySchema.safeParse({ amount: 199, currency: "USD", exponent: 2, verified: true });
+  const result = moneySchema.safeParse({ amount: 199, amountUnit: "minor_units", currency: "USD", exponent: 2, verified: true });
   assert.equal(result.success, false, "extra 'verified' field must be rejected");
 });
 
 test("toMinorUnits: returns null for excess fractional digits (no silent truncation)", () => {
-  assert.equal(toMinorUnits({ amount: "1.999", currency: "USD", exponent: 2 }), null,
+  assert.equal(toMinorUnits({ amount: "1.999", amountUnit: "major_decimal", currency: "USD", exponent: 2 }), null,
     "1.999 with exponent 2 must return null, not silently truncate to 199");
-  assert.equal(toMinorUnits({ amount: "1.99", currency: "USD", exponent: 2 }), 199,
+  assert.equal(toMinorUnits({ amount: "1.99", amountUnit: "major_decimal", currency: "USD", exponent: 2 }), 199,
     "1.99 with exponent 2 must correctly convert to 199");
 });
 
 test("toMinorUnits: rejects excess fraction before BigInt conversion", () => {
-  assert.equal(toMinorUnits({ amount: "0.123", currency: "BHD", exponent: 3 }), 123,
+  assert.equal(toMinorUnits({ amount: "0.123", amountUnit: "major_decimal", currency: "BHD", exponent: 3 }), 123,
     "0.123 with BHD exponent 3 must convert correctly");
-  assert.equal(toMinorUnits({ amount: "0.1234", currency: "BHD", exponent: 3 }), null,
+  assert.equal(toMinorUnits({ amount: "0.1234", amountUnit: "major_decimal", currency: "BHD", exponent: 3 }), null,
     "0.1234 with BHD exponent 3 must return null (excess precision)");
 });

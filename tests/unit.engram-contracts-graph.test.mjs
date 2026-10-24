@@ -355,7 +355,7 @@ test("validateGraphIntegrity: rejects money float in assertion field (F6: typed 
       id: "a1",
       subject: "x",
       predicate: "cost",
-      object: { Amount: { amount: 1.99, currency: "USD" } },
+      object: { Amount: { amount: 1.99, amountUnit: "minor_units", currency: "USD" } },
       provenance: "observed",
       schemaValidity: "valid",
       source: { sourceId: "src-001", version: "1.0.0", capturedAt: "2026-10-23T00:00:00Z", tenantScope: "tenant/acme" },
@@ -405,7 +405,7 @@ test("validateGraphIntegrity: catches money float in entity.attributes.Price (F6
       tenantScope: "tenant/acme",
       sourceId: "src-1", sourceVersion: "1.0.0",
       capturedAt: "2026-10-23T00:00:00Z",
-      attributes: { Price: { amount: 1.99, currency: "USD" } },
+      attributes: { Price: { amount: 1.99, amountUnit: "minor_units", currency: "USD" } },
     }],
     generatedAt: "2026-10-23T00:00:00Z",
   });
@@ -522,7 +522,7 @@ test("validateGraphIntegrity: ACCEPTS monetary predicate with valid money object
   const { valid, errors } = validateGraphIntegrity({
     version: "1.0.0",
     assertions: [{
-      id: "a1", subject: "x", predicate: "cost", object: { amount: 199, currency: "USD", exponent: 2 },
+      id: "a1", subject: "x", predicate: "cost", object: { amount: 199, amountUnit: "minor_units", currency: "USD", exponent: 2 },
       provenance: "observed", schemaValidity: "valid",
       source: { sourceId: "src-001", version: "1.0.0", capturedAt: "2026-10-23T00:00:00Z", tenantScope: "tenant/acme" },
     }],

@@ -12,7 +12,7 @@ test("a trusted receipt/evidence source binds the actual price; a valid wrong-pr
   // This store represents independently authenticated source data, not fields
   // submitted by the candidate graph or its receipt.
   const pinned = Object.freeze({
-    sku: "sku-1", price: Object.freeze({ amount: "9.99", currency: "USD", exponent: 2 }),
+    sku: "sku-1", price: Object.freeze({ amount: "9.99", amountUnit: "major_decimal", currency: "USD", exponent: 2 }),
     tenantScope: "tenant/acme", sourceId: "catalog-feed", sourceVersion: "1.0.0",
   });
   const payload = JSON.stringify(pinned);
@@ -87,7 +87,7 @@ test("a trusted receipt/evidence source binds the actual price; a valid wrong-pr
   assert.equal(validateNotScreenshotInferred(address, { verifySource }).valid, false);
   trustedStore.set(receipt.receiptId, { receipt, payload, pinned });
 
-  const wrongPrice = graphWithPrice({ amount: "1.99", currency: "USD", exponent: 2 });
+  const wrongPrice = graphWithPrice({ amount: "1.99", amountUnit: "major_decimal", currency: "USD", exponent: 2 });
   assert.equal(graphSchema.safeParse(wrongPrice).success, true, "wrong price is structurally valid");
   assert.equal(validateGraphIntegrity(wrongPrice).valid, false, "caller metadata does not grant authority");
   assert.equal(validateGraphIntegrity(wrongPrice, { verifyEvidence }).valid, false);

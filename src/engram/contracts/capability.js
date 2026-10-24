@@ -263,13 +263,20 @@ export function negotiateCapability({ capability, clientVersion, tenantScope, se
     return makeResult({ result: "unknown", reason: "serverCapabilities must be an array" });
   }
 
-  const serverCap = serverCapabilities.find((entry) =>
+  const matchingEntries = serverCapabilities.filter((entry) =>
     entry && typeof entry === "object" && entry.capability === capability &&
     entry.source?.tenantScope === requestedTenant);
 
-  if (!serverCap) {
+  if (matchingEntries.length === 0) {
     return makeResult({ result: "unknown", reason: `capability "${capability}" is not registered for this tenant` });
   }
+  // A list with multiple claims for one capability and tenant cannot choose
+  // authority by array order. A selection policy for version sets belongs in a
+  // later protocol version; this contract fails closed until one is defined.
+  if (matchingEntries.length > 1) {
+    return makeResult({ reason: `capability "${capability}" has ambiguous server entries for this tenant` });
+  }
+  const serverCap = matchingEntries[0];
 
   // Validate the server entry against the full capabilityEntrySchema.
   // This ensures source, tenantScope, and all required fields are present

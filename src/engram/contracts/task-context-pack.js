@@ -12,6 +12,7 @@
 import { z } from "zod";
 import { sourceSnapshotSchema } from "./source-snapshot.js";
 import { capabilityVersionSchema } from "./capability.js";
+import { CONTRACT_VERSIONS } from "./versions.js";
 
 /**
  * A delegation reference: what agent or capability is delegated, with
@@ -37,7 +38,7 @@ export const delegationReferenceSchema = z.object({
  */
 export const taskContextPackSchema = z.object({
   packId: z.string().min(1),
-  version: z.string().min(1),
+  version: z.literal(CONTRACT_VERSIONS.taskContextPack),
   tenantScope: z.string().min(1),
   sourceSnapshot: sourceSnapshotSchema,
   capabilities: z.array(capabilityVersionSchema).optional(),
@@ -46,12 +47,23 @@ export const taskContextPackSchema = z.object({
   createdAt: z.string().datetime(),
   expiresAt: z.string().datetime().optional(),
   metadata: z.record(z.string(), z.json()).optional(),
-}).strict().refine(
-  (data) => {
-    return data.sourceSnapshot.tenantScope === data.tenantScope;
-  },
-  { message: "sourceSnapshot tenantScope must match pack tenantScope", path: ["sourceSnapshot", "tenantScope"] },
-);
+}).strict().superRefine((data, ctx) => {
+  if (data.sourceSnapshot.tenantScope !== data.tenantScope) {
+    ctx.addIssue({ code: "custom", message: "sourceSnapshot tenantScope must match pack tenantScope", path: ["sourceSnapshot", "tenantScope"] });
+  }
+  if (Date.parse(data.sourceSnapshot.capturedAt) > Date.parse(data.createdAt)) {
+    ctx.addIssue({ code: "custom", message: "sourceSnapshot cannot be captured after pack creation", path: ["sourceSnapshot", "capturedAt"] });
+  }
+  if (data.expiresAt && Date.parse(data.expiresAt) <= Date.parse(data.createdAt)) {
+    ctx.addIssue({ code: "custom", message: "expiresAt must be after createdAt", path: ["expiresAt"] });
+  }
+  const declared = new Set(data.capabilities ?? []);
+  for (const [index, delegation] of (data.delegations ?? []).entries()) {
+    if (!declared.has(delegation.capability)) {
+      ctx.addIssue({ code: "custom", message: "delegation capability must be declared by this pack", path: ["delegations", index, "capability"] });
+    }
+  }
+});
 
 /**
  * Valid fixture: a complete task context pack.

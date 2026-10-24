@@ -73,8 +73,8 @@ export const decimalStringSchema = z.string().regex(
  * The single canonical money schema — strict: rejects extra fields.
  *
  * A well-formed monetary value in ENGRAM is exactly one of:
- *   { amount: <integer minor units>, currency: "USD", exponent: 2 }
- *   { amount: "-?[0-9]+(\\.[0-9]+)?", currency: "USD", exponent: 2 }
+ *   { amount: <integer minor units>, amountUnit: "minor_units", currency: "USD", exponent: 2 }
+ *   { amount: "-?[0-9]+(\\.[0-9]+)?", amountUnit: "major_decimal", currency: "USD", exponent: 2 }
  *
  * Binary floats (1.99), NaN, Infinity, and unsafe integers are REFUSED.
  * Unknown currency codes are REFUSED (P2: pinned registry only).
@@ -85,9 +85,15 @@ export const moneySchema = z.object({
     z.number().superRefine(rejectFloat),
     decimalStringSchema,
   ]),
+  // Do not infer units from JSON number/string representation. A lost quote
+  // must fail validation rather than silently changing a total by 10^exponent.
+  amountUnit: z.enum(["minor_units", "major_decimal"]),
   currency: z.string().regex(CURRENCY_RE, { message: "currency must be a 3-letter ISO 4217 code" }),
   exponent: z.number().int().min(0).max(6).optional(),
 }).strict().refine(
+  (data) => (data.amountUnit === "minor_units") === (typeof data.amount === "number"),
+  { message: "amountUnit must match numeric minor units or string major decimal", path: ["amountUnit"] },
+).refine(
   (data) => {
     if (!KNOWN_CURRENCIES.has(data.currency)) {
       return false;
@@ -122,6 +128,18 @@ export const moneySchema = z.object({
   },
   { message: "currency requires a known exponent; provide exponent or use a known currency code", path: ["exponent"] },
 );
+
+/**
+ * Migrate a pre-freeze `{amount, currency, exponent}` value only when the
+ * importing source explicitly declares its old unit convention. Never guess
+ * a unit from a number/string, since that can multiply a total by 10^exponent.
+ * Returns null for malformed or already-tagged input.
+ */
+export function migrateLegacyMoney(legacy, amountUnit) {
+  if (!legacy || typeof legacy !== "object" || Array.isArray(legacy) || "amountUnit" in legacy) return null;
+  const result = moneySchema.safeParse({ ...legacy, amountUnit });
+  return result.success ? result.data : null;
+}
 
 /**
  * Exact decimal multiplication using BigInt for lossless conversion.
@@ -170,24 +188,27 @@ function decimalToMinorUnitsExact(decimal, exponent) {
  * Uses exact BigInt conversion for decimal strings (F5).
  * Validates the input: rejects extra fractional digits that would truncate.
  *
- * @param {object} money — a moneySchema-validated object
+ * @param {object} money — an explicitly unit-tagged money object
  * @returns {number|null}
  */
 export function toMinorUnits(money) {
-  const exponent = money.exponent ?? CURRENCY_MINOR_UNITS.get(money.currency);
+  const parsed = moneySchema.safeParse(money);
+  if (!parsed.success) return null;
+  const value = parsed.data;
+  const exponent = value.exponent ?? CURRENCY_MINOR_UNITS.get(value.currency);
   if (exponent == null) return null;
 
-  if (typeof money.amount === "number") return money.amount;
+  if (value.amountUnit === "minor_units") return value.amount;
 
   // Validate: reject if fractional digits exceed exponent (would truncate)
-  const dot = money.amount.indexOf(".");
+  const dot = value.amount.indexOf(".");
   if (dot >= 0) {
-    const fracLen = money.amount.length - dot - 1;
+    const fracLen = value.amount.length - dot - 1;
     if (fracLen > exponent) return null;
   }
 
   // Exact BigInt conversion for decimal strings
-  const exact = decimalToMinorUnitsExact(money.amount, exponent);
+  const exact = decimalToMinorUnitsExact(value.amount, exponent);
   if (exact == null) return null;
 
   // Check safe integer range before converting back to Number

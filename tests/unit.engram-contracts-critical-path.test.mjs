@@ -116,7 +116,7 @@ test("unknown money names cannot carry ambiguous bare numeric facts", () => {
 test("canonical money and explicitly typed non-money quantities pass", () => {
   const input = graph({ assertions: [
     assertion({ id: "a1", predicate: "grandTotal", object: {
-      amount: "1.99", currency: "USD", exponent: 2,
+      amount: "1.99", amountUnit: "major_decimal", currency: "USD", exponent: 2,
     } }),
     assertion({ id: "a2", predicate: "temperature", object: {
       kind: "quantity", value: 36.6, unit: "celsius",

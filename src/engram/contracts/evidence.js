@@ -83,7 +83,14 @@ export const evidenceRecordSchema = z.object({
   independentlyVerified: z.boolean().optional(),
   /** Verifier identity — who attested this evidence is not screenshot-inferred */
   verifiedBy: z.string().min(1).optional(),
-}).strict();
+}).strict().superRefine((record, ctx) => {
+  if (record.address.capturedAt && Date.parse(record.address.capturedAt) > Date.parse(record.collectedAt)) {
+    ctx.addIssue({ code: "custom", message: "address capturedAt cannot be after collectedAt", path: ["address", "capturedAt"] });
+  }
+  if (record.expiresAt && Date.parse(record.expiresAt) <= Date.parse(record.collectedAt)) {
+    ctx.addIssue({ code: "custom", message: "expiresAt must be after collectedAt", path: ["expiresAt"] });
+  }
+});
 
 /**
  * Paginated evidence list.
@@ -97,15 +104,18 @@ export const evidencePageSchema = z.object({
   nextCursor: z.string().optional(),
   hasMore: z.boolean(),
   total: z.number().int().nonnegative().optional(),
-}).strict().refine(
-  (data) => {
-    if (data.hasMore && !data.nextCursor) {
-      return false;
-    }
-    return true;
-  },
-  { message: "hasMore requires nextCursor for pagination", path: ["nextCursor"] },
-);
+}).strict().superRefine((data, ctx) => {
+  if (data.hasMore && !data.nextCursor) {
+    ctx.addIssue({ code: "custom", message: "hasMore requires nextCursor for pagination", path: ["nextCursor"] });
+  }
+  const scopes = new Set(data.items.map((record) => record.address.tenantScope));
+  if (scopes.size > 1) {
+    ctx.addIssue({ code: "custom", message: "evidence page cannot mix tenant scopes", path: ["items"] });
+  }
+  if (data.total != null && data.total < data.items.length) {
+    ctx.addIssue({ code: "custom", message: "total cannot be smaller than items count", path: ["total"] });
+  }
+});
 
 /**
  * Migration policy for evidence format changes.
