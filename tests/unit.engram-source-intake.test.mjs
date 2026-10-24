@@ -211,6 +211,19 @@ test("trusted reader's actual version rejects bytes from a registry ABA", async 
   assert.equal(requestedVersion, source.version);
 });
 
+test("IPv6 literal hosts are refused even when their origin is allow-listed", async () => {
+  for (const literal of ["https://[::1]/llms.txt", "https://[fe80::1]/llms.txt", "https://[2001:db8::1]/llms.txt"]) {
+    let reads = 0;
+    const origin = new URL(literal).origin;
+    await rejectsCode(fixture({
+      allowedOrigins: new Set([origin]),
+      sources: new Map([[sourceId, { ...source, url: literal }]]),
+      read: async () => { reads += 1; throw Error("must not read"); },
+    }), "source_not_approved", literal);
+    assert.equal(reads, 0, literal);
+  }
+});
+
 test("a replayed error from an earlier call cannot be rewritten or rethrown as trusted", async () => {
   let captured;
   try {

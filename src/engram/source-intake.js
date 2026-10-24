@@ -56,7 +56,7 @@ function approvedUrl(raw, allowedOrigins) {
   }
   if (
     url.href !== raw || url.protocol !== "https:" || url.username || url.password ||
-    url.search || url.hash || isIP(url.hostname) || !allowedOrigins.has(url.origin)
+    url.search || url.hash || isIP(url.hostname.replace(/^\[|\]$/g, "")) || !allowedOrigins.has(url.origin)
   ) reject("source_not_approved");
   return url.href;
 }
