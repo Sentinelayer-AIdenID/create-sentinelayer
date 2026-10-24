@@ -14,5 +14,9 @@ JSON returns the ticket and `idempotencyKey`. After an uncertain response, retry
 the exact request using `--idempotency-key KEY`; error output retains the key.
 Changing the source or body under the same key is refused by the API.
 
-Requires the API creator-provenance companion change. This does not alter ticket
+Agent and source attribution need the API's creator-provenance change. A server
+without it accepts the ticket and ignores `agentId`/`sourceSequenceId`, so the
+ticket is attributed to your account. The command never claims attribution it
+did not get: JSON carries `provenance.agentRecorded` / `provenance.sourceRecorded`
+read from the stored ticket, and text output says when either was not recorded. This does not alter ticket
 work lease identity, admission, claim, renew or submission authority.

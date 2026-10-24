@@ -225,7 +225,15 @@ export async function createTicket(sessionId, {
         ...(normalizeString(assignee) ? { assignee: normalizeString(assignee) } : {}),
         ...(sourceSequenceId !== null ? { sourceSequenceId } : {}) },
     });
-    return { ticket, idempotencyKey };
+    // Report what the server RECORDED, not what was sent: a server without the creator-provenance change accepts
+    // and ignores agentId/sourceSequenceId, so a requested attribution may be absent from the stored ticket.
+    const provenance = {
+      agentRequested: cleanAgent || null,
+      agentRecorded: Boolean(cleanAgent) && ticket?.createdBy === cleanAgent,
+      sourceRequested: sourceSequenceId,
+      sourceRecorded: sourceSequenceId !== null && Number(ticket?.sourceSequenceId) === sourceSequenceId,
+    };
+    return { ticket, idempotencyKey, provenance };
   } catch (error) {
     // Retain the logical write's retry key even if the server committed but the response was lost.
     throw new Error(`${error.message || "Ticket creation failed"} (retry with --idempotency-key ${idempotencyKey})`, { cause: error });

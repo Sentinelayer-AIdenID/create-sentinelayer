@@ -7366,7 +7366,7 @@ Guide: https://sentinelayer.com/docs/senti/overview/
 
   ticket
     .command("create <sessionId>")
-    .description("Create a ticket with server-authorized creator and source attribution")
+    .description("Create a ticket in the room. Agent and source attribution are recorded only by servers that support them; the output says whether they were")
     .requiredOption("--title <text>", "Ticket title")
     .option("--body <text>", "Ticket description", "")
     .option("--agent <id>", "Acting agent identity, authorized by the server")
@@ -7384,7 +7384,12 @@ Guide: https://sentinelayer.com/docs/senti/overview/
         sourceSequenceId: options.sourceSequence === undefined ? null : parsePositiveInteger(options.sourceSequence, "source-sequence", 1),
         ...(options.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : {}),
       });
-      ticketOutput(options, command, { command: "session ticket create", ...result }, `Created ${result.ticket.id}.`);
+      const unrecorded = [
+        result.provenance.agentRequested && !result.provenance.agentRecorded ? `agent ${result.provenance.agentRequested}` : "",
+        result.provenance.sourceRequested !== null && !result.provenance.sourceRecorded ? `source #${result.provenance.sourceRequested}` : "",
+      ].filter(Boolean);
+      ticketOutput(options, command, { command: "session ticket create", ...result },
+        `Created ${result.ticket.id}.${unrecorded.length ? ` This server did not record the ${unrecorded.join(" or ")}; the ticket is attributed to your account.` : ""}`);
     });
 
   ticket

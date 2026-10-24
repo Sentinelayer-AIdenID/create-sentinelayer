@@ -341,6 +341,39 @@ test("ticket create carries explicit agent and source while the request uses its
   const request = api.requests.find(r => r.method === "POST" && r.path.endsWith("/tickets"));
   assert.equal(request.bearer, ADMISSION_TOKEN);
   assert.equal(request.key, "create-10000000-0000-4000-8000-000000000001");
+  assert.deepEqual(ran.json.provenance, { agentRequested: AGENT, agentRecorded: true, sourceRequested: 52041, sourceRecorded: false });
+});
+
+test("ticket create reports attribution the server did NOT record instead of claiming it", async () => {
+  const { createTicket } = await import("../src/session/tickets.js");
+  const created = await createTicket(SID, {
+    title: "file once", agentId: "probe-a", sourceSequenceId: 7, idempotencyKey: "create-key-unrecorded",
+    resolveAuthSession: async () => ({ token: "synthetic", apiUrl: API }),
+    // A server without the creator-provenance change: it ignores agentId/sourceSequenceId.
+    requestMutation: async () => ({ id: "t-new", title: "file once", createdBy: "user-1", version: 1 }),
+  });
+  assert.deepEqual(created.provenance, { agentRequested: "probe-a", agentRecorded: false, sourceRequested: 7, sourceRecorded: false });
+});
+
+test("ticket create keeps its key across an uncertain response, and a retry reuses it", async () => {
+  const { createTicket } = await import("../src/session/tickets.js");
+  const keys = [];
+  const opts = (requestMutation) => ({
+    title: "file once", idempotencyKey: "create-key-uncertain",
+    resolveAuthSession: async () => ({ token: "synthetic", apiUrl: API }), requestMutation,
+  });
+  // The server may have committed, but the response was lost.
+  await assert.rejects(
+    createTicket(SID, opts(async (_url, init) => { keys.push(init.idempotencyKey); throw new Error("socket hang up"); })),
+    (error) => {
+      assert.match(String(error.message), /socket hang up/);
+      assert.match(String(error.message), /retry with --idempotency-key create-key-uncertain/);
+      return true;
+    },
+  );
+  const retried = await createTicket(SID, opts(async (_url, init) => { keys.push(init.idempotencyKey); return { id: "t-1", title: "file once", version: 1 }; }));
+  assert.equal(retried.idempotencyKey, "create-key-uncertain");
+  assert.deepEqual(keys, ["create-key-uncertain", "create-key-uncertain"]);
 });
 
 test("a claim the server records for someone else is not recorded as ours", async () => {
