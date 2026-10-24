@@ -347,6 +347,18 @@ const MONEY_UNIT_WORDS = new Set([
   "buck", "bucks",
 ]);
 
+// Compact names lack word boundaries. Recognize only deliberate modifier +
+// monetary-terminal pairs; arbitrary suffix matching mistakes percent for
+// cents, coffee for a fee, and nonprofit for profit.
+const COMPACT_MONEY_MODIFIERS = Object.freeze([
+  "grand", "gross", "net", "order", "purchase", "sale", "invoice",
+  "unit", "base", "list", "retail", "shipping", "item", "lineitem",
+  "total", "tax", "discount", "refund", "payment",
+]);
+const COMPACT_MONEY_TERMINALS = new Set([
+  ...MONEY_FIELD_SUFFIXES, "tax", ...MONEY_UNIT_WORDS,
+]);
+
 // Quantity units are intentionally closed in this protocol version. An open
 // string lets new currency names and slang bypass the canonical money type.
 // A caller can still mislabel a price as a count under an unrelated field
@@ -400,11 +412,10 @@ function isMoneyFieldName(key, value) {
       [...STRONG_MONEY_FIELD_TOKENS, "total", "tax"].some((word) => suffix.startsWith(word))) {
     return true;
   }
-  // Accept compact aliases as names, not as untyped amounts: `grandtotal`,
-  // `purchaseprice` and `totaldollars` have monetary terminal words even
-  // without camel-case or separators.
-  if (words.length === 1 && [...MONEY_FIELD_SUFFIXES, "tax", ...MONEY_UNIT_WORDS]
-    .some((word) => suffix.endsWith(word))) return true;
+  // Compact aliases need a recognized modifier and a whole terminal, since
+  // suffixes inside ordinary words are not semantic money boundaries.
+  if (words.length === 1 && COMPACT_MONEY_MODIFIERS.some((modifier) =>
+    suffix.startsWith(modifier) && COMPACT_MONEY_TERMINALS.has(suffix.slice(modifier.length)))) return true;
   if (words.length === 1 && (STRONG_MONEY_FIELD_TOKENS.has(words[0]) ||
       MONEY_UNIT_WORDS.has(words[0]) || words[0] === "total" || words[0] === "tax")) return true;
   // Outside named metadata, a monetary field needs canonical money whatever

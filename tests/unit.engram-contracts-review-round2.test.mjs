@@ -198,6 +198,7 @@ test("compound money names reject string-encoded prices in assertions and entiti
 test("compact monetary aliases and amount-like metadata require canonical money", () => {
   for (const [name, value] of Object.entries({
     grandtotal: "19.99", GRANDTOTAL: "19.99", purchaseprice: "19.99",
+    shippingcost: "19.99", orderamount: "19.99", lineitemprices: "19.99",
     totaldollars: "19.99", priceNumber: "19.99", pricenumber: "19.99",
     priceTier: quantity,
   })) {
@@ -207,13 +208,28 @@ test("compact monetary aliases and amount-like metadata require canonical money"
       false, `entity ${name} cannot disguise money`);
   }
   for (const [name, value] of Object.entries({
-    grandtotal: price, priceNumber: price, orderNumber: "PO-12", priceTier: "gold",
+    grandtotal: price, lineitemprices: [price], priceNumber: price,
+    orderNumber: "PO-12", priceTier: "gold",
     costCenter: "CC-12", paymentTerms: "net 30", totalcount: quantity,
   })) {
     assert.equal(validateGraphIntegrity(graph({ assertions: [assertion(name, value)] })).valid,
       true, `assertion ${name} remains valid`);
     assert.equal(validateGraphIntegrity(graph({ entities: [entity({ [name]: value })] })).valid,
       true, `entity ${name} remains valid`);
+  }
+});
+
+test("ordinary compact words do not inherit monetary suffixes", () => {
+  const ordinary = {
+    percent: { kind: "quantity", value: 12.5, unit: "percent" },
+    recent: "2026-10-23", scent: "citrus", coffee: "arabica",
+    syntax: "json", nonprofit: "registered",
+  };
+  for (const [name, value] of Object.entries(ordinary)) {
+    assert.equal(validateGraphIntegrity(graph({ assertions: [assertion(name, value)] })).valid,
+      true, `assertion ${name} is not a monetary fact`);
+    assert.equal(validateGraphIntegrity(graph({ entities: [entity({ [name]: value })] })).valid,
+      true, `entity ${name} is not a monetary fact`);
   }
 });
 
