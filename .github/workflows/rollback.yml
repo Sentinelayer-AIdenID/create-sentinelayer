@@ -64,9 +64,11 @@ jobs:
 
       - name: Require explicit rollback confirmation
         shell: bash
+        env:
+          INPUT_CONFIRM: ${{ inputs.confirm }}
         run: |
           set -euo pipefail
-          if [ "${{ inputs.confirm }}" != "ROLLBACK" ]; then
+          if [ "${INPUT_CONFIRM}" != "ROLLBACK" ]; then
             echo "::error::Rollback confirmation missing. Re-run with confirm=ROLLBACK."
             exit 1
           fi

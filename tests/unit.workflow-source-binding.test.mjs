@@ -1,7 +1,12 @@
 import "./setup-env.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import os from "node:os";
+import path from "node:path";
+import { parse } from "yaml";
 
 const PR_HEAD_EXPRESSION =
   "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}";
@@ -63,4 +68,39 @@ test("required-check polling retries transient GitHub API failures within bounde
   assert.match(gate, /--retry-max-time "\$\{GITHUB_API_RETRY_MAX_SECONDS\}"/);
   assert.match(gate, /--retry-all-errors/);
   assert.doesNotMatch(gate, /curl -fsSL/);
+});
+
+test("rollback confirmation stays data even when the dispatch input contains shell syntax", async () => {
+  const workflow = parse(await readFile(".github/workflows/rollback.yml", "utf8"));
+  const confirmation = workflow.jobs["rollback-execute"].steps.find(
+    (step) => step.name === "Require explicit rollback confirmation"
+  );
+  assert.ok(confirmation, "rollback confirmation step must exist");
+  assert.equal(confirmation.env.INPUT_CONFIRM, "${{ inputs.confirm }}");
+  assert.doesNotMatch(confirmation.run, /\$\{\{\s*inputs\./);
+
+  const bash = process.platform === "win32"
+    ? ["C:\\Program Files\\Git\\bin\\bash.exe", "C:\\Program Files\\Git\\usr\\bin\\bash.exe"].find(existsSync)
+    : "bash";
+  if (!bash) return;
+  const root = await mkdtemp(path.join(os.tmpdir(), "sl-rollback-confirm-"));
+  const marker = path.join(root, "injected");
+  try {
+    const injection = spawnSync(bash, ["-c", confirmation.run], {
+      encoding: "utf8",
+      cwd: root,
+      env: { ...process.env, INPUT_CONFIRM: '$(touch "$INJECTION_MARKER")', INJECTION_MARKER: "injected" },
+    });
+    assert.equal(injection.status, 1, injection.stderr);
+    assert.equal(existsSync(marker), false, "dispatch input must not execute as Bash");
+
+    const allowed = spawnSync(bash, ["-c", confirmation.run], {
+      encoding: "utf8",
+      cwd: root,
+      env: { ...process.env, INPUT_CONFIRM: "ROLLBACK" },
+    });
+    assert.equal(allowed.status, 0, allowed.stderr);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
