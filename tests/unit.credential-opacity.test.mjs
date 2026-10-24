@@ -189,7 +189,7 @@ test("the README says where the token goes, that POCKET_GATEWAY_URL is not read,
 });
 
 test("the init flow's client also refuses a hand-built Authorization header", async () => {
-  const { __legacyCredentialFlowForTests: legacy } = await import("../src/legacy-cli.js");
+  const { __initCallsForTests: legacy } = await import("../src/legacy-cli.js");
   const server = await startServer();
   try {
     await assert.rejects(legacy.requestJson(`${server.url}/x`, { headers: { Authorization: `Bearer ${SECRET}` } }), TypeError);
