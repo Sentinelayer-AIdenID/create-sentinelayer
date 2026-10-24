@@ -26,7 +26,7 @@ import { invokeViaProxy } from "../src/ai/proxy.js";
 import { queryHybridRetriever } from "../src/memory/retrieval.js";
 import { runHostedMcpSmoke } from "../src/mcp/smoke.js";
 import { requestHostedMcpAccessToken } from "../src/mcp/token-service.js";
-import { __legacyCredentialFlowForTests as legacy } from "../src/legacy-cli.js";
+import { __initCallsForTests as legacy } from "../src/legacy-cli.js";
 import { bearerOf } from "./credential-probe.mjs";
 
 // A loopback server; `routes` maps "METHOD /path" (or "METHOD /prefix*") to a handler.
