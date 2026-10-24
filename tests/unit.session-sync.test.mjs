@@ -2002,6 +2002,41 @@ test("Unit session sync: stored credential without noAutoGrant proceeds to grant
   resetSessionSyncStateForTests();
 });
 
+test("Unit session sync: corrupt credential file fails closed on 403 IDENTITY_FORGERY", async () => {
+  resetSessionSyncStateForTests();
+  __resetAutoGrantCacheForTests();
+  const calls = [];
+  const result = await syncSessionEventToApi(
+    "sess-grant-10",
+    buildIdentityForgeryEventEnvelope({ agentId: "keeper-bot", role: "coder" }),
+    {
+      noAutoGrant: false,
+      resolveAuthSession: async () => ({
+        token: "tok_test_grant",
+        apiUrl: "https://api.sentinelayer.com",
+      }),
+      readCredential: async () => {
+        throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+      },
+      fetchImpl: async (url, options) => {
+        calls.push({ url, method: options.method });
+        return makeJsonResponse({
+          ok: false,
+          status: 403,
+          body: { error: { code: "IDENTITY_FORGERY", message: "agent identity 'keeper-bot' is not granted" } },
+        });
+      },
+      nowMs: () => 1_700_001_000_000,
+    }
+  );
+  // The outer try/catch in syncSessionEventToApi catches the thrown error and
+  // returns { synced: false }. The key assertion: the function did NOT proceed
+  // to auto-grant (calls should only have the original /events POST, no grant call).
+  assert.equal(result.synced, false, "non-ENOENT credential read error must fail closed");
+  assert.equal(calls.length, 1, "only the initial /events POST, no grant+retry loop");
+  resetSessionSyncStateForTests();
+});
+
 // --- CLI parsing: --no-auto-grant on the real session join command ---
 // These tests register the application's actual session join command (via
 // registerSessionCommand) and verify that the Commander-negated option
