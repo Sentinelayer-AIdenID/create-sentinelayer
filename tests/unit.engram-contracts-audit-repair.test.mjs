@@ -6,6 +6,7 @@ import {
   delegationReferenceSchema,
   taskContextPackSchema,
   VALID_TASK_CONTEXT_PACK,
+  graphSchema,
   quantitySchema,
   validateGraphIntegrity,
 } from '../src/engram/contracts/index.js';
@@ -68,4 +69,28 @@ test('delegation version bounds must be ordered and include the delegated versio
     assert.equal(delegationReferenceSchema.safeParse({ ...base, ...valid }).success, true, JSON.stringify(valid));
     assert.equal(pack({ ...base, ...valid }), true, JSON.stringify(valid));
   }
+});
+
+test('graph freshness claim agrees with its generation-time age', () => {
+  const graph = {
+    version: '1.0.0', assertions: [], generatedAt: '2026-10-23T12:00:00Z',
+    freshness: {
+      asOf: '2026-10-23T11:00:00Z', staleAfterMs: 1000, isStale: false,
+    },
+  };
+  assert.equal(graphSchema.safeParse(graph).success, false);
+  assert.equal(validateGraphIntegrity(graph).valid, false);
+  assert.equal(graphSchema.safeParse({
+    ...graph, freshness: { ...graph.freshness, isStale: true },
+  }).success, true);
+  assert.equal(graphSchema.safeParse({
+    ...graph, freshness: {
+      asOf: '2026-10-23T11:59:59.500Z', staleAfterMs: 1000, isStale: false,
+    },
+  }).success, true);
+  assert.equal(graphSchema.safeParse({
+    ...graph, freshness: {
+      asOf: '2026-10-23T11:59:59Z', staleAfterMs: 1000, isStale: true,
+    },
+  }).success, true);
 });

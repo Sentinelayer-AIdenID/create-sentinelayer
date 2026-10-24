@@ -193,6 +193,12 @@ export const graphSchema = z.object({
     }
   };
   capturedByGeneration(data.freshness?.asOf, ["freshness", "asOf"]);
+  if (data.freshness?.asOf && data.freshness.staleAfterMs != null && data.freshness.isStale != null) {
+    const ageMs = generatedAtMs - Date.parse(data.freshness.asOf);
+    if (data.freshness.isStale !== (ageMs >= data.freshness.staleAfterMs)) {
+      ctx.addIssue({ code: "custom", path: ["freshness", "isStale"], message: "isStale must match the age at graph generation" });
+    }
+  }
   (data.entities ?? []).forEach((entity, i) => capturedByGeneration(entity.capturedAt, ["entities", i, "capturedAt"]));
   data.assertions.forEach((assertion, i) => {
     capturedByGeneration(assertion.source.capturedAt, ["assertions", i, "source", "capturedAt"]);
