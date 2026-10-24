@@ -4145,3 +4145,18 @@ Review evidence:
 - [x] Focused proof: 81/81 deterministic tests; exact old runtime fails all 16 selected refusal controls; syntax 405/405; Git diff check clean. No network/provider/real-key reads.
 - [ ] Independent/root review of the frozen correction overlay before commit/push.
 - [ ] Final ship requirements: npm run verify; required Omar/audit and hosted gates under root custody. No live TypeSafe activation or spending in correction preparation.
+
+# 2026-10-24 - EW02 PR862 round-two review corrections
+
+## Plan
+- [x] Reproduce Sol and Luna's exact-head counterexamples as fail-first contract tests (0/5 passed before repair).
+- [x] Restrict compound money-name enforcement to number-carrying values, normalize plural words, and preserve exact money-name strictness.
+- [x] Require provenance on factual entity labels/attributes; verify authoritative entity claims with the same trusted callback as assertions and links.
+- [x] Require a freshness basis for graph/assertion isStale and use one unpadded nonblank identity validator for source and capability scopes.
+- [x] Run focused and full contract/unit/static gates, review the bounded diff, commit a direct child of 0b41c210, and report SHA without pushing.
+
+## Review
+- Fail-first at 0b41c210: all five review classes failed. Final focused ENGRAM contract matrix: 213/213 passed.
+- Sequential full unit suite: 2,720 passed, three skipped, zero failed. Final static check: 417 source files passed; docs validation passed; package dry-run succeeded. Git diff check is clean.
+- `npm run verify` reached E2E: 134/136 passed. The two unrelated, unchanged tests fail on an old hardcoded help URL and a legacy session-join request returning `LEGACY_AGENT_ACCESS_UNAVAILABLE` 503. The first concurrent unit attempt also saw Windows EPERM in an untouched auth-store file-rename test; the sequential full rerun passed.
+- Fact-bearing entity label/attributes now share one explicit provenance class. Mixed-provenance fields belong in separate assertions; source-only entities retain their existing shape. An observed or unknown wrong price remains structurally valid but does not become authoritative; only a trusted verifier checking the exact entity payload can accept an authoritative claim.

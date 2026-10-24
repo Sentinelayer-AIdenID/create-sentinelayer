@@ -20,6 +20,7 @@
 import { z } from "zod";
 import { moneySchema } from "./money.js";
 import { GRAPH_SCHEMA_VERSION } from "./versions.js";
+import { nonblankIdentitySchema } from "./identity.js";
 
 /**
  * Provenance classification (R09 truth). Must be one of exactly four values.
@@ -55,36 +56,44 @@ export const modelConfidenceSchema = z.enum(["high", "medium", "low", "unavailab
  * Required for authoritative classification (luna-judge finding F2).
  */
 export const evidenceRefSchema = z.object({
-  address: z.string().min(1),
+  address: nonblankIdentitySchema,
   verifiedAt: z.string().datetime(),
-  verifier: z.string().min(1),
+  verifier: nonblankIdentitySchema,
 }).strict();
 
 /**
  * An entity node in the ENGRAM graph.
  *
- * Entities carrying factual content (label, attributes) require sourceVersion
- * and capturedAt to establish provenance. Source-less facts are fabricable.
+ * Entities carrying factual content (label, attributes) declare provenance,
+ * source version and capture time. Authority requires trusted evidence.
  */
 export const entitySchema = z.object({
-  id: z.string().min(1),
-  type: z.string().min(1),
+  id: nonblankIdentitySchema,
+  type: nonblankIdentitySchema,
   label: z.string().optional(),
   attributes: z.record(z.string(), z.json()).optional(),
-  tenantScope: z.string().min(1),
-  sourceId: z.string().min(1),
-  sourceVersion: z.string().min(1),
+  provenance: provenanceClassSchema.optional(),
+  evidenceRef: evidenceRefSchema.optional(),
+  tenantScope: nonblankIdentitySchema,
+  sourceId: nonblankIdentitySchema,
+  sourceVersion: nonblankIdentitySchema,
   capturedAt: z.string().datetime().optional(),
-}).strict().refine(
-  (data) => {
-    const hasFacts = !!(data.label || (data.attributes && Object.keys(data.attributes).length > 0));
-    if (hasFacts && !data.capturedAt) {
-      return false;
-    }
-    return true;
-  },
-  { message: "entity with factual content (label or attributes) requires capturedAt", path: ["capturedAt"] },
-);
+}).strict().superRefine((data, ctx) => {
+  const hasFacts = data.label !== undefined ||
+    (data.attributes && Object.keys(data.attributes).length > 0);
+  if (hasFacts && !data.capturedAt) {
+    ctx.addIssue({ code: "custom", path: ["capturedAt"],
+      message: "entity with factual content (label or attributes) requires capturedAt" });
+  }
+  if (hasFacts && !data.provenance) {
+    ctx.addIssue({ code: "custom", path: ["provenance"],
+      message: "entity with factual content requires an explicit provenance class" });
+  }
+  if (data.provenance === "authoritative" && !data.evidenceRef) {
+    ctx.addIssue({ code: "custom", path: ["evidenceRef"],
+      message: "authoritative entity requires an evidenceRef" });
+  }
+});
 
 /**
  * A link between two graph entities.
@@ -93,15 +102,15 @@ export const entitySchema = z.object({
  * Authoritative links require an evidenceAddress.
  */
 export const linkSchema = z.object({
-  source: z.string().min(1),
-  target: z.string().min(1),
-  predicate: z.string().min(1),
+  source: nonblankIdentitySchema,
+  target: nonblankIdentitySchema,
+  predicate: nonblankIdentitySchema,
   provenance: provenanceClassSchema,
   confidence: modelConfidenceSchema.optional(),
-  evidenceAddress: z.string().min(1).optional(),
-  tenantScope: z.string().min(1),
-  sourceId: z.string().min(1).optional(),
-  sourceVersion: z.string().min(1).optional(),
+  evidenceAddress: nonblankIdentitySchema.optional(),
+  tenantScope: nonblankIdentitySchema,
+  sourceId: nonblankIdentitySchema.optional(),
+  sourceVersion: nonblankIdentitySchema.optional(),
   capturedAt: z.string().datetime().optional(),
 }).strict().superRefine((link, ctx) => {
   if (link.provenance !== "unknown") {
@@ -125,17 +134,25 @@ export const freshnessSchema = z.object({
   staleAfterMs: z.number().int().positive().optional(),
   isStale: z.boolean().optional(),
   coverageRatio: z.number().min(0).max(1).optional(),
-}).strict();
+}).strict().superRefine((freshness, ctx) => {
+  if (freshness.isStale === undefined) return;
+  for (const field of ["asOf", "staleAfterMs"]) {
+    if (freshness[field] === undefined) {
+      ctx.addIssue({ code: "custom", path: [field],
+        message: `isStale requires ${field} to establish a freshness basis` });
+    }
+  }
+});
 
 /**
  * A versioned source descriptor. Every assertion must carry a source version
  * and tenant scope (luna-judge finding F2).
  */
 export const sourceDescriptorSchema = z.object({
-  sourceId: z.string().min(1),
-  version: z.string().min(1),
+  sourceId: nonblankIdentitySchema,
+  version: nonblankIdentitySchema,
   capturedAt: z.string().datetime(),
-  tenantScope: z.string().min(1),
+  tenantScope: nonblankIdentitySchema,
 }).strict();
 
 /**
@@ -147,9 +164,9 @@ export const sourceDescriptorSchema = z.object({
  * Authoritative assertions MUST carry an evidenceRef (luna-judge P1 finding).
  */
 export const assertionSchema = z.object({
-  id: z.string().min(1),
-  subject: z.string().min(1),
-  predicate: z.string().min(1),
+  id: nonblankIdentitySchema,
+  subject: nonblankIdentitySchema,
+  predicate: nonblankIdentitySchema,
   object: z.json(),
   provenance: provenanceClassSchema,
   schemaValidity: schemaValiditySchema,
@@ -334,6 +351,8 @@ const MONEY_UNIT_WORDS = new Set([
 
 // Quantity units are intentionally closed in this protocol version. An open
 // string lets new currency names and slang bypass the canonical money type.
+// A caller can still mislabel a price as a count under an unrelated field
+// name; only source-bound evidence, not a field-name guess, resolves truth.
 const NON_MONETARY_UNITS = new Set([
   "count", "ratio", "percent", "percentage", "celsius", "fahrenheit", "kelvin",
   "ms", "millisecond", "milliseconds", "s", "second", "seconds", "min", "minute", "minutes",
@@ -352,9 +371,28 @@ export const quantitySchema = z.object({
   path: ["unit"],
 });
 
-function isMoneyFieldName(key) {
+function singularWord(word) {
+  if (word === "taxes") return "tax";
+  if (word.endsWith("ies") && word.length > 3) return `${word.slice(0, -3)}y`;
+  if (word.endsWith("s") && !word.endsWith("ss")) return word.slice(0, -1);
+  return word;
+}
+
+function isPluralMoneyFieldName(key) {
+  const terminal = key.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase()
+    .split(/[^a-z0-9]+/).at(-1);
+  return terminal.endsWith("s") && terminal !== singularWord(terminal);
+}
+
+function isMoneyFieldName(key, value) {
   if (MONEY_FIELD_NAMES.has(key)) return true;
-  const words = key.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase().split(/[^a-z0-9]+/);
+  const words = key.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase()
+    .split(/[^a-z0-9]+/).filter(Boolean).map(singularWord);
+  if (words.length === 1 && (STRONG_MONEY_FIELD_TOKENS.has(words[0]) ||
+      MONEY_UNIT_WORDS.has(words[0]) || words[0] === "total" || words[0] === "tax")) return true;
+  // Compound names can be merchant metadata (priceTier, taxExempt). Only
+  // values capable of carrying numbers need the name-based money boundary.
+  if (value === null || (typeof value !== "number" && typeof value !== "object")) return false;
   const suffix = words.at(-1);
   if (NON_MONETARY_METADATA_TERMINALS.has(suffix)) return false;
   if (words.some((word) => STRONG_MONEY_FIELD_TOKENS.has(word) || MONEY_UNIT_WORDS.has(word))) return true;
@@ -414,9 +452,12 @@ export function validateGraphIntegrity(graph, { verifyEvidence } = {}) {
   if (data.entities) {
     for (let i = 0; i < data.entities.length; i++) {
       const e = data.entities[i];
-      const hasFacts = !!(e.label || (e.attributes && Object.keys(e.attributes).length > 0));
+      const hasFacts = e.label !== undefined || (e.attributes && Object.keys(e.attributes).length > 0);
       if (hasFacts && (!e.sourceVersion || !e.capturedAt)) {
         errors.push(`entities[${i}]: entity with factual content requires sourceVersion and capturedAt`);
+      }
+      if (e.provenance === "authoritative" && !isVerified(e, e.evidenceRef)) {
+        errors.push(`entities[${i}]: authoritative entity requires trusted evidence verification`);
       }
     }
   }
@@ -461,7 +502,9 @@ export function validateGraphIntegrity(graph, { verifyEvidence } = {}) {
     for (const key of Object.keys(obj)) {
       const val = obj[key];
       const fullPath = `${path}.${key}`;
-      if (isMoneyFieldName(key)) {
+      if (isMoneyFieldName(key, val)) {
+        if (Array.isArray(val) && isPluralMoneyFieldName(key) &&
+            val.every((item) => moneySchema.safeParse(item).success)) continue;
         if (typeof val === "object" && val !== null) {
           const moneyResult = moneySchema.safeParse(val);
           if (!moneyResult.success) {
@@ -481,9 +524,10 @@ export function validateGraphIntegrity(graph, { verifyEvidence } = {}) {
   // Check: assertions with monetary predicates must have moneySchema-valid objects
   for (let i = 0; i < data.assertions.length; i++) {
     const a = data.assertions[i];
-    if (isMoneyFieldName(a.predicate)) {
-      const objResult = moneySchema.safeParse(a.object);
-      if (!objResult.success) {
+    if (isMoneyFieldName(a.predicate, a.object)) {
+      const isMoneyList = Array.isArray(a.object) && isPluralMoneyFieldName(a.predicate) &&
+        a.object.every((item) => moneySchema.safeParse(item).success);
+      if (!isMoneyList && !moneySchema.safeParse(a.object).success) {
         errors.push(`assertions[${i}].object: assertion with monetary predicate "${a.predicate}" must have a canonical money object, got ${typeof a.object === "object" ? JSON.stringify(a.object) : String(a.object)}`);
       }
     }

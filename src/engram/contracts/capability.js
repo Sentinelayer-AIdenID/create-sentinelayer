@@ -17,6 +17,7 @@
  */
 
 import { z } from "zod";
+import { nonblankIdentitySchema } from "./identity.js";
 
 /**
  * A capability version identifier.
@@ -34,8 +35,8 @@ export const capabilityVersionSchema = z.string().regex(
  * A tenant scope: the namespace boundary for all capability operations.
  */
 export const tenantScopeSchema = z.object({
-  tenantId: z.string().min(1).max(128),
-  namespace: z.string().min(1).max(256).optional(),
+  tenantId: nonblankIdentitySchema.max(128),
+  namespace: nonblankIdentitySchema.max(256).optional(),
   environment: z.enum(["production", "staging", "development", "sandbox"]).optional(),
 }).strict();
 
@@ -43,10 +44,10 @@ export const tenantScopeSchema = z.object({
  * A source descriptor: identifies where an assertion or capability originated.
  */
 export const sourceDescriptorSchema = z.object({
-  sourceId: z.string().min(1),
+  sourceId: nonblankIdentitySchema,
   sourceType: z.enum(["adapter", "ingest", "derived", "external", "manual"]),
   version: capabilityVersionSchema,
-  tenantScope: z.string().min(1),
+  tenantScope: nonblankIdentitySchema,
   endpoint: z.string().url().optional(),
 }).strict();
 
@@ -82,7 +83,7 @@ export const negotiationResultSchema = z.object({
   clientVersion: capabilityVersionSchema,
   serverVersion: capabilityVersionSchema.optional(),
   negotiatedVersion: capabilityVersionSchema.optional(),
-  tenantScope: z.string().min(1).optional(),
+  tenantScope: nonblankIdentitySchema.optional(),
   result: z.enum(["matched", "upgraded", "downgraded", "incompatible", "unknown"]),
   reason: z.string().optional(),
   evidenceAddress: z.string().optional(),
@@ -235,7 +236,7 @@ export function negotiateCapability({ capability, clientVersion, tenantScope, se
   const clientParts = parseCapVersion(clientVersion);
   const safeClientVersion = clientParts?.[0] === safeCapability
     ? clientVersion : `${safeCapability}@0.0.0`;
-  const requestedTenant = typeof tenantScope === "string" && tenantScope.length > 0
+  const requestedTenant = nonblankIdentitySchema.safeParse(tenantScope).success
     ? tenantScope : undefined;
   const makeResult = (overrides) => negotiationResultSchema.parse({
     capability: safeCapability,

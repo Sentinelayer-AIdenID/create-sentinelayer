@@ -7,6 +7,7 @@
  */
 
 import { z } from "zod";
+import { nonblankIdentitySchema } from "./identity.js";
 
 /**
  * A point-in-time snapshot of a data source.
@@ -16,7 +17,7 @@ import { z } from "zod";
  * these fields means the fact cannot be classified as authoritative.
  */
 export const sourceSnapshotSchema = z.object({
-  sourceId: z.string().min(1),
+  sourceId: nonblankIdentitySchema,
   sourceType: z.enum([
     "session",
     "api",
@@ -25,9 +26,9 @@ export const sourceSnapshotSchema = z.object({
     "derived",
     "import",
   ]),
-  version: z.string().min(1),
+  version: nonblankIdentitySchema,
   capturedAt: z.string().datetime(),
-  tenantScope: z.string().min(1),
+  tenantScope: nonblankIdentitySchema,
   contentHash: z.string().min(1).optional(),
   metadata: z.record(z.string(), z.json()).optional(),
 }).strict();

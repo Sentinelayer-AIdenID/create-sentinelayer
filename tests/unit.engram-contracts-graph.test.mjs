@@ -405,6 +405,7 @@ test("validateGraphIntegrity: catches money float in entity.attributes.Price (F6
       tenantScope: "tenant/acme",
       sourceId: "src-1", sourceVersion: "1.0.0",
       capturedAt: "2026-10-23T00:00:00Z",
+      provenance: "observed",
       attributes: { Price: { amount: 1.99, amountUnit: "minor_units", currency: "USD" } },
     }],
     generatedAt: "2026-10-23T00:00:00Z",
@@ -479,6 +480,7 @@ test("entitySchema: ACCEPTS entity with label, sourceVersion and capturedAt", ()
   const result = entitySchema.safeParse({
     id: "e1", type: "product", tenantScope: "tenant/acme",
       sourceId: "src-1", sourceVersion: "1.0.0", capturedAt: "2026-10-23T00:00:00Z",
+    provenance: "observed",
     label: "A Product",
   });
   assert.equal(result.success, true, "factual entity with capturedAt must be accepted");
@@ -542,6 +544,7 @@ test("validateGraphIntegrity: REJECTS non-object value on money-named field", ()
     entities: [{
       id: "e1", type: "product", tenantScope: "tenant/acme",
       sourceId: "src-1", sourceVersion: "1.0.0", capturedAt: "2026-10-23T00:00:00Z",
+      provenance: "observed",
       attributes: { total: 1.99 },
     }],
     generatedAt: "2026-10-23T00:00:00Z",
@@ -576,6 +579,7 @@ test("entitySchema: ACCEPTS attributes with valid JSON values", () => {
   const result = entitySchema.safeParse({
     id: "e1", type: "Person", label: "Alice", tenantScope: "tenant/acme",
       sourceId: "src-1", sourceVersion: "1.0.0", capturedAt: "2026-10-23T00:00:00Z",
+    provenance: "observed",
     attributes: { age: 30, active: true, tags: ["a", "b"], meta: { key: "val" } },
   });
   assert.equal(result.success, true,

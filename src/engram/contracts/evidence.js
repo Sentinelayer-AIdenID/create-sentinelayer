@@ -16,6 +16,7 @@
 
 import { z } from "zod";
 import { EVIDENCE_SCHEMA_VERSION } from "./versions.js";
+import { nonblankIdentitySchema } from "./identity.js";
 
 /**
  * Supported evidence locator schemes. "screenshot" and
@@ -41,10 +42,9 @@ export const evidenceAddressSchema = z.object({
   /** When this evidence was captured */
   capturedAt: z.string().datetime().optional(),
   /** Source version that produced this evidence */
-  sourceVersion: z.string().min(1).refine((value) => value.trim() === value && value.trim().length > 0,
-    "sourceVersion must be nonblank and unpadded"),
+  sourceVersion: nonblankIdentitySchema,
   /** Tenant scope of the evidence */
-  tenantScope: z.string().min(1),
+  tenantScope: nonblankIdentitySchema,
   /** Whether the evidence is still reachable */
   reachable: z.boolean().optional(),
   /** Verifier identity — who attested this address was not screenshot-inferred */

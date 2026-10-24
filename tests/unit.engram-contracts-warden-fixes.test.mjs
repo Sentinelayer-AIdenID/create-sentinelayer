@@ -131,7 +131,7 @@ test("WARDEN-F2d: validateGraphIntegrity ACCEPTS typed non-monetary quantities",
     entities: [{
       id: "e1", type: "product", tenantScope: "tenant/acme",
       sourceVersion: "1.0.0", capturedAt: "2026-10-23T00:00:00Z",
-      sourceId: "src-001", attributes: {
+      sourceId: "src-001", provenance: "observed", attributes: {
         ratio: { kind: "quantity", value: 0.5, unit: "ratio" },
         temperature: { kind: "quantity", value: 98.6, unit: "fahrenheit" },
         count: { kind: "quantity", value: 42, unit: "count" },
