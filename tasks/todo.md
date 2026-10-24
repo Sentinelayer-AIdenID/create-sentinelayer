@@ -4213,3 +4213,12 @@ Local proof: PyYAML parsed all three jobs; contract and forbidden-surface self-t
 Review: Four fail-first contract gaps reproduced on the untouched head. The repaired tree passes 222/222 focused ENGRAM contracts and 2,729/2,732 full unit tests (three skips, no failures); static check passes 418 files, docs validation and package dry-run pass, and the diff check is clean. The separate ENGRAM 21.3 conformance suite remains 2/4 on both this tree and untouched `76490b9` because of pre-existing observation-ID and recall-watermark behavior outside this contract patch. No hosted gate or merge is claimed by this local successor.
 
 Review correction: An independent review caught broad compact suffix matching misclassifying `percent`, `recent`, `scent`, `coffee`, `syntax`, and `nonprofit` as monetary. A new fail-first test reproduced the false positive; the matcher now recognizes only curated modifier + whole monetary-terminal pairs while preserving `grandtotal`, `purchaseprice`, `totaldollars`, `shippingcost`, `orderamount`, and `lineitemprices`. The focused contract suite passes 223/223. Replay on the PR's newer head and full verification remain before publication.
+
+## EW02 metadata quantity review correction on PR862 head `ae3a4fe`
+
+- [x] Reproduce the false money classification for typed day/count/ratio metadata facts in both assertions and entity attributes.
+- [x] Narrow the metadata-name rule while retaining strict `priceNumber`, `priceTier` quantity, and compact monetary aliases.
+- [x] Run focused ENGRAM contracts, full unit/static/docs/package checks; review diff and commit a direct child of `ae3a4fe` locally.
+- [ ] Independent warden review and publication; keep PR862 draft until accepted gates pass.
+
+Review: The new test failed on `refundWindow` before the correction. Final focused ENGRAM contracts pass 224/224; a bounded full unit run passes 2,733 tests with three skips and no failures. Final static check passes 418 files, docs validation and package dry-run pass, and the diff check is clean. The first highly parallel full run failed five unrelated billing/Omar/session tests while the Windows host ran over 130 Node processes; all those files passed 25/25 in isolation before the bounded full rerun. No hosted gate or merge is claimed by this local successor.

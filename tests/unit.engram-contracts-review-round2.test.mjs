@@ -233,6 +233,32 @@ test("ordinary compact words do not inherit monetary suffixes", () => {
   }
 });
 
+test("typed metadata quantities remain valid under monetary prefixes", () => {
+  const metadata = {
+    refundWindow: { kind: "quantity", value: 30, unit: "day" },
+    paymentTerms: { kind: "quantity", value: 30, unit: "day" },
+    costCenter: { kind: "quantity", value: 2, unit: "count" },
+    discountRate: { kind: "quantity", value: 0.15, unit: "ratio" },
+    taxRate: { kind: "quantity", value: 0.08, unit: "ratio" },
+  };
+  for (const [name, value] of Object.entries(metadata)) {
+    assert.equal(validateGraphIntegrity(graph({ assertions: [assertion(name, value)] })).valid,
+      true, `assertion ${name} is a typed non-monetary quantity`);
+    assert.equal(validateGraphIntegrity(graph({ entities: [entity({ [name]: value })] })).valid,
+      true, `entity ${name} is a typed non-monetary quantity`);
+    assert.equal(validateGraphIntegrity(graph({ assertions: [assertion(name, value.value)] })).valid,
+      false, `assertion ${name} still rejects a bare number`);
+    assert.equal(validateGraphIntegrity(graph({ entities: [entity({ [name]: value.value })] })).valid,
+      false, `entity ${name} still rejects a bare number`);
+  }
+  for (const name of ["priceNumber", "pricenumber", "priceTier", "grandtotal", "purchaseprice"]) {
+    assert.equal(validateGraphIntegrity(graph({ assertions: [assertion(name, quantity)] })).valid,
+      false, `assertion ${name} cannot launder money as a count`);
+    assert.equal(validateGraphIntegrity(graph({ entities: [entity({ [name]: quantity })] })).valid,
+      false, `entity ${name} cannot launder money as a count`);
+  }
+});
+
 test("even unknown links in a servable graph identify source, version and time", () => {
   const nodes = ["left", "right"].map((id) => ({
     id, type: "item", tenantScope: "tenant/acme",

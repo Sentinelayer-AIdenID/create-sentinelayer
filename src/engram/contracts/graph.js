@@ -400,13 +400,15 @@ function isMoneyFieldName(key, value) {
     .split(/[^a-z0-9]+/).filter(Boolean).map(singularWord);
   const suffix = words.at(-1);
   // These nouns describe merchant metadata, including structured metadata.
-  // An amount-bearing `priceNumber` still denotes money; a quantity under a
-  // monetary prefix cannot gain authority by calling itself metadata.
+  // `priceNumber` still denotes money, and a numeric `priceTier` cannot
+  // disguise a price as a count. A typed refundWindow, paymentTerms or
+  // costCenter instead describes a duration or count, not an amount.
   // Nested facts still pass through validateFactNumbers individually.
   if (NON_MONETARY_METADATA_TERMINALS.has(suffix)) {
     const moneyModifier = words.slice(0, -1).some((word) =>
       STRONG_MONEY_FIELD_TOKENS.has(word) || word === "total" || word === "tax");
-    return moneyModifier && (suffix === "number" || value?.kind === "quantity");
+    return moneyModifier && (suffix === "number" ||
+      (suffix === "tier" && value?.kind === "quantity"));
   }
   if (words.length === 1 && suffix.endsWith("number") &&
       [...STRONG_MONEY_FIELD_TOKENS, "total", "tax"].some((word) => suffix.startsWith(word))) {
