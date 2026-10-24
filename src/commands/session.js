@@ -3541,7 +3541,7 @@ export function registerSessionCommand(program) {
           ttlSeconds: parseAdmissionTtlSeconds(options.ttl),
           wait: options.wait !== false,
           recoverActive: Boolean(options.recoverAdmission),
-          noAutoGrant: Boolean(options.noAutoGrant),
+          noAutoGrant: options.autoGrant === false,
           waitTimeoutMs: (Number.isFinite(waitSeconds) && waitSeconds >= 0 ? waitSeconds : 900) * 1000,
           targetPath,
           onPending: ({ approveUrl, phase }) => {
@@ -3965,7 +3965,7 @@ export function registerSessionCommand(program) {
         for (let attempt = 0; attempt < 2; attempt += 1) {
           remoteSync = await syncSessionEventToApi(normalizedSessionId, event, {
             targetPath,
-            noAutoGrant: Boolean(options.noAutoGrant),
+            noAutoGrant: options.autoGrant === false,
           });
           if (remoteSync?.synced) break;
         }
@@ -4098,7 +4098,7 @@ export function registerSessionCommand(program) {
       }
       const remoteSync = await syncSessionEventToApi(normalizedSessionId, event, {
         targetPath,
-        noAutoGrant: Boolean(options.noAutoGrant),
+        noAutoGrant: options.autoGrant === false,
       });
       if (!remoteSync?.synced) {
         throw new Error(
@@ -4272,7 +4272,7 @@ export function registerSessionCommand(program) {
       }
       const remoteSync = await syncSessionEventToApi(normalizedSessionId, event, {
         targetPath,
-        noAutoGrant: Boolean(options.noAutoGrant),
+        noAutoGrant: options.autoGrant === false,
       });
       if (!remoteSync?.synced) {
         throw new Error(

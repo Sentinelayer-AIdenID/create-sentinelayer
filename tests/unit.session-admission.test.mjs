@@ -802,3 +802,71 @@ test("publishing a key NEVER replaces an existing identity (the property the rac
   const leftovers = (await fsp.readdir(path.dirname(keyPath))).filter((name) => name.endsWith(".tmp"));
   assert.deepEqual(leftovers, [], "no temp files left behind");
 });
+
+// --- noAutoGrant persistence on cached/reused credentials ---
+
+test("noAutoGrant is persisted on reused live credential (fast path, !recoverActive)", async () => {
+  const dirs = await scratch();
+  const api = fakeApi({
+    onPoll: (adm) => { adm.status = "approved"; },
+    reportsIdentityReadiness: true,
+  });
+  // First join without noAutoGrant
+  await runAdmissionJoin(SID, base(api, dirs, { noAutoGrant: false }));
+  const credPath = admissionCredentialPath(SID, "builder-1", dirs);
+  let stored = JSON.parse(await fsp.readFile(credPath, "utf8"));
+  assert.equal(stored.noAutoGrant || false, false, "initial credential has noAutoGrant false");
+
+  // Second join WITH noAutoGrant (identical fingerprint -> fast path)
+  const result = await runAdmissionJoin(SID, base(api, dirs, { noAutoGrant: true }));
+  assert.equal(result.reused, true);
+  // Read back: noAutoGrant should now be true
+  stored = JSON.parse(await fsp.readFile(credPath, "utf8"));
+  assert.equal(stored.noAutoGrant, true, "fast path must persist noAutoGrant on reused credential");
+});
+
+test("noAutoGrant false does not overwrite existing true on fast-path reuse", async () => {
+  const dirs = await scratch();
+  const api = fakeApi({
+    onPoll: (adm) => { adm.status = "approved"; },
+    reportsIdentityReadiness: true,
+  });
+  // First join WITH noAutoGrant
+  await runAdmissionJoin(SID, base(api, dirs, { noAutoGrant: true }));
+  const credPath = admissionCredentialPath(SID, "builder-1", dirs);
+  let stored = JSON.parse(await fsp.readFile(credPath, "utf8"));
+  assert.equal(stored.noAutoGrant, true, "initial credential has noAutoGrant true");
+
+  // Second join WITHOUT noAutoGrant (fast path)
+  const result = await runAdmissionJoin(SID, base(api, dirs, { noAutoGrant: false }));
+  assert.equal(result.reused, true);
+  // Read back: noAutoGrant should still be true (not downgraded)
+  stored = JSON.parse(await fsp.readFile(credPath, "utf8"));
+  assert.equal(stored.noAutoGrant, true, "noAutoGrant must not be downgraded from true to false on reuse");
+});
+
+
+test("noAutoGrant is persisted on reused live credential (recoverAndStore path)", async () => {
+  const dirs = await scratch();
+  const api = fakeApi({
+    onPoll: (adm) => { adm.status = "approved"; },
+    reportsIdentityReadiness: true,
+  });
+  // First join without noAutoGrant
+  await runAdmissionJoin(SID, base(api, dirs, { noAutoGrant: false }));
+  const credPath = admissionCredentialPath(SID, "builder-1", dirs);
+  let stored = JSON.parse(await fsp.readFile(credPath, "utf8"));
+  assert.equal(stored.noAutoGrant || false, false, "initial credential has noAutoGrant false");
+
+  // Force token change to ensure recoverAndStore takes the store path (not reuse)
+  // We do this by using recoverActive which goes through recovery and calls recoverAndStore
+  const result = await runAdmissionJoin(SID, base(api, dirs, { noAutoGrant: true, recoverActive: true }));
+  assert.equal(result.recovered, true, "recovery happened");
+  // After recovery, noAutoGrant should be persisted
+  stored = JSON.parse(await fsp.readFile(credPath, "utf8"));
+  assert.equal(stored.noAutoGrant, true, "recoverAndStore must persist noAutoGrant after recovery");
+});
+
+
+
+

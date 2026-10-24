@@ -494,6 +494,17 @@ export async function withAdmissionCredentialLock(filePath, run, { timeoutMs = 1
   }
 }
 
+// Persist noAutoGrant on a cached credential when the caller requests it.
+// Never downgrade: noAutoGrant=false on an already-true credential is a no-op.
+async function persistNoAutoGrantIfNeeded(credential, noAutoGrant, sid, agent, homeDir) {
+  if (noAutoGrant && !credential.noAutoGrant) {
+    const updated = { ...credential, noAutoGrant: true };
+    await writeSecretFile(admissionCredentialPath(sid, agent, { homeDir }), updated);
+    return updated;
+  }
+  return credential;
+}
+
 async function recoverAndStore(auth, sid, agent, admissionId, key, fingerprint, deps, homeDir, now, rejectedToken = null, noAutoGrant = false) {
   return withAdmissionCredentialLock(admissionCredentialPath(sid, agent, { homeDir }), async () => {
     // Another process may have completed recovery while this process waited.
@@ -501,7 +512,8 @@ async function recoverAndStore(auth, sid, agent, admissionId, key, fingerprint, 
     if (current.state === "live" && current.credential.admissionId === admissionId &&
         current.credential.requestFingerprint === fingerprint && current.credential.publicKey === key.publicKey &&
         current.credential.apiUrl === auth.apiUrl && current.credential.token !== rejectedToken) {
-      return redacted({ status: "active", reused: true, stored: current.credential, sid, agent, homeDir });
+      const updated = await persistNoAutoGrantIfNeeded(current.credential, noAutoGrant, sid, agent, homeDir);
+      return redacted({ status: "active", reused: true, stored: updated, sid, agent, homeDir });
     }
     const claimed = await recoverCredential(auth, sid, agent, admissionId, key, deps, now);
     const stored = await storeClaimedCredential(claimed, { auth, sid, agent, key, fingerprint, homeDir, now, noAutoGrant });
@@ -626,7 +638,8 @@ export async function runAdmissionJoin(
   // which answers with the existing grant (same purpose) or a conflict (new one).
   const held = await readAdmissionCredentialState(sid, agent, { homeDir, now: now() });
   if (!recoverActive && held.state === "live" && held.credential.requestFingerprint === fingerprint) {
-    return redacted({ status: "active", reused: true, stored: held.credential, sid, agent, homeDir });
+    const fastPathCredential = await persistNoAutoGrantIfNeeded(held.credential, noAutoGrant, sid, agent, homeDir);
+    return redacted({ status: "active", reused: true, stored: fastPathCredential, sid, agent, homeDir });
   }
   if (recoverActive && held.credential?.admissionId) {
     if (held.credential.requestFingerprint !== fingerprint || held.credential.publicKey !== key.publicKey ||
@@ -677,7 +690,8 @@ export async function runAdmissionJoin(
       held.credential.admissionId === created.admissionId
     ) {
       // The server judged this request covered by the grant we already hold.
-      return redacted({ status: "active", reused: true, stored: held.credential, sid, agent, homeDir });
+      const fastPathCredential = await persistNoAutoGrantIfNeeded(held.credential, noAutoGrant, sid, agent, homeDir);
+    return redacted({ status: "active", reused: true, stored: fastPathCredential, sid, agent, homeDir });
     }
     if (created?.status === "active" && created?.reused) {
       const recovered = await recoverAndStore(auth, sid, agent, created.admissionId, key, fingerprint, deps, homeDir, now,

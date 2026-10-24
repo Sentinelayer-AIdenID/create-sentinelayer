@@ -2001,3 +2001,33 @@ test("Unit session sync: stored credential without noAutoGrant proceeds to grant
   assert.ok(calls.length >= 2, "grant call was made");
   resetSessionSyncStateForTests();
 });
+
+// --- CLI parsing: Commander --no-auto-grant negated option ---
+import { Command } from "commander";
+
+test("Unit session sync: --no-auto-grant sets autoGrant=false so noAutoGrant is derived as true", async () => {
+  const program = new Command();
+  program.exitOverride();
+  program.allowExcessArguments(true);
+  program.option("--no-auto-grant", "desc");
+  program.parse(["node", "test", "--no-auto-grant"], { from: "user" });
+  const opts = program.opts();
+  assert.equal(opts.autoGrant, false, "Commander sets autoGrant=false for --no-auto-grant");
+  assert.equal(opts.noAutoGrant, undefined, "Commander does NOT set noAutoGrant");
+  // The fix reads options.autoGrant === false, not Boolean(options.noAutoGrant)
+  const noAutoGrant = opts.autoGrant === false;
+  assert.equal(noAutoGrant, true, "derived noAutoGrant must be true when --no-auto-grant is given");
+});
+
+test("Unit session sync: without --no-auto-grant, autoGrant defaults to true so noAutoGrant is derived as false", async () => {
+  const program = new Command();
+  program.exitOverride();
+  program.allowExcessArguments(true);
+  program.option("--no-auto-grant", "desc");
+  program.parse(["node", "test"], { from: "user" });
+  const opts = program.opts();
+  assert.equal(opts.autoGrant, true, "Commander defaults autoGrant to true when flag omitted");
+  assert.equal(opts.noAutoGrant, undefined, "Commander does NOT set noAutoGrant");
+  const noAutoGrant = opts.autoGrant === false;
+  assert.equal(noAutoGrant, false, "derived noAutoGrant must be false when --no-auto-grant is omitted");
+});
