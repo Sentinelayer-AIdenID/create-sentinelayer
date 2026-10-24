@@ -4145,3 +4145,29 @@ Review evidence:
 - [x] Focused proof: 81/81 deterministic tests; exact old runtime fails all 16 selected refusal controls; syntax 405/405; Git diff check clean. No network/provider/real-key reads.
 - [ ] Independent/root review of the frozen correction overlay before commit/push.
 - [ ] Final ship requirements: npm run verify; required Omar/audit and hosted gates under root custody. No live TypeSafe activation or spending in correction preparation.
+
+## 2026-10-24 EnGram canonical Omar gpt-6.1-sol restore (isolated, unpublished)
+
+- [x] Keep the existing Omar Gate job/check names, trusted OIDC boundary, fork static scan, artifacts, and merge enforcer.
+- [x] Route the primary deep Action to direct OpenAI gpt-6.1-sol with legacy review and fail-closed policy; pin reviewed PR135 release 2d5a8edd.
+- [x] Make the workflow contract and focused tests reject old Codex/Gemini/managed/Jev paths and state bounded legacy deep evidence honestly.
+- [x] Run YAML, contract self-test, forbidden-surface, focused unit and diff checks; commit exact local patch for warden review only.
+
+### Review
+
+Local proof: PyYAML parsed all three jobs; contract and forbidden-surface self-tests passed; 14 focused tests passed; `npm run check` passed 405 files. The default workflow is currently disabled on GitHub, so this worktree did not trigger an Omar run. Independent warden review and hosted exact-head gate remain before merge.
+
+# 2026-10-24 - PR866 local Lighthouse fallback
+
+## Plan
+
+- [x] Replace the `npx lighthouse@12` fallback with the installed, pinned Lighthouse 13 CLI via the current Node executable.
+- [x] Update the invocation test to prove literal URL and credential handling, offline local execution, and graceful absence of the package.
+- [x] Run focused tests, repository checks, and review the diff before a local commit.
+
+## Review
+
+- Clean `npm ci`: 213 packages, zero vulnerabilities. The installed CLI reports 13.5.0.
+- Focused runtime-audit tests: 15/15 pass. `npm run check`: 405 files pass. Docs validation passes; `git diff --check` is clean.
+- Full `npm run verify` reaches an inherited E2E assertion at `tests/e2e.test.mjs:1379`: help text now names `Sentinelayer-AIdenID`, while the test expects `mrrCarter`. The same focused assertion fails on untouched PR866 head `48604c4`.
+- No paid model call or hosted gate run; branch awaits independent review.
