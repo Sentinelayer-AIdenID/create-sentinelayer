@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import {
   capabilityVersionSchema,
   tenantScopeSchema,
+  tenantScopeDescriptorSchema,
   sourceDescriptorSchema,
   capabilityEntrySchema,
   negotiationResultSchema,
@@ -32,13 +33,22 @@ test("capabilityVersionSchema: REFUSES malformed versions", () => {
   assert.equal(capabilityVersionSchema.safeParse("").success, false);
 });
 
-test("tenantScopeSchema: validates required fields", () => {
-  assert.equal(tenantScopeSchema.safeParse({ tenantId: "acme" }).success, true);
-  assert.equal(tenantScopeSchema.safeParse({ tenantId: "acme", namespace: "ns:notes", environment: "sandbox" }).success, true);
+test("tenantScopeSchema: uses the same string scope as source and negotiation", () => {
+  assert.equal(tenantScopeSchema.safeParse("tenant/acme").success, true);
+  assert.equal(tenantScopeSchema.safeParse(" ").success, false);
+  assert.equal(tenantScopeSchema.safeParse({ tenantId: "acme" }).success, false);
+  assert.equal(sourceDescriptorSchema.safeParse({
+    sourceId: "s1", sourceType: "adapter", version: "ev@1.0.0", tenantScope: "tenant/acme",
+  }).success, true);
 });
 
-test("tenantScopeSchema: REFUSES missing tenantId", () => {
-  assert.equal(tenantScopeSchema.safeParse({}).success, false);
+test("tenantScopeDescriptorSchema: optional structured descriptor remains distinct", () => {
+  assert.equal(tenantScopeDescriptorSchema.safeParse({ tenantId: "acme" }).success, true);
+  assert.equal(tenantScopeDescriptorSchema.safeParse({ tenantId: "acme", namespace: "ns:notes", environment: "sandbox" }).success, true);
+});
+
+test("tenantScopeDescriptorSchema: REFUSES missing tenantId", () => {
+  assert.equal(tenantScopeDescriptorSchema.safeParse({}).success, false);
 });
 
 test("sourceDescriptorSchema: requires sourceId, sourceType, version, tenantScope", () => {
@@ -206,8 +216,8 @@ test("capabilityEntrySchema: REFUSES extra unknown field (strict)", () => {
   assert.equal(r.success, false, "extra field must be rejected by strict schema");
 });
 
-test("tenantScopeSchema: REFUSES extra unknown field (strict)", () => {
-  const r = tenantScopeSchema.safeParse({ tenantId: "acme", extra: true });
+test("tenantScopeDescriptorSchema: REFUSES extra unknown field (strict)", () => {
+  const r = tenantScopeDescriptorSchema.safeParse({ tenantId: "acme", extra: true });
   assert.equal(r.success, false);
 });
 

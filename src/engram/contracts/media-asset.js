@@ -9,6 +9,7 @@
 
 import { z } from "zod";
 import { sourceSnapshotSchema } from "./source-snapshot.js";
+import { sha256ContentHashSchema } from "./content-hash.js";
 
 export const MEDIA_ASSET_TYPES = Object.freeze([
   "image",
@@ -41,7 +42,7 @@ export const mediaAssetSchema = z.object({
   assetId: z.string().min(1),
   type: mediaAssetTypeSchema,
   uri: z.string().min(1),
-  contentHash: z.string().min(1),
+  contentHash: sha256ContentHashSchema,
   mimeType: z.string().optional(),
   sizeBytes: z.number().int().positive().optional(),
   sourceSnapshot: sourceSnapshotSchema,
@@ -70,7 +71,7 @@ export const VALID_MEDIA_ASSET = Object.freeze({
   assetId: "ma-img-001",
   type: "image",
   uri: "https://evidence.example.com/assets/img-001.png",
-  contentHash: "sha256:def789abc123",
+  contentHash: "sha256:a6f2f770889daacf470cedb54e76c426817431a5e18aff6b270f182f22e0d43d",
   mimeType: "image/png",
   sizeBytes: 102400,
   sourceSnapshot: {

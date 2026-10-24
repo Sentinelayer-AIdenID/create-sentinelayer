@@ -31,10 +31,11 @@ export const capabilityVersionSchema = z.string().regex(
   { message: "capability version must match <name>@<semver>" },
 );
 
-/**
- * A tenant scope: the namespace boundary for all capability operations.
- */
-export const tenantScopeSchema = z.object({
+/** The canonical tenant key used by sources, entries and negotiation. */
+export const tenantScopeSchema = nonblankIdentitySchema;
+
+/** Optional structured tenant metadata; it is not a wire tenant key. */
+export const tenantScopeDescriptorSchema = z.object({
   tenantId: nonblankIdentitySchema.max(128),
   namespace: nonblankIdentitySchema.max(256).optional(),
   environment: z.enum(["production", "staging", "development", "sandbox"]).optional(),
@@ -47,7 +48,7 @@ export const sourceDescriptorSchema = z.object({
   sourceId: nonblankIdentitySchema,
   sourceType: z.enum(["adapter", "ingest", "derived", "external", "manual"]),
   version: capabilityVersionSchema,
-  tenantScope: nonblankIdentitySchema,
+  tenantScope: tenantScopeSchema,
   endpoint: z.string().url().optional(),
 }).strict();
 
@@ -83,7 +84,7 @@ export const negotiationResultSchema = z.object({
   clientVersion: capabilityVersionSchema,
   serverVersion: capabilityVersionSchema.optional(),
   negotiatedVersion: capabilityVersionSchema.optional(),
-  tenantScope: nonblankIdentitySchema.optional(),
+  tenantScope: tenantScopeSchema.optional(),
   result: z.enum(["matched", "upgraded", "downgraded", "incompatible", "unknown"]),
   reason: z.string().optional(),
   evidenceAddress: z.string().optional(),
@@ -236,7 +237,7 @@ export function negotiateCapability({ capability, clientVersion, tenantScope, se
   const clientParts = parseCapVersion(clientVersion);
   const safeClientVersion = clientParts?.[0] === safeCapability
     ? clientVersion : `${safeCapability}@0.0.0`;
-  const requestedTenant = nonblankIdentitySchema.safeParse(tenantScope).success
+  const requestedTenant = tenantScopeSchema.safeParse(tenantScope).success
     ? tenantScope : undefined;
   const makeResult = (overrides) => negotiationResultSchema.parse({
     capability: safeCapability,

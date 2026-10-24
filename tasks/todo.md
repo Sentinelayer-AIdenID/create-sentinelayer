@@ -4202,3 +4202,12 @@ Local proof: PyYAML parsed all three jobs; contract and forbidden-surface self-t
 - Focused runtime-audit tests: 15/15 pass. `npm run check`: 405 files pass. Docs validation passes; `git diff --check` is clean.
 - Full `npm run verify` reaches an inherited E2E assertion at `tests/e2e.test.mjs:1379`: help text now names `Sentinelayer-AIdenID`, while the test expects `mrrCarter`. The same focused assertion fails on untouched PR866 head `48604c4`.
 - No paid model call or hosted gate run; branch awaits independent review.
+## EW02 exact-764 final contract repair (local review successor)
+
+- [x] Reproduce compact monetary aliases, incompatible tenant scope schemas, and incomplete media SHA-256 digest on PR862 head `76490b9`.
+- [x] Make the capability tenant key one string contract, distinguish the optional descriptor, and share the receipt/media digest validator.
+- [x] Confirm an unknown graph link can be served without source, version, or time; require all three for every link.
+- [x] Keep the work on an isolated direct-child branch; run contract, full unit, static, docs, package, and diff checks.
+- [ ] Root review, publication to PR862, fresh permitted Omar Gate and attestation, and original board acceptance.
+
+Review: Four fail-first contract gaps reproduced on the untouched head. The repaired tree passes 222/222 focused ENGRAM contracts and 2,729/2,732 full unit tests (three skips, no failures); static check passes 418 files, docs validation and package dry-run pass, and the diff check is clean. The separate ENGRAM 21.3 conformance suite remains 2/4 on both this tree and untouched `76490b9` because of pre-existing observation-ID and recall-watermark behavior outside this contract patch. No hosted gate or merge is claimed by this local successor.

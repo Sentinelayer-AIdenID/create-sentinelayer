@@ -71,6 +71,18 @@ test("mediaAssetSchema: REFUSES missing contentHash", () => {
   assert.equal(r.success, false);
 });
 
+test("mediaAssetSchema: requires a complete SHA-256 digest", () => {
+  for (const contentHash of ["sha256:def789abc123", "sha256:x", "unstructured", "sha256:" + "z".repeat(64)]) {
+    assert.equal(mediaAssetSchema.safeParse({ ...VALID_MEDIA_ASSET, contentHash }).success,
+      false, `invalid media digest ${contentHash}`);
+  }
+  for (const contentHash of ["sha256:" + "a".repeat(64),
+    "sha256:nji40eArkmG6ZZyc3Od23mge2TYew/f4vFc/wTBwCOE="]) {
+    assert.equal(mediaAssetSchema.safeParse({ ...VALID_MEDIA_ASSET, contentHash }).success,
+      true, `valid media digest ${contentHash}`);
+  }
+});
+
 test("mediaAssetSchema: REFUSES missing sourceSnapshot", () => {
   const { sourceSnapshot, ...rest } = VALID_MEDIA_ASSET;
   const r = mediaAssetSchema.safeParse(rest);

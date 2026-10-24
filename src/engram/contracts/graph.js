@@ -98,8 +98,9 @@ export const entitySchema = z.object({
 /**
  * A link between two graph entities.
  *
- * Links with non-unknown provenance require a versioned data source and time.
- * Authoritative links require an evidenceAddress.
+ * Every link is a served graph fact and needs a versioned source and capture
+ * time, even when its provenance remains unknown. Authoritative links also
+ * require an evidenceAddress.
  */
 export const linkSchema = z.object({
   source: nonblankIdentitySchema,
@@ -109,17 +110,10 @@ export const linkSchema = z.object({
   confidence: modelConfidenceSchema.optional(),
   evidenceAddress: nonblankIdentitySchema.optional(),
   tenantScope: nonblankIdentitySchema,
-  sourceId: nonblankIdentitySchema.optional(),
-  sourceVersion: nonblankIdentitySchema.optional(),
-  capturedAt: z.string().datetime().optional(),
+  sourceId: nonblankIdentitySchema,
+  sourceVersion: nonblankIdentitySchema,
+  capturedAt: z.string().datetime(),
 }).strict().superRefine((link, ctx) => {
-  if (link.provenance !== "unknown") {
-    for (const field of ["sourceId", "sourceVersion", "capturedAt"]) {
-      if (!link[field]) {
-        ctx.addIssue({ code: "custom", path: [field], message: `non-unknown link requires ${field}` });
-      }
-    }
-  }
   if (link.provenance === "authoritative" && !link.evidenceAddress) {
     ctx.addIssue({ code: "custom", path: ["evidenceAddress"], message: "authoritative link requires evidenceAddress" });
   }
@@ -388,14 +382,29 @@ function isPluralMoneyFieldName(key) {
   return terminal.endsWith("s") && terminal !== singularWord(terminal);
 }
 
-function isMoneyFieldName(key) {
+function isMoneyFieldName(key, value) {
   if (MONEY_FIELD_NAMES.has(key)) return true;
   const words = key.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase()
     .split(/[^a-z0-9]+/).filter(Boolean).map(singularWord);
   const suffix = words.at(-1);
   // These nouns describe merchant metadata, including structured metadata.
-  // Its nested facts still pass through validateFactNumbers individually.
-  if (NON_MONETARY_METADATA_TERMINALS.has(suffix)) return false;
+  // An amount-bearing `priceNumber` still denotes money; a quantity under a
+  // monetary prefix cannot gain authority by calling itself metadata.
+  // Nested facts still pass through validateFactNumbers individually.
+  if (NON_MONETARY_METADATA_TERMINALS.has(suffix)) {
+    const moneyModifier = words.slice(0, -1).some((word) =>
+      STRONG_MONEY_FIELD_TOKENS.has(word) || word === "total" || word === "tax");
+    return moneyModifier && (suffix === "number" || value?.kind === "quantity");
+  }
+  if (words.length === 1 && suffix.endsWith("number") &&
+      [...STRONG_MONEY_FIELD_TOKENS, "total", "tax"].some((word) => suffix.startsWith(word))) {
+    return true;
+  }
+  // Accept compact aliases as names, not as untyped amounts: `grandtotal`,
+  // `purchaseprice` and `totaldollars` have monetary terminal words even
+  // without camel-case or separators.
+  if (words.length === 1 && [...MONEY_FIELD_SUFFIXES, "tax", ...MONEY_UNIT_WORDS]
+    .some((word) => suffix.endsWith(word))) return true;
   if (words.length === 1 && (STRONG_MONEY_FIELD_TOKENS.has(words[0]) ||
       MONEY_UNIT_WORDS.has(words[0]) || words[0] === "total" || words[0] === "tax")) return true;
   // Outside named metadata, a monetary field needs canonical money whatever
@@ -467,15 +476,12 @@ export function validateGraphIntegrity(graph, { verifyEvidence } = {}) {
     }
   }
 
-  // Check: links need tenantScope (all) and capturedAt (non-unknown)
+  // Check: all links are traceable by schema; authority needs separate proof.
   if (data.links) {
     for (let i = 0; i < data.links.length; i++) {
       const l = data.links[i];
       if (!l.tenantScope) {
         errors.push(`links[${i}]: all links require tenantScope`);
-      }
-      if (l.provenance !== "unknown" && !l.capturedAt) {
-        errors.push(`links[${i}]: non-unknown provenance link requires capturedAt`);
       }
       if (l.provenance === "authoritative" && !isVerified(l, l.evidenceAddress)) {
         errors.push(`links[${i}]: authoritative provenance link requires trusted evidence verification`);
@@ -507,7 +513,7 @@ export function validateGraphIntegrity(graph, { verifyEvidence } = {}) {
     for (const key of Object.keys(obj)) {
       const val = obj[key];
       const fullPath = `${path}.${key}`;
-      if (isMoneyFieldName(key)) {
+      if (isMoneyFieldName(key, val)) {
         if (Array.isArray(val) && isPluralMoneyFieldName(key) &&
             val.every((item) => moneySchema.safeParse(item).success)) continue;
         if (typeof val === "object" && val !== null) {
@@ -529,7 +535,7 @@ export function validateGraphIntegrity(graph, { verifyEvidence } = {}) {
   // Check: assertions with monetary predicates must have moneySchema-valid objects
   for (let i = 0; i < data.assertions.length; i++) {
     const a = data.assertions[i];
-    if (isMoneyFieldName(a.predicate)) {
+    if (isMoneyFieldName(a.predicate, a.object)) {
       const isMoneyList = Array.isArray(a.object) && isPluralMoneyFieldName(a.predicate) &&
         a.object.every((item) => moneySchema.safeParse(item).success);
       if (!isMoneyList && !moneySchema.safeParse(a.object).success) {

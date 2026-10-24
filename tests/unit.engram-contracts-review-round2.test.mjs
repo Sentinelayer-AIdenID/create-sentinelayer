@@ -195,6 +195,49 @@ test("compound money names reject string-encoded prices in assertions and entiti
   }
 });
 
+test("compact monetary aliases and amount-like metadata require canonical money", () => {
+  for (const [name, value] of Object.entries({
+    grandtotal: "19.99", GRANDTOTAL: "19.99", purchaseprice: "19.99",
+    totaldollars: "19.99", priceNumber: "19.99", pricenumber: "19.99",
+    priceTier: quantity,
+  })) {
+    assert.equal(validateGraphIntegrity(graph({ assertions: [assertion(name, value)] })).valid,
+      false, `assertion ${name} cannot disguise money`);
+    assert.equal(validateGraphIntegrity(graph({ entities: [entity({ [name]: value })] })).valid,
+      false, `entity ${name} cannot disguise money`);
+  }
+  for (const [name, value] of Object.entries({
+    grandtotal: price, priceNumber: price, orderNumber: "PO-12", priceTier: "gold",
+    costCenter: "CC-12", paymentTerms: "net 30", totalcount: quantity,
+  })) {
+    assert.equal(validateGraphIntegrity(graph({ assertions: [assertion(name, value)] })).valid,
+      true, `assertion ${name} remains valid`);
+    assert.equal(validateGraphIntegrity(graph({ entities: [entity({ [name]: value })] })).valid,
+      true, `entity ${name} remains valid`);
+  }
+});
+
+test("even unknown links in a servable graph identify source, version and time", () => {
+  const nodes = ["left", "right"].map((id) => ({
+    id, type: "item", tenantScope: "tenant/acme",
+    sourceId: "catalog", sourceVersion: "1.0.0",
+  }));
+  const link = {
+    source: "left", target: "right", predicate: "related", provenance: "unknown",
+    tenantScope: "tenant/acme", sourceId: "catalog",
+    sourceVersion: "1.0.0", capturedAt: at,
+  };
+  assert.equal(validateGraphIntegrity(graph({ entities: nodes, links: [link] })).valid,
+    true, "unknown provenance is allowed when the link remains traceable");
+  for (const field of ["sourceId", "sourceVersion", "capturedAt"]) {
+    const missing = { ...link };
+    delete missing[field];
+    assert.equal(linkSchema.safeParse(missing).success, false, `${field} is required`);
+    assert.equal(validateGraphIntegrity(graph({ entities: nodes, links: [missing] })).valid,
+      false, `untraceable ${field} must not be served by a graph`);
+  }
+});
+
 test("structured merchant metadata remains usable under semantic metadata names", () => {
   const descriptiveFields = {
     refundPolicy: { returnWindow: "30 days" },

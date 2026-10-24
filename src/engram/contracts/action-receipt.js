@@ -12,6 +12,7 @@
 
 import { z } from "zod";
 import { sourceSnapshotSchema } from "./source-snapshot.js";
+import { sha256ContentHashSchema } from "./content-hash.js";
 
 export const ACTION_RECEIPT_STATUSES = Object.freeze([
   "executed",
@@ -27,10 +28,6 @@ export const actionReceiptStatusSchema = z.enum([
   "rolled_back",
 ]);
 
-// SHA-256 is 32 bytes: 64 hex characters or canonical padded base64.
-// Encoding validation alone does not verify the claimed action payload.
-const SHA256_CONTENT_HASH_RE = /^sha256:(?:[0-9a-fA-F]{64}|[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=)$/;
-
 /**
  * A verifiable receipt for an action performed in the system.
  *
@@ -45,9 +42,7 @@ export const actionReceiptSchema = z.object({
   status: actionReceiptStatusSchema,
   performedAt: z.string().datetime(),
   verifier: z.string().min(1),
-  contentHash: z.string().regex(SHA256_CONTENT_HASH_RE, {
-    message: "contentHash must be a complete sha256 digest in hex or canonical base64",
-  }),
+  contentHash: sha256ContentHashSchema,
   sourceSnapshot: sourceSnapshotSchema,
   tenantScope: z.string().min(1),
   evidenceRefs: z.array(z.string().min(1)).optional(),
