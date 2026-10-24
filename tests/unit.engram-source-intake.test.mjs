@@ -145,6 +145,11 @@ test("reader exceptions, malformed UTF-8 and credential-like content never leak 
   await rejectsCode(fixture({ read: async () => ({
     status: 200, url, version: source.version, mediaType: "text/plain", body: Buffer.from("api_key: abcdefghijklmnopqrstuvwxyz123456"),
   }) }), "source_rejected");
+  for (const quoted of ['{"api_key":"abcdefghijklmnopqrstuvwxyz123456"}', "{'token': 'abcdefghijklmnopqrstuvwxyz123456'}"]) {
+    await rejectsCode(fixture({ read: async () => ({
+      status: 200, url, version: source.version, mediaType: "text/plain", body: Buffer.from(quoted),
+    }) }), "source_rejected", quoted);
+  }
   const namedOnly = Buffer.from("Set AIDENID_API_KEY in the server environment.");
   const named = await captureSourceBytes(fixture({ read: async () => ({
     status: 200, url, version: source.version, mediaType: "text/plain", body: namedOnly,

@@ -22,7 +22,8 @@ const CREDENTIAL_VALUES = [
   /(?:AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]+PRIVATE KEY-----|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{35})/,
   /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{6,}/,
   /authorization\s*:\s*bearer\s+[A-Za-z0-9._~+/-]{24,}/i,
-  /(?:api[_-]?key|secret|token|password)\s*[:=]\s*["']?[A-Za-z0-9._~+/-]{24,}/i,
+  // The key may be quoted, as in JSON ("api_key": "...") or YAML ('token': ...).
+  /(?:api[_-]?key|secret|token|password)["']?\s*[:=]\s*["']?[A-Za-z0-9._~+/-]{24,}/i,
 ];
 
 export class SourceIntakeError extends Error {
