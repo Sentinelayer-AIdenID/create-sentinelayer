@@ -355,6 +355,16 @@ test("ticket create reports attribution the server did NOT record instead of cla
   assert.deepEqual(created.provenance, { agentRequested: "probe-a", agentRecorded: false, sourceRequested: 7, sourceRecorded: false });
 });
 
+test("ticket create reports recorded attribution when the server stores it (companion API shape)", async () => {
+  const { createTicket } = await import("../src/session/tickets.js");
+  const created = await createTicket(SID, {
+    title: "file once", agentId: "probe-a", sourceSequenceId: 7, idempotencyKey: "create-key-recorded",
+    resolveAuthSession: async () => ({ token: "synthetic", apiUrl: API }),
+    requestMutation: async () => ({ id: "t-new", title: "file once", createdBy: "probe-a", sourceSequenceId: 7, version: 1 }),
+  });
+  assert.deepEqual(created.provenance, { agentRequested: "probe-a", agentRecorded: true, sourceRequested: 7, sourceRecorded: true });
+});
+
 test("ticket create keeps its key across an uncertain response, and a retry reuses it", async () => {
   const { createTicket } = await import("../src/session/tickets.js");
   const keys = [];
