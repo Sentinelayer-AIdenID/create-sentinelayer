@@ -246,7 +246,8 @@ test("a view that lies about its byteLength and a flood of empty chunks are both
   }) }), "source_too_large", "a shadowed chunk byteLength cannot slip past the cap");
   let yielded = 0;
   async function* emptyFlood() {
-    while (true) { yielded += 1; yield new Uint8Array(0); }
+    // Finite on purpose: if the chunk cap regressed, this ends and the rejection assertion fails instead of hanging.
+    for (let i = 0; i < 4096 + 64; i += 1) { yielded += 1; yield new Uint8Array(0); }
   }
   await rejectsCode(fixture({ read: async () => ({
     status: 200, url, version: source.version, mediaType: "text/plain", body: emptyFlood(),
