@@ -23,6 +23,21 @@ checks remain; no auth bypass, no session creation in live tests, no credentials
 in JSON/logs. Synthetic credentials and isolated homes are used for loopback
 subprocesses. No package publication or release bypass authorized.
 
+## EW04 source-byte intake slice — 2026-10-24
+
+- [x] Read original EW04 and EW02 board contracts; isolate from the owner branch at exact EW02 head `ae482421`.
+- [x] Add a tenant-authorized, owner-registered source-byte capture seam that validates origin, rejects redirects, bounds streamed bytes and emits the EW02 `SourceSnapshot` shape.
+- [x] Prove denied access happens before retrieval, hostile source/response metadata is refused, secret-bearing failures stay redacted, and identical bytes retain the same digest.
+- [x] Run focused tests, repository syntax checks, diff checks and scoped security review; hand root a reviewable commit without publishing an owner PR before EW02 lands.
+
+### Review
+
+The EW02 contract and EW04 intake tests pass 207/207; `npm run check` passes 417 files and `npm pack --dry-run` includes the new source module. An authorized local read of AIdenID main `137dd928` `apps/web/public/llms.txt` produced 123,787 bytes and `sha256:d1ae12c32fc50d887e4d8f842e726eac5790307632ce4d5bd67292302cc1164a`. No network fetch, persistence, public response or assertion promotion occurred.
+
+`npm run verify` passed check and docs, then E2E finished 134/136. Both failures reproduced on untouched EW02 base `ae482421`: a CLI help link assertion expects the old `mrrCarter` URL, and an existing session join flow returns `LEGACY_AGENT_ACCESS_UNAVAILABLE` 503. Coverage did not run because E2E failed; the failures are outside this slice. Full EW04 still requires an approved live source connector with DNS/redirect enforcement, parsing and persisted snapshot readback after EW02 acceptance. The original ticket remains open.
+
+The staged local review scan covered all four changed files: P1 0, nonblocking P2 2 because `docs/spec.md` does not enumerate these ENGRAM paths, plus P3 new-file scope. No scanner finding attributes a credential or unsafe operation to this slice. The spec-scope warnings need a reviewer disposition or scoped spec update at publication. Exact-head Omar/Audit and hosted gates remain for the later PR after EW02 lands.
+
 ### Gate regression correction
 
 Same-environment A/B proved the Omar diff E2E failure was patch-triggered, not
