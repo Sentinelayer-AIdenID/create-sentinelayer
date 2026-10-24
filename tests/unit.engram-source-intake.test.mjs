@@ -229,6 +229,31 @@ test("IPv6 literal hosts are refused even when their origin is allow-listed", as
   }
 });
 
+test("a view that lies about its byteLength and a flood of empty chunks are both bounded", async () => {
+  const big = Buffer.alloc(300 * 1024, 0x61);
+  const liar = new Uint8Array(big.buffer, big.byteOffset, big.length);
+  Object.defineProperty(liar, "byteLength", { value: 0 });
+  await rejectsCode(fixture({ read: async () => ({
+    status: 200, url, version: source.version, mediaType: "text/plain", body: liar,
+  }) }), "source_too_large", "a shadowed byteLength cannot slip past the cap");
+  async function* liarChunks() {
+    const chunk = new Uint8Array(big.buffer, big.byteOffset, big.length);
+    Object.defineProperty(chunk, "byteLength", { value: 1 });
+    yield chunk;
+  }
+  await rejectsCode(fixture({ read: async () => ({
+    status: 200, url, version: source.version, mediaType: "text/plain", body: liarChunks(),
+  }) }), "source_too_large", "a shadowed chunk byteLength cannot slip past the cap");
+  let yielded = 0;
+  async function* emptyFlood() {
+    while (true) { yielded += 1; yield new Uint8Array(0); }
+  }
+  await rejectsCode(fixture({ read: async () => ({
+    status: 200, url, version: source.version, mediaType: "text/plain", body: emptyFlood(),
+  }) }), "source_too_large", "endless empty chunks are cut off");
+  assert.ok(yielded <= 4097, `stopped after ${yielded} chunks`);
+});
+
 test("a replayed error from an earlier call cannot be rewritten or rethrown as trusted", async () => {
   let captured;
   try {

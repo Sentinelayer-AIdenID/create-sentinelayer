@@ -75,19 +75,40 @@ function unchangedApprovedSource(current, approved, allowedOrigins) {
   }
 }
 
+// The TypedArray intrinsic getters: a reader-supplied view can shadow .byteLength/.byteOffset/.buffer with
+// own properties, so the cap and the copy read the real values through these, never through the object.
+const TYPED_ARRAY = Object.getPrototypeOf(Uint8Array.prototype);
+const intrinsic = (name) => Object.getOwnPropertyDescriptor(TYPED_ARRAY, name).get;
+const VIEW_LENGTH = intrinsic("byteLength");
+const VIEW_OFFSET = intrinsic("byteOffset");
+const VIEW_BUFFER = intrinsic("buffer");
+// A stream may only yield this many chunks in total, so endless empty chunks cannot hold a capture open.
+export const MAX_SOURCE_CHUNKS = 4096;
+
+function copyView(view) {
+  const length = Reflect.apply(VIEW_LENGTH, view, []);
+  return { length, copy: () => Buffer.from(new Uint8Array(Reflect.apply(VIEW_BUFFER, view, []), Reflect.apply(VIEW_OFFSET, view, []), length)) };
+}
+
 async function boundedBytes(body, limit) {
   if (body instanceof Uint8Array) {
-    if (body.byteLength > limit) reject("source_too_large");
-    return Buffer.from(body);
+    const view = copyView(body);
+    if (view.length > limit) reject("source_too_large");
+    return view.copy();
   }
   if (!body || typeof body[Symbol.asyncIterator] !== "function") reject("source_rejected");
   const chunks = [];
   let length = 0;
+  let count = 0;
   for await (const chunk of body) {
     if (!(chunk instanceof Uint8Array)) reject("source_rejected");
-    length += chunk.byteLength;
+    count += 1;
+    if (count > MAX_SOURCE_CHUNKS) reject("source_too_large");
+    const view = copyView(chunk);
+    if (view.length === 0) continue; // never retain empty chunks
+    length += view.length;
     if (length > limit) reject("source_too_large");
-    chunks.push(Buffer.from(chunk));
+    chunks.push(view.copy());
   }
   return Buffer.concat(chunks, length);
 }
