@@ -4176,3 +4176,29 @@ Review: The added fail-first tests both failed at faa7; no-digit monetary string
 Scope note: No `priceRange` representation or consumer exists in the current contract. A range needs an explicit typed schema and ordering rule before it can be accepted; this narrow review repair does not add one.
 
 Review: All three new tests failed against 971459b (36/39 targeted passed) and now pass (39/39). The complete ENGRAM contract suite passes 218/218, static check passes 417 files, package dry-run succeeds, and the final full unit run passes 2,725 tests with three skipped and no failures. The former Windows EPERM did not recur in this run. The direct-child diff check is clean.
+
+## 2026-10-24 EnGram canonical Omar gpt-6.1-sol restore (isolated, unpublished)
+
+- [x] Keep the existing Omar Gate job/check names, trusted OIDC boundary, fork static scan, artifacts, and merge enforcer.
+- [x] Route the primary deep Action to direct OpenAI gpt-6.1-sol with legacy review and fail-closed policy; pin reviewed PR135 release 2d5a8edd.
+- [x] Make the workflow contract and focused tests reject old Codex/Gemini/managed/Jev paths and state bounded legacy deep evidence honestly.
+- [x] Run YAML, contract self-test, forbidden-surface, focused unit and diff checks; commit exact local patch for warden review only.
+
+### Review
+
+Local proof: PyYAML parsed all three jobs; contract and forbidden-surface self-tests passed; 14 focused tests passed; `npm run check` passed 405 files. The default workflow is currently disabled on GitHub, so this worktree did not trigger an Omar run. Independent warden review and hosted exact-head gate remain before merge.
+
+# 2026-10-24 - PR866 local Lighthouse fallback
+
+## Plan
+
+- [x] Replace the `npx lighthouse@12` fallback with the installed, pinned Lighthouse 13 CLI via the current Node executable.
+- [x] Update the invocation test to prove literal URL and credential handling, offline local execution, and graceful absence of the package.
+- [x] Run focused tests, repository checks, and review the diff before a local commit.
+
+## Review
+
+- Clean `npm ci`: 213 packages, zero vulnerabilities. The installed CLI reports 13.5.0.
+- Focused runtime-audit tests: 15/15 pass. `npm run check`: 405 files pass. Docs validation passes; `git diff --check` is clean.
+- Full `npm run verify` reaches an inherited E2E assertion at `tests/e2e.test.mjs:1379`: help text now names `Sentinelayer-AIdenID`, while the test expects `mrrCarter`. The same focused assertion fails on untouched PR866 head `48604c4`.
+- No paid model call or hosted gate run; branch awaits independent review.
