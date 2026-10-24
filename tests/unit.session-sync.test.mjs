@@ -1886,3 +1886,118 @@ test("Unit session sync: orchestrator role is normalized to 'coder' in grant pay
   assert.equal(grantBody.role, "coder", "orchestrator must fall back to coder pending API enum extension");
   resetSessionSyncStateForTests();
 });
+
+test("Unit session sync: noAutoGrant=true skips grant+retry on 403 IDENTITY_FORGERY", async () => {
+  resetSessionSyncStateForTests();
+  __resetAutoGrantCacheForTests();
+  const calls = [];
+  const result = await syncSessionEventToApi(
+    "sess-grant-7",
+    buildIdentityForgeryEventEnvelope({ agentId: "codex", role: "coder" }),
+    {
+      noAutoGrant: true,
+      resolveAuthSession: async () => ({
+        token: "tok_test_grant",
+        apiUrl: "https://api.sentinelayer.com",
+      }),
+      fetchImpl: async (url, options) => {
+        calls.push({ url, method: options.method });
+        return makeJsonResponse({
+          ok: false,
+          status: 403,
+          body: { error: { code: "IDENTITY_FORGERY", message: "agent identity 'codex' is not granted" } },
+        });
+      },
+      nowMs: () => 1_700_000_700_700,
+    }
+  );
+
+  assert.equal(result.synced, false, "noAutoGrant must suppress grant and return failure");
+  assert.equal(result.reason, "api_403");
+  assert.equal(result.autoGranted, undefined);
+  assert.equal(calls.length, 1, "only one /events POST, no grant call");
+  assert.equal(calls[0].url, "https://api.sentinelayer.com/api/v1/sessions/sess-grant-7/events");
+  resetSessionSyncStateForTests();
+});
+
+test("Unit session sync: stored credential noAutoGrant skips grant+retry on 403 IDENTITY_FORGERY", async () => {
+  resetSessionSyncStateForTests();
+  __resetAutoGrantCacheForTests();
+  const calls = [];
+  const result = await syncSessionEventToApi(
+    "sess-grant-8",
+    buildIdentityForgeryEventEnvelope({ agentId: "keeper-bot", role: "coder" }),
+    {
+      noAutoGrant: false,
+      resolveAuthSession: async () => ({
+        token: "tok_test_grant",
+        apiUrl: "https://api.sentinelayer.com",
+      }),
+      readCredential: async () => ({
+        state: "live",
+        credential: { noAutoGrant: true },
+      }),
+      fetchImpl: async (url, options) => {
+        calls.push({ url, method: options.method });
+        return makeJsonResponse({
+          ok: false,
+          status: 403,
+          body: { error: { code: "IDENTITY_FORGERY", message: "agent identity 'keeper-bot' is not granted" } },
+        });
+      },
+      nowMs: () => 1_700_000_800_800,
+    }
+  );
+
+  assert.equal(result.synced, false, "stored noAutoGrant must suppress grant and return failure");
+  assert.equal(result.reason, "api_403");
+  assert.equal(result.autoGranted, undefined);
+  assert.equal(calls.length, 1, "only one /events POST, no grant call");
+  assert.equal(calls[0].url, "https://api.sentinelayer.com/api/v1/sessions/sess-grant-8/events");
+  resetSessionSyncStateForTests();
+});
+
+test("Unit session sync: stored credential without noAutoGrant proceeds to grant", async () => {
+  resetSessionSyncStateForTests();
+  __resetAutoGrantCacheForTests();
+  const calls = [];
+  const result = await syncSessionEventToApi(
+    "sess-grant-9",
+    buildIdentityForgeryEventEnvelope({ agentId: "keeper-bot", role: "coder" }),
+    {
+      noAutoGrant: false,
+      resolveAuthSession: async () => ({
+        token: "tok_test_grant",
+        apiUrl: "https://api.sentinelayer.com",
+      }),
+      readCredential: async () => ({
+        state: "live",
+        credential: { noAutoGrant: false },
+      }),
+      fetchImpl: async (url, options) => {
+        calls.push({ url, method: options.method });
+        if (calls.length === 1) {
+          return makeJsonResponse({
+            ok: false,
+            status: 403,
+            body: { error: { code: "IDENTITY_FORGERY", message: "agent identity 'keeper-bot' is not granted" } },
+          });
+        }
+        if (calls.length === 2) {
+          return makeJsonResponse({
+            ok: true,
+            status: 201,
+            body: { grantId: "grant-test", agentId: "keeper-bot" },
+          });
+        }
+        return makeJsonResponse({ ok: true, status: 200, body: { synced: true } });
+      },
+      nowMs: () => 1_700_000_900_900,
+    }
+  );
+
+  assert.equal(result.synced, true, "grant proceeds when stored noAutoGrant is false");
+  assert.equal(result.autoGranted, true);
+  assert.ok(calls.length >= 2, "grant call was made");
+  resetSessionSyncStateForTests();
+});

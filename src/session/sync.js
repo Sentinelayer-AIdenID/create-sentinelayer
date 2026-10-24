@@ -10,6 +10,7 @@ import { createAgentEvent } from "../events/schema.js";
 import { isSessionControlEvent } from "./control-events.js";
 import { createSessionMutationHeaders } from "./invitations.js";
 import { messageRevision } from "./message-edits.js";
+import { readAdmissionCredentialState } from "./admission.js";
 import { installTestEgressGuard } from "../net/test-egress-guard.js";
 import { isUrlPathSegment, urlPathSegment } from "../net/url-path.js";
 
@@ -957,6 +958,8 @@ export async function syncSessionEventToApi(
     resolveAuthSession = resolveActiveAuthSession,
     fetchImpl = fetchWithTimeout,
     nowMs = Date.now,
+    noAutoGrant = false,
+    readCredential = readAdmissionCredentialState,
   } = {}
 ) {
   const normalizedSessionId = normalizeString(sessionId);
@@ -1069,6 +1072,23 @@ export async function syncSessionEventToApi(
           return { synced: false, reason: "api_403" };
         }
         const agentId = normalizeString(event?.agent?.id);
+        if (noAutoGrant) {
+          return { synced: false, reason: "api_403" };
+        }
+        // Check the stored admission credential: a keeper that joined with
+        // --no-auto-grant persists the preference.
+        if (!noAutoGrant && agentId) {
+          let storedNoAutoGrant = false;
+          try {
+            const cred = await readCredential(normalizedSessionId, agentId);
+            storedNoAutoGrant = !!(cred?.credential?.noAutoGrant);
+          } catch {
+            // credential file absent or unreadable — no preference to apply
+          }
+          if (storedNoAutoGrant) {
+            return { synced: false, reason: "api_403" };
+          }
+        }
         if (!agentId || isReservedAgentIdForGrant(agentId)) {
           // Reserved or empty — server enforcement is intentional, no grant
           // attempt is meaningful. Treat as a normal 403 failure.

@@ -494,7 +494,7 @@ export async function withAdmissionCredentialLock(filePath, run, { timeoutMs = 1
   }
 }
 
-async function recoverAndStore(auth, sid, agent, admissionId, key, fingerprint, deps, homeDir, now, rejectedToken = null) {
+async function recoverAndStore(auth, sid, agent, admissionId, key, fingerprint, deps, homeDir, now, rejectedToken = null, noAutoGrant = false) {
   return withAdmissionCredentialLock(admissionCredentialPath(sid, agent, { homeDir }), async () => {
     // Another process may have completed recovery while this process waited.
     const current = await readAdmissionCredentialState(sid, agent, { homeDir, now: now() });
@@ -504,12 +504,12 @@ async function recoverAndStore(auth, sid, agent, admissionId, key, fingerprint, 
       return redacted({ status: "active", reused: true, stored: current.credential, sid, agent, homeDir });
     }
     const claimed = await recoverCredential(auth, sid, agent, admissionId, key, deps, now);
-    const stored = await storeClaimedCredential(claimed, { auth, sid, agent, key, fingerprint, homeDir, now });
+    const stored = await storeClaimedCredential(claimed, { auth, sid, agent, key, fingerprint, homeDir, now, noAutoGrant });
     return { ...redacted({ status: "active", reused: true, stored, claimed, sid, agent, homeDir }), recovered: true };
   });
 }
 
-async function storeClaimedCredential(claimed, { auth, sid, agent, key, fingerprint, homeDir, now }) {
+async function storeClaimedCredential(claimed, { auth, sid, agent, key, fingerprint, homeDir, now, noAutoGrant = false }) {
   if (!String(claimed?.credential?.token || "").startsWith("sladm_")) {
     throw new Error("Admission did not return a scoped agent credential.");
   }
@@ -538,6 +538,7 @@ async function storeClaimedCredential(claimed, { auth, sid, agent, key, fingerpr
     grant,
     correlation: claimed.correlation,
     storedAt: new Date(now()).toISOString(),
+    noAutoGrant: Boolean(noAutoGrant),
   };
   await writeSecretFile(admissionCredentialPath(sid, agent, { homeDir }), stored);
   return stored;
@@ -579,6 +580,7 @@ export async function runAdmissionJoin(
     wait = true,
     recoverActive = false,
     waitTimeoutMs = 15 * 60_000,
+    noAutoGrant = false,
     targetPath = process.cwd(),
     homeDir,
     origin = SESSION_MUTATION_ORIGIN,
@@ -634,7 +636,7 @@ export async function runAdmissionJoin(
     // Go directly to recovery, never file a new request after a refused cached
     // bearer. A revoked/expired grant must be refused, not reopened as pending.
     return recoverAndStore(auth, sid, agent, held.credential.admissionId, key, fingerprint, deps, homeDir, now,
-      held.credential.token);
+      held.credential.token, noAutoGrant);
   }
 
   const statePath = admissionStatePath(targetPath, sid, agent);
@@ -679,7 +681,7 @@ export async function runAdmissionJoin(
     }
     if (created?.status === "active" && created?.reused) {
       const recovered = await recoverAndStore(auth, sid, agent, created.admissionId, key, fingerprint, deps, homeDir, now,
-        recoverActive && held.state === "live" ? held.credential.token : null);
+        recoverActive && held.state === "live" ? held.credential.token : null, noAutoGrant);
       await fsp.rm(statePath, { force: true });
       return recovered;
     }
@@ -759,7 +761,7 @@ export async function runAdmissionJoin(
   }
   if (polled.status === "active") {
     const recovered = await recoverAndStore(auth, sid, agent, state.admissionId, key, fingerprint, deps, homeDir, now,
-      recoverActive && held.state === "live" ? held.credential.token : null);
+      recoverActive && held.state === "live" ? held.credential.token : null, noAutoGrant);
     await fsp.rm(statePath, { force: true });
     return recovered;
   }
@@ -782,7 +784,7 @@ export async function runAdmissionJoin(
     }
     if (fresh.status === "active") {
       const recovered = await recoverCredential(auth, sid, agent, state.admissionId, key, deps, now);
-      const stored = await storeClaimedCredential(recovered, { auth, sid, agent, key, fingerprint, homeDir, now });
+      const stored = await storeClaimedCredential(recovered, { auth, sid, agent, key, fingerprint, homeDir, now, noAutoGrant });
       return { ...redacted({ status: "active", reused: true, stored, claimed: recovered, sid, agent, homeDir }), recovered: true };
     }
     const fields = fresh?.claim?.preimage;
@@ -800,7 +802,7 @@ export async function runAdmissionJoin(
       { nonce: fields.nonce, signature: signature.toString("base64url") },
       { ...deps, operationName: "session.admission_claim" }
     );
-    const stored = await storeClaimedCredential(claimed, { auth, sid, agent, key, fingerprint, homeDir, now });
+    const stored = await storeClaimedCredential(claimed, { auth, sid, agent, key, fingerprint, homeDir, now, noAutoGrant });
     return redacted({ status: "active", reused: false, stored, claimed, sid, agent, homeDir });
   });
   await fsp.rm(statePath, { force: true });
