@@ -1078,19 +1078,23 @@ export async function syncSessionEventToApi(
         // Check the stored admission credential: a keeper that joined with
         // --no-auto-grant persists the preference.
         if (!noAutoGrant && agentId) {
-          let storedNoAutoGrant = false;
           try {
             const cred = await readCredential(normalizedSessionId, agentId);
-            storedNoAutoGrant = !!(cred?.credential?.noAutoGrant);
+            // A present-but-unreadable or corrupt credential (state "refused")
+            // means the preference cannot be determined; fail closed rather than
+            // silently treating it as "no preference" and auto-granting.
+            if (cred?.state === "refused") {
+              return { synced: false, reason: "api_403" };
+            }
+            if (cred?.credential?.noAutoGrant) {
+              return { synced: false, reason: "api_403" };
+            }
           } catch (error) {
             // Only a missing file means no preference. Any other read error
             // (permissions, corruption, transient I/O) must fail closed: a
             // 403 must NOT auto-grant because the preference is unreadable.
             if (!error || error.code !== "ENOENT") throw error;
             // credential file absent — no preference to apply
-          }
-          if (storedNoAutoGrant) {
-            return { synced: false, reason: "api_403" };
           }
         }
         if (!agentId || isReservedAgentIdForGrant(agentId)) {

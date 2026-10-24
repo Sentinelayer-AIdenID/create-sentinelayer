@@ -2037,6 +2037,42 @@ test("Unit session sync: corrupt credential file fails closed on 403 IDENTITY_FO
   resetSessionSyncStateForTests();
 });
 
+test("Unit session sync: refused credential state fails closed on 403 IDENTITY_FORGERY", async () => {
+  resetSessionSyncStateForTests();
+  __resetAutoGrantCacheForTests();
+  const calls = [];
+  const result = await syncSessionEventToApi(
+    "sess-grant-11",
+    buildIdentityForgeryEventEnvelope({ agentId: "keeper-bot", role: "coder" }),
+    {
+      noAutoGrant: false,
+      resolveAuthSession: async () => ({
+        token: "tok_test_grant",
+        apiUrl: "https://api.sentinelayer.com",
+      }),
+      readCredential: async () => ({
+        state: "refused",
+        reason: "malformed",
+        credential: null,
+      }),
+      fetchImpl: async (url, options) => {
+        calls.push({ url, method: options.method });
+        return makeJsonResponse({
+          ok: false,
+          status: 403,
+          body: { error: { code: "IDENTITY_FORGERY", message: "agent identity 'keeper-bot' is not granted" } },
+        });
+      },
+      nowMs: () => 1_700_001_100_000,
+    }
+  );
+  // A present-but-corrupt credential file must fail closed: no grant attempt.
+  assert.equal(result.synced, false, "refused credential state must fail closed");
+  assert.equal(result.reason, "api_403");
+  assert.equal(calls.length, 1, "only the initial /events POST, no grant+retry loop");
+  resetSessionSyncStateForTests();
+});
+
 // --- CLI parsing: --no-auto-grant on the real session join command ---
 // These tests register the application's actual session join command (via
 // registerSessionCommand) and verify that the Commander-negated option
