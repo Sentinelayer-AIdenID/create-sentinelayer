@@ -219,7 +219,10 @@ export const graphSchema = z.object({
     }
   };
   checkFreshness(data.freshness, ["freshness"]);
-  (data.entities ?? []).forEach((entity, i) => capturedByGeneration(entity.capturedAt, ["entities", i, "capturedAt"]));
+  (data.entities ?? []).forEach((entity, i) => {
+    capturedByGeneration(entity.capturedAt, ["entities", i, "capturedAt"]);
+    capturedByGeneration(entity.evidenceRef?.verifiedAt, ["entities", i, "evidenceRef", "verifiedAt"]);
+  });
   data.assertions.forEach((assertion, i) => {
     capturedByGeneration(assertion.source.capturedAt, ["assertions", i, "source", "capturedAt"]);
     capturedByGeneration(assertion.evidenceRef?.verifiedAt, ["assertions", i, "evidenceRef", "verifiedAt"]);
@@ -327,7 +330,7 @@ const MONEY_FIELD_SUFFIXES = new Set([
 // transaction noun such as "order" or "invoice" is an entity, not an amount.
 const STRONG_MONEY_FIELD_TOKENS = new Set([
   "amount", "price", "cost", "fee", "subtotal", "balance", "payment",
-  "revenue", "expense", "charge", "refund", "budget", "profit", "vat",
+  "revenue", "expense", "charge", "refund", "budget", "profit", "vat", "msrp",
 ]);
 const TRANSACTION_VALUE_TOKENS = new Set(["sale", "purchase", "invoice", "order"]);
 const NON_MONETARY_MEASURE_TERMINALS = new Set([

@@ -116,6 +116,18 @@ test("formatFromMinorUnits: formats minor units to decimal string", () => {
   assert.equal(formatFromMinorUnits(1000, 3), "1.000");
 });
 
+test("formatFromMinorUnits: rejects invalid minor units and exponents instead of coercing", () => {
+  for (const value of [1.5, Number.MAX_SAFE_INTEGER + 1, NaN, Infinity, "199", null]) {
+    assert.throws(() => formatFromMinorUnits(value, 2), RangeError,
+      `invalid minor units ${String(value)} must not become a display amount`);
+  }
+  for (const exponent of [-1, 1.5, 7, NaN, Infinity, "2", null]) {
+    assert.throws(() => formatFromMinorUnits(199, exponent), RangeError,
+      `exponent ${String(exponent)} must be an integer from 0 to 6`);
+  }
+  assert.equal(formatFromMinorUnits(Number.MAX_SAFE_INTEGER, 6), "9007199254.740991");
+});
+
 test("currencyExponent: returns known exponent for ISO codes", () => {
   assert.equal(currencyExponent("USD"), 2);
   assert.equal(currencyExponent("JPY"), 0);

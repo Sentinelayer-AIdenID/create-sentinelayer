@@ -4167,3 +4167,12 @@ Review evidence:
 - [x] Run focused/static/full unit gates on the direct child, inspect diff, commit locally, and report SHA without pushing.
 
 Review: The added fail-first tests both failed at faa7; no-digit monetary strings and refundWindow also failed under the intermediate matcher. After the bounded repair, all 215 ENGRAM contract tests pass, static check passes on 417 files, and package dry-run succeeds. The final full unit run had 2,721 passed, three skipped, and one Windows EPERM temporary-file rename in the untouched session-agent-registry test; that file passed 4/4 when rerun alone. The known two unrelated E2E failures from the preceding verify attempt remain outside this three-file correction.
+
+## Exact-971 release review follow-up
+- [x] Reproduce invalid minor-unit formatting, future entity evidence, and untyped MSRP facts with fail-first tests (36/39 passed before repair).
+- [x] Reject invalid formatter arguments, bound entity evidence time to graph generation, and recognize MSRP as a money alias.
+- [x] Run focused, static, and full unit checks; inspect the direct-child diff and commit locally without pushing.
+
+Scope note: No `priceRange` representation or consumer exists in the current contract. A range needs an explicit typed schema and ordering rule before it can be accepted; this narrow review repair does not add one.
+
+Review: All three new tests failed against 971459b (36/39 targeted passed) and now pass (39/39). The complete ENGRAM contract suite passes 218/218, static check passes 417 files, package dry-run succeeds, and the final full unit run passes 2,725 tests with three skipped and no failures. The former Windows EPERM did not recur in this run. The direct-child diff check is clean.

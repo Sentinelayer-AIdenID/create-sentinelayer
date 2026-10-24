@@ -214,3 +214,31 @@ test("structured merchant metadata remains usable under semantic metadata names"
     entities: [entity({ refundPolicy: { refundAmount: quantity } })],
   })).valid, false, "metadata exemption must still validate nested money facts");
 });
+
+test("entity evidence cannot claim verification after graph generation", () => {
+  const evidenceRef = {
+    address: "receipt:catalog-price", verifier: "trusted-catalog",
+    verifiedAt: "2026-10-23T12:00:01Z",
+  };
+  for (const provenance of ["observed", "authoritative"]) {
+    const futureEvidence = graph({ entities: [entity({ Price: price }, { provenance, evidenceRef })] });
+    assert.equal(graphSchema.safeParse(futureEvidence).success, false,
+      `${provenance} entity evidence cannot postdate graph generation`);
+  }
+  assert.equal(graphSchema.safeParse(graph({ entities: [entity({ Price: price }, {
+    provenance: "authoritative", evidenceRef: { ...evidenceRef, verifiedAt: at },
+  })] })).success, true, "evidence at generation time is allowed");
+});
+
+test("MSRP aliases require canonical money in assertions and entity attributes", () => {
+  for (const name of ["MSRP", "msrp", "Msrp", "productMSRP"]) {
+    assert.equal(validateGraphIntegrity(graph({ assertions: [assertion(name, "19.99")] })).valid,
+      false, `assertion ${name} cannot encode MSRP as an untyped string`);
+    assert.equal(validateGraphIntegrity(graph({ entities: [entity({ [name]: "19.99" })] })).valid,
+      false, `entity ${name} cannot encode MSRP as an untyped string`);
+    assert.equal(validateGraphIntegrity(graph({ assertions: [assertion(name, price)] })).valid,
+      true, `assertion ${name} accepts canonical money`);
+    assert.equal(validateGraphIntegrity(graph({ entities: [entity({ [name]: price })] })).valid,
+      true, `entity ${name} accepts canonical money`);
+  }
+});

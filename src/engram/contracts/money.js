@@ -222,9 +222,15 @@ export function toMinorUnits(money) {
  * @param {number} minorUnits
  * @param {number} exponent
  * @returns {string}
+ * @throws {RangeError} when minorUnits is not a safe integer or exponent is outside 0..6
  */
 export function formatFromMinorUnits(minorUnits, exponent = 2) {
-  if (!Number.isSafeInteger(minorUnits)) return String(minorUnits);
+  if (!Number.isSafeInteger(minorUnits)) {
+    throw new RangeError("minorUnits must be a finite safe integer");
+  }
+  if (!Number.isInteger(exponent) || exponent < 0 || exponent > 6) {
+    throw new RangeError("exponent must be an integer from 0 to 6");
+  }
   if (exponent === 0) return String(minorUnits);
 
   const negative = minorUnits < 0;
