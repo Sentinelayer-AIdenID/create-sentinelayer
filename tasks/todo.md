@@ -1,13 +1,3 @@
-# 2026-10-21 - Workspace artifact output containment
-
-- [x] Reproduce project-configured artifact writes outside the workspace at main `628f96c`.
-- [x] Isolate implementation from preserved, unaccepted worker drafts.
-- [x] Restrict only project-origin output paths; preserve explicit CLI and global choices.
-- [x] Verify real artifact writes, Windows path forms, symlinks/junctions, missing suffixes and safe normalization.
-- [ ] Run focused checks and obtain independent exact-head review; root owns publication.
-
-Review: focused new/existing tests pass (28); independent Windows harness passes all 26 cases. Broader checks and exact-head independent review pending. This check validates the current filesystem before writes; it does not claim protection against concurrent filesystem replacement.
-
 # 2026-09-28 - Bounded session start (`roadmap/pr-800-session-start-bounded`)
 
 ## Plan
