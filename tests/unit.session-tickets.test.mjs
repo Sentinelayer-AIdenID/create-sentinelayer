@@ -62,6 +62,10 @@ function fakeApi({ loseClaimResponses = 0, decoyCursor = false, brokenContinuati
     if (u.origin !== API) throw new Error(`left the fixture API: ${u.origin}`);
     if (bearer !== ADMISSION_TOKEN) return json({ error: { code: "INVALID_TOKEN" } }, 401);
     const p = u.pathname;
+    if (method === "POST" && p.endsWith("/tickets")) {
+      state.createBody = JSON.parse(init.body || "{}");
+      return json({ id: "created-ticket", createdBy: AGENT, creator: { kind: "agent", id: AGENT, credentialBound: true } });
+    }
     if (method === "GET" && p.endsWith("/tickets")) {
       // The bounded board page: NOT a baseline, and it would miss work. The list must not use it.
       return json({ items: [{ id: "board-decoy", title: "board page only", status: "open", version: 1, lease: null }] });
@@ -322,6 +326,64 @@ test("ticket work as an agent with NO admission is refused before any request", 
   const ran = await sl(["session", "ticket", "claim", SID, "t-open", "--agent", "not-admitted", "--json"]);
   assert.match(String(ran.error?.message), /"not-admitted" has no live admission.*would act as you/s);
   assert.deepEqual(api.requests, []);
+});
+
+test("ticket create carries explicit agent and source while the request uses its admission credential", async () => {
+  await reset();
+  await storeAdmission();
+  const api = fakeApi();
+  const ran = await sl(["session", "ticket", "create", SID, "--title", "file once", "--body", "details",
+    "--agent", AGENT, "--source-sequence", "52041", "--idempotency-key", "create-10000000-0000-4000-8000-000000000001", "--json"]);
+  assert.equal(ran.error, null, String(ran.error?.stack || ran.error));
+  assert.deepEqual(api.createBody, { title: "file once", body: "details", agentId: AGENT, sourceSequenceId: 52041 });
+  assert.equal(ran.json.ticket.createdBy, AGENT);
+  assert.equal(ran.json.idempotencyKey, "create-10000000-0000-4000-8000-000000000001");
+  const request = api.requests.find(r => r.method === "POST" && r.path.endsWith("/tickets"));
+  assert.equal(request.bearer, ADMISSION_TOKEN);
+  assert.equal(request.key, "create-10000000-0000-4000-8000-000000000001");
+  assert.deepEqual(ran.json.provenance, { agentRequested: AGENT, agentRecorded: true, sourceRequested: 52041, sourceRecorded: false });
+});
+
+test("ticket create reports attribution the server did NOT record instead of claiming it", async () => {
+  const { createTicket } = await import("../src/session/tickets.js");
+  const created = await createTicket(SID, {
+    title: "file once", agentId: "probe-a", sourceSequenceId: 7, idempotencyKey: "create-key-unrecorded",
+    resolveAuthSession: async () => ({ token: "synthetic", apiUrl: API }),
+    // A server without the creator-provenance change: it ignores agentId/sourceSequenceId.
+    requestMutation: async () => ({ id: "t-new", title: "file once", createdBy: "user-1", version: 1 }),
+  });
+  assert.deepEqual(created.provenance, { agentRequested: "probe-a", agentRecorded: false, sourceRequested: 7, sourceRecorded: false });
+});
+
+test("ticket create reports recorded attribution when the server stores it (companion API shape)", async () => {
+  const { createTicket } = await import("../src/session/tickets.js");
+  const created = await createTicket(SID, {
+    title: "file once", agentId: "probe-a", sourceSequenceId: 7, idempotencyKey: "create-key-recorded",
+    resolveAuthSession: async () => ({ token: "synthetic", apiUrl: API }),
+    requestMutation: async () => ({ id: "t-new", title: "file once", createdBy: "probe-a", sourceSequenceId: 7, version: 1 }),
+  });
+  assert.deepEqual(created.provenance, { agentRequested: "probe-a", agentRecorded: true, sourceRequested: 7, sourceRecorded: true });
+});
+
+test("ticket create keeps its key across an uncertain response, and a retry reuses it", async () => {
+  const { createTicket } = await import("../src/session/tickets.js");
+  const keys = [];
+  const opts = (requestMutation) => ({
+    title: "file once", idempotencyKey: "create-key-uncertain",
+    resolveAuthSession: async () => ({ token: "synthetic", apiUrl: API }), requestMutation,
+  });
+  // The server may have committed, but the response was lost.
+  await assert.rejects(
+    createTicket(SID, opts(async (_url, init) => { keys.push(init.idempotencyKey); throw new Error("socket hang up"); })),
+    (error) => {
+      assert.match(String(error.message), /socket hang up/);
+      assert.match(String(error.message), /retry with --idempotency-key create-key-uncertain/);
+      return true;
+    },
+  );
+  const retried = await createTicket(SID, opts(async (_url, init) => { keys.push(init.idempotencyKey); return { id: "t-1", title: "file once", version: 1 }; }));
+  assert.equal(retried.idempotencyKey, "create-key-uncertain");
+  assert.deepEqual(keys, ["create-key-uncertain", "create-key-uncertain"]);
 });
 
 test("a claim the server records for someone else is not recorded as ours", async () => {
