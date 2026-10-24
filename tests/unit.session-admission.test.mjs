@@ -29,6 +29,7 @@ import {
 } from "../src/session/admission.js";
 import { canonicalPreimage } from "../src/session/admission-preimage.js";
 import { createSessionMutationCsrfToken } from "../src/session/invitations.js";
+import { resolveSessionPaths } from "../src/session/paths.js";
 import { bearerOf } from "./credential-probe.mjs";
 
 const SID = "e9e8dc5e-8d57-4603-975f-09156e3b4473";
@@ -477,6 +478,63 @@ test("a concurrent first claim applies the later caller's noAutoGrant opt-out", 
   assert.equal(api.calls.filter((call) => call.url.endsWith("/claim")).length, 1);
   const stored = await readAdmissionCredentialState(SID, "builder-1", dirs);
   assert.equal(stored.credential.noAutoGrant, true);
+});
+
+test("a pending opt-out added after a waiter's snapshot survives that waiter's first claim", async () => {
+  const dirs = await scratch();
+  const api = fakeApi({ onPoll: (adm) => { if (adm.status === "pending") adm.status = "approved"; } });
+  await runAdmissionJoin(SID, base(api, dirs, { wait: false }));
+
+  let optedOut = false;
+  const requestRead = async (...args) => {
+    const approved = await api.requestRead(...args);
+    if (!optedOut) {
+      optedOut = true;
+      const pending = await runAdmissionJoin(SID, base(api, dirs, { noAutoGrant: true, wait: false }));
+      assert.equal(pending.status, "pending", "the opting-out caller never claims the admission");
+    }
+    return approved;
+  };
+  const claimed = await runAdmissionJoin(SID, base(api, dirs, { requestRead }));
+  assert.equal(optedOut, true);
+  assert.equal(claimed.status, "active");
+  assert.equal(api.calls.filter((call) => call.url.endsWith("/claim")).length, 1);
+  const stored = await readAdmissionCredentialState(SID, "builder-1", dirs);
+  assert.equal(stored.credential.noAutoGrant, true,
+    "the claiming waiter must reread the later opt-out while holding the credential lock");
+});
+
+test("a pending opt-out added after a waiter's snapshot survives recovery of an external claim", async () => {
+  const dirs = await scratch();
+  const api = fakeApi({ onPoll: (adm) => { if (adm.status === "pending") adm.status = "approved"; } });
+  await runAdmissionJoin(SID, base(api, dirs, { wait: false }));
+  const statePath = path.join(resolveSessionPaths(SID, { targetPath: dirs.targetPath }).sessionDir,
+    "admissions", "builder-1.json");
+  const pendingState = await fsp.readFile(statePath, "utf8");
+
+  // Model a claim from another process: the server is active, while this
+  // workspace still has its pending record and no local credential.
+  await runAdmissionJoin(SID, base(api, dirs));
+  await fsp.unlink(admissionCredentialPath(SID, "builder-1", dirs));
+  await fsp.writeFile(statePath, pendingState);
+
+  let optedOut = false;
+  const requestRead = async (...args) => {
+    const active = await api.requestRead(...args);
+    if (!optedOut) {
+      optedOut = true;
+      const pending = await runAdmissionJoin(SID, base(api, dirs, { noAutoGrant: true, wait: false }));
+      assert.equal(pending.status, "pending", "the opting-out caller never recovers the credential");
+    }
+    return active;
+  };
+  const recovered = await runAdmissionJoin(SID, base(api, dirs, { requestRead }));
+  assert.equal(optedOut, true);
+  assert.equal(recovered.status, "active");
+  assert.equal(recovered.recovered, true);
+  const stored = await readAdmissionCredentialState(SID, "builder-1", dirs);
+  assert.equal(stored.credential.noAutoGrant, true,
+    "the recovering waiter must reread the later opt-out while holding the credential lock");
 });
 
 test("a re-run resumes the same request instead of filing a new one", async () => {
