@@ -2002,32 +2002,54 @@ test("Unit session sync: stored credential without noAutoGrant proceeds to grant
   resetSessionSyncStateForTests();
 });
 
-// --- CLI parsing: Commander --no-auto-grant negated option ---
-import { Command } from "commander";
+// --- CLI parsing: --no-auto-grant on the real session join command ---
+// These tests register the application's actual session join command (via
+// registerSessionCommand) and verify that the Commander-negated option
+// --no-auto-grant sets autoGrant=false and is derivable as noAutoGrant=true.
+// The action handler is replaced with a no-op to avoid network I/O.
 
-test("Unit session sync: --no-auto-grant sets autoGrant=false so noAutoGrant is derived as true", async () => {
+import { Command } from "commander";
+import { registerSessionCommand } from "../src/commands/session.js";
+
+function buildJoinProgram() {
   const program = new Command();
-  program.exitOverride();
-  program.allowExcessArguments(true);
-  program.option("--no-auto-grant", "desc");
-  program.parse(["node", "test", "--no-auto-grant"], { from: "user" });
-  const opts = program.opts();
-  assert.equal(opts.autoGrant, false, "Commander sets autoGrant=false for --no-auto-grant");
-  assert.equal(opts.noAutoGrant, undefined, "Commander does NOT set noAutoGrant");
-  // The fix reads options.autoGrant === false, not Boolean(options.noAutoGrant)
+  program.name("sl").exitOverride();
+  registerSessionCommand(program);
+  // Replace the join action with a no-op so parse() does not invoke network I/O.
+  const joinCmd = program.commands.find(c => c.name() === "session")?.commands?.find(c => c.name() === "join");
+  if (joinCmd) joinCmd.action(() => {});
+  return program;
+}
+
+test("Unit session sync: --no-auto-grant on registered session join sets autoGrant=false", () => {
+  const program = buildJoinProgram();
+  program.parse(["session", "join", "sess-test1", "--no-auto-grant"], { from: "user" });
+  const joinCmd = program.commands.find(c => c.name() === "session")?.commands?.find(c => c.name() === "join");
+  assert.ok(joinCmd, "session join command must be registered");
+  const opts = joinCmd.opts();
+  assert.equal(opts.autoGrant, false, "Commander sets autoGrant=false for --no-auto-grant on real join command");
+  assert.equal(opts.noAutoGrant, undefined, "Commander does NOT set noAutoGrant directly");
   const noAutoGrant = opts.autoGrant === false;
-  assert.equal(noAutoGrant, true, "derived noAutoGrant must be true when --no-auto-grant is given");
+  assert.equal(noAutoGrant, true, "derived noAutoGrant must be true when --no-auto-grant is given on join");
 });
 
-test("Unit session sync: without --no-auto-grant, autoGrant defaults to true so noAutoGrant is derived as false", async () => {
-  const program = new Command();
-  program.exitOverride();
-  program.allowExcessArguments(true);
-  program.option("--no-auto-grant", "desc");
-  program.parse(["node", "test"], { from: "user" });
-  const opts = program.opts();
-  assert.equal(opts.autoGrant, true, "Commander defaults autoGrant to true when flag omitted");
+test("Unit session sync: without --no-auto-grant on registered session join, autoGrant defaults to true", () => {
+  const program = buildJoinProgram();
+  program.parse(["session", "join", "sess-test2"], { from: "user" });
+  const joinCmd = program.commands.find(c => c.name() === "session")?.commands?.find(c => c.name() === "join");
+  assert.ok(joinCmd, "session join command must be registered");
+  const opts = joinCmd.opts();
+  assert.equal(opts.autoGrant, true, "Commander defaults autoGrant to true when --no-auto-grant omitted on join");
   assert.equal(opts.noAutoGrant, undefined, "Commander does NOT set noAutoGrant");
   const noAutoGrant = opts.autoGrant === false;
-  assert.equal(noAutoGrant, false, "derived noAutoGrant must be false when --no-auto-grant is omitted");
+  assert.equal(noAutoGrant, false, "derived noAutoGrant must be false when --no-auto-grant is omitted on join");
+});
+
+test("Unit session sync: --no-auto-grant is defined on the session join command", () => {
+  const program = buildJoinProgram();
+  const joinCmd = program.commands.find(c => c.name() === "session")?.commands?.find(c => c.name() === "join");
+  assert.ok(joinCmd, "session join command must be registered");
+  const noAutoGrantOpt = joinCmd.options.find(o => o.long === "--no-auto-grant");
+  assert.ok(noAutoGrantOpt, "--no-auto-grant option must be defined on session join");
+  assert.equal(noAutoGrantOpt.long, "--no-auto-grant");
 });

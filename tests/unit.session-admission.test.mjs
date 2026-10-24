@@ -866,6 +866,28 @@ test("noAutoGrant is persisted on reused live credential (recoverAndStore path)"
   stored = JSON.parse(await fsp.readFile(credPath, "utf8"));
   assert.equal(stored.noAutoGrant, true, "recoverAndStore must persist noAutoGrant after recovery");
 });
+test("noAutoGrant survives recovery when caller omits the flag (do not clear existing opt-out)", async () => {
+  const dirs = await scratch();
+  const api = fakeApi({
+    onPoll: (adm) => { adm.status = "approved"; },
+    reportsIdentityReadiness: true,
+  });
+  // First join WITH noAutoGrant=true to set the opt-out
+  await runAdmissionJoin(SID, base(api, dirs, { noAutoGrant: true }));
+  const credPath = admissionCredentialPath(SID, "builder-1", dirs);
+  let stored = JSON.parse(await fsp.readFile(credPath, "utf8"));
+  assert.equal(stored.noAutoGrant, true, "initial credential has noAutoGrant true");
+
+  // Recover WITHOUT repeating noAutoGrant — the existing opt-out must survive
+  const result = await runAdmissionJoin(SID, base(api, dirs, { noAutoGrant: false, recoverActive: true }));
+  // Recovery still happened
+  assert.equal(result.recovered, true, "recovery happened");
+  stored = JSON.parse(await fsp.readFile(credPath, "utf8"));
+  assert.equal(stored.noAutoGrant, true,
+    "existing noAutoGrant opt-out must survive recovery even when caller omits the flag");
+});
+
+
 
 
 

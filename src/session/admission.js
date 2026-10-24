@@ -550,7 +550,10 @@ async function storeClaimedCredential(claimed, { auth, sid, agent, key, fingerpr
     grant,
     correlation: claimed.correlation,
     storedAt: new Date(now()).toISOString(),
-    noAutoGrant: Boolean(noAutoGrant),
+    // Preserve an existing noAutoGrant opt-out: recovery/replacement without
+    // the flag must not clear a previously persisted refusal. Only an explicit
+    // `noAutoGrant: true` overrides (never downgrades).
+    noAutoGrant: noAutoGrant || (previous.state === "live" && previous.credential.noAutoGrant === true),
   };
   await writeSecretFile(admissionCredentialPath(sid, agent, { homeDir }), stored);
   return stored;
@@ -638,7 +641,18 @@ export async function runAdmissionJoin(
   // which answers with the existing grant (same purpose) or a conflict (new one).
   const held = await readAdmissionCredentialState(sid, agent, { homeDir, now: now() });
   if (!recoverActive && held.state === "live" && held.credential.requestFingerprint === fingerprint) {
-    const fastPathCredential = await persistNoAutoGrantIfNeeded(held.credential, noAutoGrant, sid, agent, homeDir);
+    const fastPathCredential = await withAdmissionCredentialLock(
+      admissionCredentialPath(sid, agent, { homeDir }),
+      async () => {
+        // Reread under lock: a concurrent recovery may have rotated the token.
+        const current = await readAdmissionCredentialState(sid, agent, { homeDir, now: now() });
+        if (current.state === "live" && current.credential.requestFingerprint === fingerprint) {
+          const cred = await persistNoAutoGrantIfNeeded(current.credential, noAutoGrant, sid, agent, homeDir);
+          return cred;
+        }
+        // Credential changed under us; return the held snapshot unchanged.
+        return held.credential;
+      });
     return redacted({ status: "active", reused: true, stored: fastPathCredential, sid, agent, homeDir });
   }
   if (recoverActive && held.credential?.admissionId) {
