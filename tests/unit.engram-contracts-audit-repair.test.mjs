@@ -94,3 +94,27 @@ test('graph freshness claim agrees with its generation-time age', () => {
     },
   }).success, true);
 });
+
+test('assertion freshness claim agrees with its generation-time age', () => {
+  const graph = graphWith('status', 'pending');
+  graph.assertions[0].source.capturedAt = '2026-10-23T11:00:00Z';
+  graph.assertions[0].freshness = {
+    asOf: '2026-10-23T11:00:00Z', staleAfterMs: 1000, isStale: false,
+  };
+  assert.equal(graphSchema.safeParse(graph).success, false,
+    'an hour-old assertion cannot claim fresh after a one-second TTL');
+  assert.equal(validateGraphIntegrity(graph).valid, false);
+
+  graph.assertions[0].freshness.isStale = true;
+  assert.equal(graphSchema.safeParse(graph).success, true);
+
+  graph.assertions[0].freshness.asOf = '2026-10-23T11:59:59.001Z';
+  graph.assertions[0].freshness.isStale = false;
+  assert.equal(graphSchema.safeParse(graph).success, true,
+    'an assertion one millisecond inside its TTL remains fresh');
+
+  graph.assertions[0].freshness.asOf = '2026-10-23T11:59:59.000Z';
+  graph.assertions[0].freshness.isStale = true;
+  assert.equal(graphSchema.safeParse(graph).success, true,
+    'an assertion exactly at its TTL is stale');
+});

@@ -192,18 +192,21 @@ export const graphSchema = z.object({
       ctx.addIssue({ code: "custom", path, message: "fact time cannot be after graph generatedAt" });
     }
   };
-  capturedByGeneration(data.freshness?.asOf, ["freshness", "asOf"]);
-  if (data.freshness?.asOf && data.freshness.staleAfterMs != null && data.freshness.isStale != null) {
-    const ageMs = generatedAtMs - Date.parse(data.freshness.asOf);
-    if (data.freshness.isStale !== (ageMs >= data.freshness.staleAfterMs)) {
-      ctx.addIssue({ code: "custom", path: ["freshness", "isStale"], message: "isStale must match the age at graph generation" });
+  const checkFreshness = (freshness, path) => {
+    capturedByGeneration(freshness?.asOf, [...path, "asOf"]);
+    if (freshness?.asOf && freshness.staleAfterMs != null && freshness.isStale != null) {
+      const ageMs = generatedAtMs - Date.parse(freshness.asOf);
+      if (freshness.isStale !== (ageMs >= freshness.staleAfterMs)) {
+        ctx.addIssue({ code: "custom", path: [...path, "isStale"], message: "isStale must match the age at graph generation" });
+      }
     }
-  }
+  };
+  checkFreshness(data.freshness, ["freshness"]);
   (data.entities ?? []).forEach((entity, i) => capturedByGeneration(entity.capturedAt, ["entities", i, "capturedAt"]));
   data.assertions.forEach((assertion, i) => {
     capturedByGeneration(assertion.source.capturedAt, ["assertions", i, "source", "capturedAt"]);
     capturedByGeneration(assertion.evidenceRef?.verifiedAt, ["assertions", i, "evidenceRef", "verifiedAt"]);
-    capturedByGeneration(assertion.freshness?.asOf, ["assertions", i, "freshness", "asOf"]);
+    checkFreshness(assertion.freshness, ["assertions", i, "freshness"]);
   });
   (data.links ?? []).forEach((link, i) => capturedByGeneration(link.capturedAt, ["links", i, "capturedAt"]));
 
