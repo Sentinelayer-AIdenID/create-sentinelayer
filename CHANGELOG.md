@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.47.1](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/compare/v0.47.0...v0.47.1) (2026-10-24)
+
+
+### Bug Fixes
+
+* **auth:** serialize complete session-store operations ([#855](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/issues/855)) ([3a7b34e](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/3a7b34e71195faa93da35b98746c1638fbb32432))
+* bind rollback input and remove false secret hit ([fcb0912](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/fcb0912835a3c81d9e346f5c175ac73be87cfe60))
+* **board:** honor JSON output selected by global options ([c11ca85](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/c11ca8567ac5ea505e7f3e5877190ad3d8e2bd31))
+* **board:** honor JSON output selected by global options ([6b2654d](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/6b2654d82fcc8cd15a34b2e9e7387dc785f53cff))
+* **engram:** bind entity facts and close review contract gaps ([faa7ff8](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/faa7ff86c6b80419f8efa266879f21fbe7665d7a))
+* **engram:** enforce money contracts across compound fact names ([971459b](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/971459b517f91f61ecdeecad660dd9329faa2e01))
+* **engram:** reject invalid money formatting and late entity evidence ([76490b9](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/76490b9ca6de177d40e6f84eea8ff6300e8e7aec))
+* **gh:** close API path segment census ([628f96c](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/628f96c191640b03b4f6a167f0a5dc5299a8f338))
+* **gh:** close API path segment census ([b401cb6](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/b401cb6a0f4036622c2b2d903e49f5fbac0ca8ab))
+* **release:** pin verified tag objects before publication ([#860](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/issues/860)) ([4a76a8e](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/4a76a8e3979cf7630aeb3a826d5c76a647376f5d))
+* **runtime-audit:** use pinned local Lighthouse CLI ([c97aa3c](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/c97aa3c7ef8584f9fa824d8711589d7ffcd5087b))
+* **session:** caller-bound CLI and MCP self-provisioning ([aa68b9f](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/aa68b9f9908454a04c2da2b3ca9ddacf73676592))
+
 ## [0.47.0](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/compare/v0.46.5...v0.47.0) (2026-10-18)
 
 
