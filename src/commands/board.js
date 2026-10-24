@@ -104,10 +104,10 @@ export function registerBoardCommand(program) {
     .description("Check whether a ticket's evidence holds (done | not-done | cannot-verify)")
     .requiredOption("--file <path>", "Ticket JSON file with an `evidence` array")
     .option("--json", "Emit machine-readable output")
-    .action(async (options) => {
+    .action(async (options, command) => {
       const code = await runBoardCheck({
         file: path.resolve(process.cwd(), String(options.file)),
-        emitJson: Boolean(options.json),
+        emitJson: Boolean(options.json || command.optsWithGlobals().json),
       });
       process.exitCode = code;
     });

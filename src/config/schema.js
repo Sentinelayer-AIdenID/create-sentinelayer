@@ -8,8 +8,10 @@ function emptyToUndefined(value) {
   return normalized ? normalized : undefined;
 }
 
-const optionalTrimmedString = z.preprocess(emptyToUndefined, z.string().min(1)).optional();
-const optionalUrl = z.preprocess(emptyToUndefined, z.string().url()).optional();
+// optional() sits inside preprocess: zod >=4.2 validates the preprocessed value, so a blank value
+// mapped to undefined must be accepted by the inner schema, not only by an outer optional().
+const optionalTrimmedString = z.preprocess(emptyToUndefined, z.string().min(1).optional());
+const optionalUrl = z.preprocess(emptyToUndefined, z.string().url().optional());
 const optionalStringArray = z
   .array(z.preprocess(emptyToUndefined, z.string().min(1)))
   .optional();

@@ -228,12 +228,19 @@ through the MCP CLI bridge.
 Sentinelayer includes a deterministic session coordination surface for multi-agent coding loops:
 
 - session event stream and replay (`start`, `join`, `say`, `read`, `status`, `leave`, `list`, `kill`)
-- low-noise message actions (`react ack|like|dislike|unlike|undislike`, `action working_on|disregard`, `reply`/`comment`, `actions`) plus one monotonic per-agent read cursor (`view`)
+- low-noise message actions (`react ack|like|dislike|unlike|undislike`, `action working_on|disregard`, `reply`/`comment`, `actions`) plus one monotonic per-agent read cursor advanced by remote reads; there is no standalone `session view` command
+- shared ticket backlog (`ticket list --available`, `claim`, `renew`, `release`, `submit`, `events`); submission hands work to review, not completion
+- durable handoffs (`checkpoint list|show|create|generate`), provenance-backed retrieval (`recall`), JSON/NDJSON exports (`export`) and Markdown transcripts (`download`)
 - agent lifecycle controls (join/ephemeral TTL presence/leave/kill); listener liveness never enters the durable transcript
 - recap and context briefing for late-joining agents
 - analytics + lineage artifacts at session closeout
 
 Read the full guide: [docs/sessions.md](docs/sessions.md)
+
+For a ticket-to-review example, see [Ticket Backlog and Review Handoff](docs/sessions.md#ticket-backlog-and-review-handoff).
+For context recovery and output formats, see [Checkpoints, Recall and Exports](docs/sessions.md#checkpoints-recall-and-exports).
+Each group has direct help, for example `sl session ticket --help` and
+`sl session checkpoint --help`.
 
 For new engineers or agents joining an active SentinelLayer loop, start with
 [docs/ENGINEERING_ONBOARDING.md](docs/ENGINEERING_ONBOARDING.md).
@@ -1096,8 +1103,8 @@ Ledger contract:
 
 ## Requirements
 
-- Node.js `^20.0.0 || ^22.0.0` (the package `engines`)
-- on Windows, Node.js 22 (libuv 1.48.0 or later): the CLI looks up the programs it runs (git, gh, python, npm and others) on `PATH` only, and an older runtime cannot do that, so on Windows the CLI exits with an error before running anything under Node.js 20
+- Node.js `>=22.19.0` (the package `engines`; Lighthouse 13, used by `devtestbot` and runtime audits, needs it). Node.js 20 reached end of life in April 2026 and is no longer supported
+- on Windows the CLI also checks libuv 1.48.0 or later: it looks up the programs it runs (git, gh, python, npm and others) on `PATH` only, and an older runtime cannot do that, so on Windows the CLI exits with an error before running anything under Node.js 20
 - network access to Sentinelayer API/web
 - optional: GitHub CLI (`gh`) authenticated for secret injection
 

@@ -7322,7 +7322,19 @@ export function registerSessionCommand(program) {
   // an ACTOR command: the runCli choke point runs it on the agent's admission.
   const ticket = session
     .command("ticket")
-    .description("The room's shared backlog: list, claim, renew, release and submit tickets");
+    .description("The room's shared backlog: list, claim, renew, release and submit tickets")
+    .addHelpText("after", `
+Workflow:
+  sl session ticket list <sessionId> --available --json
+  sl session ticket claim <sessionId> <ticketId> --expected-version <version>
+  sl session ticket renew <sessionId> <ticketId>
+  sl session ticket submit <sessionId> <ticketId> --sha <commit> --evidence-file evidence.json
+
+The evidence file is a JSON array of re-checkable claims. Submit means in_review,
+not done. Use release --reason "handoff" when you cannot continue.
+Agent work requires that agent's live admission; --agent is not authorization.
+Guide: https://sentinelayer.com/docs/senti/overview/
+`);
 
   // Ticket work is attributed by the CREDENTIAL, never by a label: the lease routes take the
   // holder from authentication alone. So an agent identity is allowed only with that agent's
