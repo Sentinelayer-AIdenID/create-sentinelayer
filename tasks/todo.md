@@ -4160,3 +4160,10 @@ Review evidence:
 - Sequential full unit suite: 2,720 passed, three skipped, zero failed. Final static check: 417 source files passed; docs validation passed; package dry-run succeeded. Git diff check is clean.
 - `npm run verify` reached E2E: 134/136 passed. The two unrelated, unchanged tests fail on an old hardcoded help URL and a legacy session-join request returning `LEGACY_AGENT_ACCESS_UNAVAILABLE` 503. The first concurrent unit attempt also saw Windows EPERM in an untouched auth-store file-rename test; the sequential full rerun passed.
 - Fact-bearing entity label/attributes now share one explicit provenance class. Mixed-provenance fields belong in separate assertions; source-only entities retain their existing shape. An observed or unknown wrong price remains structurally valid but does not become authoritative; only a trusted verifier checking the exact entity payload can accept an authoritative claim.
+
+## Exact-faa7 review follow-up
+- [x] Reproduce string-encoded price bypass and structured merchant metadata false positives in both assertion and entity paths.
+- [x] Exempt semantic metadata terminal words while still validating nested facts; require canonical money under other monetary names regardless of payload type.
+- [x] Run focused/static/full unit gates on the direct child, inspect diff, commit locally, and report SHA without pushing.
+
+Review: The added fail-first tests both failed at faa7; no-digit monetary strings and refundWindow also failed under the intermediate matcher. After the bounded repair, all 215 ENGRAM contract tests pass, static check passes on 417 files, and package dry-run succeeds. The final full unit run had 2,721 passed, three skipped, and one Windows EPERM temporary-file rename in the untouched session-agent-registry test; that file passed 4/4 when rerun alone. The known two unrelated E2E failures from the preceding verify attempt remain outside this three-file correction.

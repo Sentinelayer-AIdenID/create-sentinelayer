@@ -164,3 +164,53 @@ test("graph fact IDs and evidence addresses cannot be blank-looking", () => {
     assert.equal(linkSchema.safeParse(candidate).success, false, field);
   }
 });
+
+test("compound money names reject string-encoded prices in assertions and entities", () => {
+  const disguisedPrices = {
+    grandTotal: "19.99",
+    totalDollars: "$19.99",
+    amountUsd: "USD 19.99",
+    priceRate: "19.99 USD",
+    purchase_total: "19.99",
+    lineItemPrices: "19.99",
+    grossTotal: "free",
+    totalEuro: "unknown",
+    pricePerUnit: "TBD",
+    basePriceRate: "low",
+  };
+  for (const [name, value] of Object.entries(disguisedPrices)) {
+    assert.equal(validateGraphIntegrity(graph({ assertions: [assertion(name, value)] })).valid,
+      false, `assertion ${name} must use canonical money`);
+    assert.equal(validateGraphIntegrity(graph({ entities: [entity({ [name]: value })] })).valid,
+      false, `entity ${name} must use canonical money`);
+  }
+  for (const [name, value] of [
+    ["grandTotal", "free"], ["totalDollars", "unknown"],
+    ["amountUsd", "TBD"], ["priceRate", "low"],
+  ]) {
+    assert.equal(validateGraphIntegrity(graph({ assertions: [assertion(name, value)] })).valid,
+      false, `assertion ${name} is monetary even without digits`);
+    assert.equal(validateGraphIntegrity(graph({ entities: [entity({ [name]: value })] })).valid,
+      false, `entity ${name} is monetary even without digits`);
+  }
+});
+
+test("structured merchant metadata remains usable under semantic metadata names", () => {
+  const descriptiveFields = {
+    refundPolicy: { returnWindow: "30 days" },
+    feeSchedule: ["monthly"],
+    paymentTerms: { netDays: "30" },
+    taxExempt: { eligible: true },
+    costCenter: { code: "CC-12" },
+    refundWindow: "30 days",
+  };
+  for (const [name, value] of Object.entries(descriptiveFields)) {
+    assert.equal(validateGraphIntegrity(graph({ assertions: [assertion(name, value)] })).valid,
+      true, `assertion ${name} is merchant metadata`);
+    assert.equal(validateGraphIntegrity(graph({ entities: [entity({ [name]: value })] })).valid,
+      true, `entity ${name} is merchant metadata`);
+  }
+  assert.equal(validateGraphIntegrity(graph({
+    entities: [entity({ refundPolicy: { refundAmount: quantity } })],
+  })).valid, false, "metadata exemption must still validate nested money facts");
+});

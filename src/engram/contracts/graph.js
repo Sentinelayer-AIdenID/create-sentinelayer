@@ -338,6 +338,7 @@ const NON_MONETARY_MEASURE_TERMINALS = new Set([
 const NON_MONETARY_METADATA_TERMINALS = new Set([
   "id", "label", "name", "status", "type", "currency", "code",
   "reference", "number", "timestamp", "method", "description", "source", "version",
+  "center", "tier", "schedule", "policy", "owner", "term", "url", "exempt", "window",
 ]);
 
 // A quantity is explicitly non-monetary. Currency codes and unambiguous
@@ -384,17 +385,18 @@ function isPluralMoneyFieldName(key) {
   return terminal.endsWith("s") && terminal !== singularWord(terminal);
 }
 
-function isMoneyFieldName(key, value) {
+function isMoneyFieldName(key) {
   if (MONEY_FIELD_NAMES.has(key)) return true;
   const words = key.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase()
     .split(/[^a-z0-9]+/).filter(Boolean).map(singularWord);
+  const suffix = words.at(-1);
+  // These nouns describe merchant metadata, including structured metadata.
+  // Its nested facts still pass through validateFactNumbers individually.
+  if (NON_MONETARY_METADATA_TERMINALS.has(suffix)) return false;
   if (words.length === 1 && (STRONG_MONEY_FIELD_TOKENS.has(words[0]) ||
       MONEY_UNIT_WORDS.has(words[0]) || words[0] === "total" || words[0] === "tax")) return true;
-  // Compound names can be merchant metadata (priceTier, taxExempt). Only
-  // values capable of carrying numbers need the name-based money boundary.
-  if (value === null || (typeof value !== "number" && typeof value !== "object")) return false;
-  const suffix = words.at(-1);
-  if (NON_MONETARY_METADATA_TERMINALS.has(suffix)) return false;
+  // Outside named metadata, a monetary field needs canonical money whatever
+  // representation the sender chose (including "TBD" or "19.99").
   if (words.some((word) => STRONG_MONEY_FIELD_TOKENS.has(word) || MONEY_UNIT_WORDS.has(word))) return true;
   if (suffix === "value" && words.slice(0, -1).some((word) => TRANSACTION_VALUE_TOKENS.has(word))) return true;
   return words.some((word) => word === "total" || word === "tax") &&
@@ -502,7 +504,7 @@ export function validateGraphIntegrity(graph, { verifyEvidence } = {}) {
     for (const key of Object.keys(obj)) {
       const val = obj[key];
       const fullPath = `${path}.${key}`;
-      if (isMoneyFieldName(key, val)) {
+      if (isMoneyFieldName(key)) {
         if (Array.isArray(val) && isPluralMoneyFieldName(key) &&
             val.every((item) => moneySchema.safeParse(item).success)) continue;
         if (typeof val === "object" && val !== null) {
@@ -524,7 +526,7 @@ export function validateGraphIntegrity(graph, { verifyEvidence } = {}) {
   // Check: assertions with monetary predicates must have moneySchema-valid objects
   for (let i = 0; i < data.assertions.length; i++) {
     const a = data.assertions[i];
-    if (isMoneyFieldName(a.predicate, a.object)) {
+    if (isMoneyFieldName(a.predicate)) {
       const isMoneyList = Array.isArray(a.object) && isPluralMoneyFieldName(a.predicate) &&
         a.object.every((item) => moneySchema.safeParse(item).success);
       if (!isMoneyList && !moneySchema.safeParse(a.object).success) {
