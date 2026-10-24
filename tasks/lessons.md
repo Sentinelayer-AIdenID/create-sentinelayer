@@ -358,3 +358,13 @@
   proof-of-possession claim -> AIdenID email/purpose job -> live session-bound
   receipt. Owner controls must remain on the human credential; admitted agent
   work must remain on the scoped credential and never fall back to the human.
+
+# 2026-10-24 - Field names do not determine whether typed metadata is money
+
+- Pattern: treating every typed quantity under a monetary prefix as an amount
+  rejected valid `refundWindow` days, `paymentTerms` days, and `costCenter`
+  counts. String metadata tests alone did not expose the rule.
+- Rule: test each semantic metadata exception with strings, supported typed
+  units, and bare numbers on both assertion and entity paths. Reserve monetary
+  enforcement for amount-bearing names such as `priceNumber` and explicit
+  compact aliases; keep nested facts and untyped numbers under validation.
