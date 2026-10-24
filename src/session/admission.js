@@ -553,7 +553,8 @@ async function storeClaimedCredential(claimed, { auth, sid, agent, key, fingerpr
     // Preserve an existing noAutoGrant opt-out: recovery/replacement without
     // the flag must not clear a previously persisted refusal. Only an explicit
     // `noAutoGrant: true` overrides (never downgrades).
-    noAutoGrant: noAutoGrant || (previous.state === "live" && previous.credential.noAutoGrant === true),
+    // Preserve existing opt-out regardless of credential state (live, expired, revoked).
+    noAutoGrant: noAutoGrant || (previous.credential?.noAutoGrant === true),
   };
   await writeSecretFile(admissionCredentialPath(sid, agent, { homeDir }), stored);
   return stored;
@@ -704,7 +705,17 @@ export async function runAdmissionJoin(
       held.credential.admissionId === created.admissionId
     ) {
       // The server judged this request covered by the grant we already hold.
-      const fastPathCredential = await persistNoAutoGrantIfNeeded(held.credential, noAutoGrant, sid, agent, homeDir);
+      // Lock and reread: a concurrent recovery may have rotated the token.
+      const fastPathCredential = await withAdmissionCredentialLock(
+        admissionCredentialPath(sid, agent, { homeDir }),
+        async () => {
+          const current = await readAdmissionCredentialState(sid, agent, { homeDir, now: now() });
+          if (current.state === "live" && current.credential?.admissionId === created.admissionId) {
+            return persistNoAutoGrantIfNeeded(current.credential, noAutoGrant, sid, agent, homeDir);
+          }
+          // Credential changed under us; fall back to held snapshot.
+          return persistNoAutoGrantIfNeeded(held.credential, noAutoGrant, sid, agent, homeDir);
+        });
     return redacted({ status: "active", reused: true, stored: fastPathCredential, sid, agent, homeDir });
     }
     if (created?.status === "active" && created?.reused) {

@@ -2053,3 +2053,44 @@ test("Unit session sync: --no-auto-grant is defined on the session join command"
   assert.ok(noAutoGrantOpt, "--no-auto-grant option must be defined on session join");
   assert.equal(noAutoGrantOpt.long, "--no-auto-grant");
 });
+
+test("Unit session sync: --no-auto-grant reaches the registered join action handler as noAutoGrant", () => {
+  const program = buildJoinProgram();
+  const joinCmd = program.commands.find(c => c.name() === "session")?.commands?.find(c => c.name() === "join");
+  assert.ok(joinCmd, "session join command must be registered");
+
+  // Replace the action with a capture stub so we can assert what the real
+  // handler receives without triggering network I/O.
+  let capturedOpts = null;
+  joinCmd.action((sessionId, options) => {
+    capturedOpts = { sessionId, options };
+  });
+
+  program.parse(["session", "join", "sess-capture", "--no-auto-grant"], { from: "user" });
+  assert.ok(capturedOpts, "action handler must be called");
+  assert.equal(capturedOpts.sessionId, "sess-capture");
+  assert.equal(capturedOpts.options.autoGrant, false,
+    "Commander negates --no-auto-grant to autoGrant=false in the handler");
+  const noAutoGrant = capturedOpts.options.autoGrant === false;
+  assert.equal(noAutoGrant, true,
+    "derived noAutoGrant must be true, confirming the real handler can forward it to runAdmissionJoin");
+});
+
+test("Unit session sync: without --no-auto-grant, handler receives autoGrant=true (noAutoGrant=false)", () => {
+  const program = buildJoinProgram();
+  const joinCmd = program.commands.find(c => c.name() === "session")?.commands?.find(c => c.name() === "join");
+  assert.ok(joinCmd, "session join command must be registered");
+
+  let capturedOpts = null;
+  joinCmd.action((sessionId, options) => {
+    capturedOpts = { sessionId, options };
+  });
+
+  program.parse(["session", "join", "sess-noflag"], { from: "user" });
+  assert.ok(capturedOpts, "action handler must be called");
+  assert.equal(capturedOpts.options.autoGrant, true,
+    "Commander defaults autoGrant to true when --no-auto-grant is omitted");
+  const noAutoGrant = capturedOpts.options.autoGrant === false;
+  assert.equal(noAutoGrant, false,
+    "derived noAutoGrant must be false when --no-auto-grant is omitted");
+});

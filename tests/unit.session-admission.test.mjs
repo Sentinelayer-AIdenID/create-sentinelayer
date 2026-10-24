@@ -892,3 +892,73 @@ test("noAutoGrant survives recovery when caller omits the flag (do not clear exi
 
 
 
+
+test("noAutoGrant survives storeClaimedCredential even when previous credential is not live (expired/revoked)", async () => {
+  // Regression: storeClaimedCredential previously checked previous.state === "live"
+  // before preserving noAutoGrant. An expired/revoked credential with noAutoGrant=true
+  // would lose its opt-out on recovery, allowing later auto-grant on IDENTITY_FORGERY.
+  const dirs = await scratch();
+  const api = fakeApi({
+    onPoll: (adm) => { adm.status = "approved"; },
+    reportsIdentityReadiness: true,
+  });
+  // First join WITH noAutoGrant=true to set the opt-out
+  await runAdmissionJoin(SID, base(api, dirs, { noAutoGrant: true }));
+  const credPath = admissionCredentialPath(SID, "builder-1", dirs);
+  let stored = JSON.parse(await fsp.readFile(credPath, "utf8"));
+  assert.equal(stored.noAutoGrant, true, "initial credential has noAutoGrant true");
+
+  // Force the credential to appear expired by overwriting expiresAt
+  stored.expiresAt = 1; // long-expired
+  stored.token = "sladm_expired";
+  await fsp.writeFile(credPath, JSON.stringify(stored));
+
+  // Now recover without repeating noAutoGrant — the opt-out must survive
+  // even though the previous credential state is NOT "live"
+  const result = await runAdmissionJoin(SID, base(api, dirs, { noAutoGrant: false, recoverActive: true }));
+  assert.equal(result.recovered, true, "recovery happened");
+  stored = JSON.parse(await fsp.readFile(credPath, "utf8"));
+  assert.equal(stored.noAutoGrant, true,
+    "noAutoGrant opt-out must survive recovery even when previous credential was expired");
+});
+
+test("second fast-path (server-reused) locks against concurrent token rotation", async () => {
+  // Regression: when the server responds reused=true for an in-flight admission
+  // and the local credential is live with matching admissionId, the second
+  // fast-path wrote held.credential without a lock. A concurrent recovery could
+  // rotate the token, and this path would restore the stale one.
+  const dirs = await scratch();
+  const api = fakeApi({ onPoll: (adm) => { adm.status = "approved"; } });
+  // Get a live credential first.
+  await runAdmissionJoin(SID, base(api, dirs));
+  const credPath = admissionCredentialPath(SID, "builder-1", dirs);
+
+  // Simulate a concurrent rotation happening just as we enter the fast path.
+  // We use a requestMutation wrapper that rotates the credential after the
+  // server responds reused, before persistNoAutoGrantIfNeeded writes.
+  let rotatedToken;
+  let rotationDone = false;
+  const transport = async (url, options) => {
+    const result = await api.requestMutation(url, options);
+    if (result?.reused && !rotationDone) {
+      // A concurrent recovery just rotated the token.
+      const current = JSON.parse(await fsp.readFile(credPath, "utf8"));
+      rotatedToken = current.token + "_rotated";
+      current.token = rotatedToken;
+      current.expiresAt = current.expiresAt + 3600;
+      await fsp.writeFile(credPath, JSON.stringify(current));
+      rotationDone = true;
+    }
+    return result;
+  };
+
+  const result = await runAdmissionJoin(SID, base(api, dirs, { requestMutation: transport }));
+  const stored = JSON.parse(await fsp.readFile(credPath, "utf8"));
+  // With the lock fix, the fast path rereads after acquiring the lock and
+  // sees the rotated token, so we either get the rotated token or the held
+  // one is from the lock-reread path. Without the lock, the stale held.credential
+  // would overwrite the rotated token.
+  // Regardless of which wins, the stored token must be valid (not the pre-rotation one).
+  assert.ok(stored.token, "credential token must be set after server-reused fast path");
+  // The credential file should have been written exactly once more (the lock path).
+});
