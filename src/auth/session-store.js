@@ -19,6 +19,19 @@ const SESSION_WARNING_ALLOWED_FIELDS = new Set([
 ]);
 const emittedSessionWarningKeys = new Set();
 let keytarClientOverrideForTests;
+let sessionOperationTail = Promise.resolve();
+
+// A store operation spans metadata, keyring and file publication/cleanup. Reads
+// can migrate plaintext too. Keep that transaction in order within this module;
+// serializing only rename would still permit stale migrations and logout races.
+// One queue also covers path aliases and keyring accounts shared across homes.
+// Other processes still rely on the existing key publication and bounded retries.
+function runSessionOperation(operation) {
+  const result = sessionOperationTail.then(operation);
+  // A failed operation must not poison the queue or retain returned credentials.
+  sessionOperationTail = result.then(() => undefined, () => undefined);
+  return result;
+}
 
 function nowIso() {
   return new Date().toISOString();
@@ -600,6 +613,11 @@ async function tryDecryptFileToken({ metadata, homeDir }) {
  * }>}
  */
 export async function readStoredSession({ homeDir } = {}) {
+  const options = { homeDir: resolveHomeDir(homeDir) };
+  return runSessionOperation(() => readStoredSessionUnlocked(options));
+}
+
+async function readStoredSessionUnlocked({ homeDir } = {}) {
   const { filePath, metadata } = await readMetadata({ homeDir });
   if (!metadata) {
     return null;
@@ -711,6 +729,11 @@ export async function readStoredSession({ homeDir } = {}) {
  * }>}
  */
 export async function readStoredSessionMetadata({ homeDir } = {}) {
+  const options = { homeDir: resolveHomeDir(homeDir) };
+  return runSessionOperation(() => readStoredSessionMetadataUnlocked(options));
+}
+
+async function readStoredSessionMetadataUnlocked({ homeDir } = {}) {
   const { filePath, metadata } = await readMetadata({ homeDir });
   if (!metadata) {
     return null;
@@ -777,6 +800,15 @@ export async function writeStoredSession(
   } = {},
   { homeDir } = {}
 ) {
+  const session = { apiUrl, token, tokenId, tokenPrefix, tokenExpiresAt, user, aidenid };
+  const options = { homeDir: resolveHomeDir(homeDir) };
+  return runSessionOperation(() => writeStoredSessionUnlocked(session, options));
+}
+
+async function writeStoredSessionUnlocked(
+  { apiUrl, token, tokenId, tokenPrefix, tokenExpiresAt, user, aidenid },
+  { homeDir }
+) {
   const normalizedApiUrl = String(apiUrl || "").trim();
   const normalizedToken = String(token || "").trim();
   if (!normalizedApiUrl) {
@@ -838,6 +870,11 @@ export async function writeStoredSession(
  * @returns {Promise<{ filePath: string, hadSession: boolean }>}
  */
 export async function clearStoredSession({ homeDir } = {}) {
+  const options = { homeDir: resolveHomeDir(homeDir) };
+  return runSessionOperation(() => clearStoredSessionUnlocked(options));
+}
+
+async function clearStoredSessionUnlocked({ homeDir } = {}) {
   const { filePath, metadata } = await readMetadata({ homeDir });
   if (metadata && metadata.storage === "keyring") {
     const keytar = await loadKeytarClient({ allowImplicit: true });

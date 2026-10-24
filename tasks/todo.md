@@ -4251,3 +4251,12 @@ Review: Fail-first stock-runtime tests saw both tools hidden and same-agent admi
 - [x] Run focused, static, docs, lineage, and diff checks; commit a local successor for independent review without pushing.
 
 Review: The fail-first call with `agent: "attacker", name: "victim"` reached the pending-admission API on the replayed successor. After the correction, paired names and unsupported `owner`/`daemon` roles are refused by both dispatcher and handler without an API request. Same-caller `role: "reviewer"` and legacy name-only self-join still produce pending admissions requiring owner approval. Nine focused files pass 136/136; static check passes 418 files; docs validation and diff check pass. The replayed two-fix tree matches reviewed `69e11d0`, the final branch descends from both the PR head and main, and the remote branch remains at `cae80a9`. No push or hosted gate is claimed.
+
+## PR855 auth-store contention replay on current main
+
+- [x] Reproduce the old baseline's Windows credential-file EPERM under concurrent writers and keep the reviewed module-local FIFO repair in PR855.
+- [x] Merge current main into the existing PR head, preserving current task notes and the credential-store lesson.
+- [x] Verify focused auth tests, repository checks and current-main integration in the isolated replay.
+- [ ] Obtain independent exact-head review and fresh direct Sol 6.1 hosted gates before any branch update or merge.
+
+Review: The original PR demonstrated 1,024 decryptable concurrent writes, five ordering regressions, and recovery after an operation failure. This replay changes no credential-store source beyond that reviewed PR. On current main, the focused auth/session suite passed 21/21, static check passed 418 files, and docs validation passed. E2E passed 140/141; the legacy session-join fixture returned `LEGACY_AGENT_ACCESS_UNAVAILABLE` 503. The same named test fails identically on untouched current main `aa68b9f`, so this is not evidence of a PR855 regression. Fresh hosted direct Sol 6.1 gates remain before any merge.

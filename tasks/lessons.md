@@ -391,3 +391,15 @@
 - Rule: for privileged bridge exceptions, trace every accepted argument to its
   downstream meaning. Reject a second identity-bearing label and restrict role
   metadata before either the dispatcher or handler can launch the CLI.
+
+# 2026-10-21 - Serialize complete credential-store operations
+
+- Atomic file replacement alone does not serialize a transaction that also
+  reads metadata, changes a shared keyring, migrates plaintext and syncs files.
+  Queue the complete operation, including reads that can migrate; otherwise an
+  older migration can recreate credentials after logout or expose a temporary
+  signed-out state during backup replacement.
+- Preserve natural contention evidence, then use explicit operation barriers
+  for regression tests. Increasing retry counts or inserting arbitrary sleeps
+  does not prove ordering. Keep cross-process guarantees separate from a
+  module-local queue, and ensure a rejected operation cannot poison that queue.
