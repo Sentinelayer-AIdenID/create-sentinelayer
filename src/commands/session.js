@@ -2904,6 +2904,33 @@ async function sessionListenAgent(options) {
   return { sessionId: resolveSessionIdOption(options), agentId: normalizeAgentId(options.agent, "cli-user") };
 }
 
+
+/**
+ * Build the admission-join options object from parsed Commander options.
+ * Extracted so tests can assert the full derivation from CLI flag to
+ * runAdmissionJoin input without network I/O.
+ */
+export function buildAdmissionJoinOptions(options, overrides = {}) {
+  const waitSeconds = Number.parseInt(String(options.waitSeconds ?? "900"), 10);
+  return {
+    agentId: overrides.agentId ?? "",
+    displayName: overrides.displayName ?? "",
+    model: options.model,
+    provider: options.provider,
+    goal: options.goal,
+    deliverables: options.deliverable || [],
+    stopConditions: options.stopWhen || [],
+    actions: parseAdmissionScope(options.scope),
+    ttlSeconds: parseAdmissionTtlSeconds(options.ttl),
+    wait: options.wait !== false,
+    recoverActive: Boolean(options.recoverAdmission),
+    noAutoGrant: options.autoGrant === false,
+    waitTimeoutMs: (Number.isFinite(waitSeconds) && waitSeconds >= 0 ? waitSeconds : 900) * 1000,
+    targetPath: overrides.targetPath ?? process.cwd(),
+    onPending: overrides.onPending ?? (() => {}),
+  };
+}
+
 export function registerSessionCommand(program) {
   const session = program
     .command("session")
@@ -3528,21 +3555,9 @@ export function registerSessionCommand(program) {
         if (!admissionAgent) {
           throw new Error("--goal requires --agent <id>: admission is requested for one named agent.");
         }
-        const waitSeconds = Number.parseInt(String(options.waitSeconds ?? "900"), 10);
-        admissionJoinOptions = {
+        admissionJoinOptions = buildAdmissionJoinOptions(options, {
           agentId: admissionAgent,
           displayName: legacyName && explicitAgent ? legacyName : "",
-          model: options.model,
-          provider: options.provider,
-          goal: options.goal,
-          deliverables: options.deliverable || [],
-          stopConditions: options.stopWhen || [],
-          actions: parseAdmissionScope(options.scope),
-          ttlSeconds: parseAdmissionTtlSeconds(options.ttl),
-          wait: options.wait !== false,
-          recoverActive: Boolean(options.recoverAdmission),
-          noAutoGrant: options.autoGrant === false,
-          waitTimeoutMs: (Number.isFinite(waitSeconds) && waitSeconds >= 0 ? waitSeconds : 900) * 1000,
           targetPath,
           onPending: ({ approveUrl, phase }) => {
             // stderr, so --json stdout stays a single parseable document.
@@ -3557,7 +3572,7 @@ export function registerSessionCommand(program) {
             else if (phase === "identity") console.log(pc.yellow(line));
             else console.log(line);
           },
-        };
+        });
         admission = await runAdmissionJoin(normalizedSessionId, admissionJoinOptions);
         if (admission.status !== "active") {
           // Only an ACTIVE admission joins. Pending, denied, cancelled or expired never

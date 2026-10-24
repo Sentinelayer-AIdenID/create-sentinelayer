@@ -67,7 +67,7 @@ const REVIEWED = [
   ["src/session/admission.js", "raw-token-read", "token: claimed.credential.token", "the admission store records the agent credential the API issued at claim"],
   ["src/session/admission.js", "raw-token-read", "current.credential.apiUrl === auth.apiUrl && current.credential.token !== rejectedToken", "inside the exclusive admission-store lock, compare only the rejected agent bearer to detect a newer local publication; never exported or sent"],
   ["src/session/admission.js", "raw-token-read", "String(claimed?.credential?.token || \"\").startsWith(\"sladm_\")", "the private admission store validates the API-issued agent credential format before publication"],
-  ["src/session/admission.js", "raw-token-read", "held.credential.token", "pass the rejected stored agent bearer only to the same store's serialized recovery comparison; network uses checked credentials, not this value"],
+  ["src/session/admission.js", "raw-token-read", "held.credential.token, noAutoGrant", "pass the rejected stored agent bearer only to the same store's serialized recovery comparison; network uses checked credentials, not this value"],
   ["src/session/admission.js", "raw-token-read", "recoverActive && held.state === \"live\" ? held.credential.token : null", "both resume branches pass only the rejected local agent bearer to the admission-store comparison; no human token, output or header construction"],
   ["src/auth/session-store.js", "stored-session-read", "export async function readStoredSession", "the store's own definition"],
   // the narrow accessors

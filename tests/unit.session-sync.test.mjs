@@ -2080,7 +2080,7 @@ test("Unit session sync: refused credential state fails closed on 403 IDENTITY_F
 // The action handler is replaced with a no-op to avoid network I/O.
 
 import { Command } from "commander";
-import { registerSessionCommand } from "../src/commands/session.js";
+import { buildAdmissionJoinOptions, registerSessionCommand } from "../src/commands/session.js";
 
 function buildJoinProgram() {
   const program = new Command();
@@ -2125,28 +2125,28 @@ test("Unit session sync: --no-auto-grant is defined on the session join command"
   assert.equal(noAutoGrantOpt.long, "--no-auto-grant");
 });
 
-test("Unit session sync: --no-auto-grant reaches the registered join action handler as noAutoGrant", () => {
-  const program = buildJoinProgram();
-  const joinCmd = program.commands.find(c => c.name() === "session")?.commands?.find(c => c.name() === "join");
-  assert.ok(joinCmd, "session join command must be registered");
-
-  // Replace the action with a capture stub so we can assert what the real
-  // handler receives without triggering network I/O.
-  let capturedOpts = null;
-  joinCmd.action((sessionId, options) => {
-    capturedOpts = { sessionId, options };
+test("Unit session sync: --no-auto-grant forwards through buildAdmissionJoinOptions to runAdmissionJoin", () => {
+  // Verify that the production join handler derives noAutoGrant from the
+  // Commander-negated option and includes it in the options object that it
+  // passes to runAdmissionJoin.  Calling buildAdmissionJoinOptions directly
+  // exercises the exact same derivation that the real action handler uses
+  // (src/commands/session.js line 3558).
+  const opts = buildAdmissionJoinOptions({ autoGrant: false, goal: "test goal" }, {
+    agentId: "test-agent",
+    targetPath: "/tmp",
   });
-
-  program.parse(["session", "join", "sess-capture", "--no-auto-grant"], { from: "user" });
-  assert.ok(capturedOpts, "action handler must be called");
-  assert.equal(capturedOpts.sessionId, "sess-capture");
-  assert.equal(capturedOpts.options.autoGrant, false,
-    "Commander negates --no-auto-grant to autoGrant=false in the handler");
-  const noAutoGrant = capturedOpts.options.autoGrant === false;
-  assert.equal(noAutoGrant, true,
-    "derived noAutoGrant must be true, confirming the real handler can forward it to runAdmissionJoin");
+  assert.equal(opts.noAutoGrant, true,
+    "buildAdmissionJoinOptions must set noAutoGrant=true when autoGrant=false");
 });
 
+test("Unit session sync: without --no-auto-grant, buildAdmissionJoinOptions sets noAutoGrant=false", () => {
+  const opts = buildAdmissionJoinOptions({ autoGrant: true, goal: "test goal" }, {
+    agentId: "test-agent",
+    targetPath: "/tmp",
+  });
+  assert.equal(opts.noAutoGrant, false,
+    "buildAdmissionJoinOptions must set noAutoGrant=false when autoGrant=true (default)");
+});
 test("Unit session sync: without --no-auto-grant, handler receives autoGrant=true (noAutoGrant=false)", () => {
   const program = buildJoinProgram();
   const joinCmd = program.commands.find(c => c.name() === "session")?.commands?.find(c => c.name() === "join");
