@@ -558,6 +558,16 @@ test("Unit command contracts: session exposes D2 ensure and resume controls", ()
   assertCommandHasOption(search, "--before-sequence <n>");
   assertCommandHasOption(search, "--limit <n>");
 
+  const events = getCommandByPath(program, "session events");
+  assert.equal(
+    events.description(),
+    "Return one raw, verifiable page of session events from the remote API (ascending by sequence, no local merge). Use --before-sequence to walk backwards."
+  );
+  assertCommandHasOption(events, "--remote");
+  assertCommandHasOption(events, "--before-sequence <n>");
+  assertCommandHasOption(events, "--limit <n>");
+  assertCommandHasOption(events, "--no-auto-grant");
+
   const listen = getCommandByPath(program, "session listen");
   assertCommandHasOption(listen, "--session <id>");
   assertCommandHasOption(listen, "--agent <id>");

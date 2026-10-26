@@ -51,6 +51,7 @@ export const SESSION_ROUTE_CLASSES = Object.freeze({
   "cli:session read": "legacy-data-plane",
   "cli:session history": "legacy-data-plane",
   "cli:session search": "legacy-data-plane",
+  "cli:session events": "legacy-data-plane",
   "cli:session pins": "legacy-data-plane",
   "cli:session lock": "control",
   "cli:session unlock": "control",
