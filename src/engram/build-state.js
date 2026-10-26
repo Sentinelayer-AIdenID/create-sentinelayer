@@ -28,7 +28,7 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
 
-import { namespaceDir } from "./store.js";
+import { namespaceDir, ensureNamespace, resolveNamespaceDir, verifyNamespace } from "./store.js";
 
 export const BUILD_STATES = Object.freeze({
   ABSENT: "absent",
@@ -63,13 +63,32 @@ async function writeAtomic(file, value) {
   await fsp.rename(tmp, file);
 }
 
-export function createBuildState({ storeRoot } = {}) {
+/**
+ * Resolve and verify the namespace directory for read-only build-state access.
+ * Uses resolveNamespaceDir (legacy migration) but NEVER creates a directory
+ * or sidecar on reads.  Returns the dir path or null when absent.
+ */
+async function resolveForRead(root, namespace, legacyLossyDirs) {
+  const dir = await resolveNamespaceDir(root, namespace, legacyLossyDirs);
+  try {
+    await fsp.access(dir);
+  } catch {
+    return null;
+  }
+  await verifyNamespace(dir, namespace);
+  return dir;
+}
+
+export function createBuildState({ storeRoot, legacyLossyDirs = "refuse" } = {}) {
   const root = path.resolve(String(storeRoot || "."));
 
   async function read(namespace) {
+    const dir = await resolveForRead(root, namespace, legacyLossyDirs);
+    if (!dir) return { state: BUILD_STATES.ABSENT };
+
     let raw;
     try {
-      raw = await fsp.readFile(stateFile(root, namespace), "utf-8");
+      raw = await fsp.readFile(path.join(dir, STATE_FILE), "utf-8");
     } catch (error) {
       if (error && error.code === "ENOENT") return { state: BUILD_STATES.ABSENT };
       throw error;
@@ -106,6 +125,8 @@ export function createBuildState({ storeRoot } = {}) {
 
     /** Mark a build STARTED. Must be called before the first chunk is written. */
     async begin(namespace, { docDigest = null, expectedChunks = null, startedAt } = {}) {
+      const dir = await resolveNamespaceDir(root, namespace, legacyLossyDirs);
+      await ensureNamespace(dir, namespace);
       const record = {
         state: BUILD_STATES.BUILDING,
         namespace: namespace.raw,
