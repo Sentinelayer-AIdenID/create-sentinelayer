@@ -32,6 +32,9 @@ export { runEngramSla } from "./sla.js";
 export * from "./contracts/index.js";
 export { ingestDocumentIntoNamespace } from "./ingest-document.js";
 export { captureSourceBytes, SourceIntakeError, MAX_SOURCE_BYTES } from "./source-intake.js";
+export { createSafeReader, SafeReaderError } from "./safe-reader.js";
+export { extractFromHtml } from "./extract-html.js";
+export { ingestSite } from "./ingest-site.js";
 export {
   createGraphStore,
   GraphValidationError,
