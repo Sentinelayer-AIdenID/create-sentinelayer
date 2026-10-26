@@ -120,6 +120,7 @@ export const BRIDGE_ALLOWED_INPUTS = Object.freeze({
   "session.comment": "sessionId targetSequenceId message agent idempotencyKey path json",
   "session.continue": "path title json",
   "session.edit": "sessionId target message agent expectedRevision idempotencyKey path json",
+  "session.events": "sessionId remote beforeSequence limit path json autoGrant",
   "session.ensure": "path session title ttlSeconds forceNew resume reuseWindowSeconds json",
   "session.guard": "sessionId files agent path json",
   "session.guard-hook": "sessionId agent path",

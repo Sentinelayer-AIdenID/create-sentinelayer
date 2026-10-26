@@ -2523,6 +2523,10 @@ export async function pollSessionEventsBefore(
       events,
       cursor: normalizeString(lastEvent?.cursor) || null,
       beforeSequence: nextBeforeSequenceFromPayload(payload, payload?.events || []),
+      hasMore: typeof payload?.has_more === "boolean" ? payload.has_more : null,
+      partial: typeof payload?.partial === "boolean" ? payload.partial : null,
+      rawEvents: payload?.events,
+      rawNextBeforeSequence: payload?.next_before_sequence ?? null,
     };
   } catch (error) {
     recordCircuitFailure(inboundCircuit, normalizedNowMs);
