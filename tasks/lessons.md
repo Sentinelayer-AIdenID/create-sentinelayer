@@ -421,3 +421,7 @@
 - Extend the concrete artifact call graph through fixed workspace roots as well
   as configured roots. Real native symlink tests catch stale compatibility
   assumptions that privilege-skipped Windows tests cannot execute.
+- ENOENT followed by an existing ordinary ancestor can be legitimate concurrent
+  mkdir, not a dangling link. Resolve that entry once and apply the same boundary;
+  verify both the actual concurrent workflow and an adversarial replacement.
+  Do not dismiss intermittent missing-artifact failures until their cause is traced.

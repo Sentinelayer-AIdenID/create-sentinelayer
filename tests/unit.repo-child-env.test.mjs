@@ -12,6 +12,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { __localReviewForTests } from "../src/review/local-review.js";
+import { createOutputFileSystem } from "../src/config/output-filesystem.js";
 import { parseAstModuleSpecifiers } from "../src/daemon/ast-parser-layer.js";
 import { parseFileCallgraph } from "../src/daemon/callgraph-overlay.js";
 
@@ -49,6 +50,7 @@ test("a repository script run by review sees none of this machine's credentials"
   try {
     await fsp.writeFile(path.join(repo, "print-env.cjs"), "process.stdout.write(JSON.stringify(process.env));\n");
     const result = await __localReviewForTests.executeStaticCheck({
+      outputFs: createOutputFileSystem({ workspaceRoot: repo }),
       check: { id: "print-env", label: "print env", command: process.execPath, args: ["print-env.cjs"], fileHint: "package.json" },
       targetPath: repo,
       runDir: path.join(repo, ".run"),

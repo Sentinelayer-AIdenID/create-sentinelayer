@@ -4286,3 +4286,5 @@ Review: The original PR demonstrated 1,024 decryptable concurrent writes, five o
 - [ ] Complete full verification on the exact frozen successor, obtain renewed first/second review and required hosted checks, then publish/merge under the existing authorization.
 
 The old candidate b85394d was rejected in first review and is superseded by this follow-up. No old-candidate approval or focused test result is used to claim the successor fully verified. Exact source bindings and local evidence are recorded in the session review854 packet.
+
+Full verification of 88a6a24 passed 141 E2E and 3,107 unit tests but found four failures. Three fixture setup omissions are corrected without changing their assertions. The fourth was traced to a concurrent ordinary-directory creation between realpath and lstat; a single re-resolution now checks the resulting real path, with a real-filesystem external-link replacement negative control. Focused follow-up passes 209 tests plus five Windows privilege skips. Full successor verification remains required before renewed review.

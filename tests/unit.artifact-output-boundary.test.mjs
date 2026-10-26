@@ -24,6 +24,46 @@ import { launch } from "../src/agents/devtestbot/runner.js";
 const boundaryError = /Workspace artifact destination must resolve inside the workspace/;
 const event = { eventType: "run_start", runId: "boundary" };
 
+for (const replacedWithExternalLink of [false, true]) {
+  test(`concurrent ordinary ancestor creation ${replacedWithExternalLink ? "still checks its re-resolved destination" : "remains writable inside the workspace"}`, async t => {
+    const f = await fixture(t);
+    const parent = path.join(f.cwd, "concurrent");
+    const destination = path.join(parent, "artifact.json");
+    const { outputFs } = await resolveOutputContext({ cwd: f.cwd, env: {} });
+    const realpath = fsp.realpath.bind(fsp), lstat = fsp.lstat.bind(fsp);
+    let created = false, parentResolutions = 0, replaced = false;
+    t.mock.method(fsp, "realpath", async (candidate, ...args) => {
+      if (candidate === parent) parentResolutions++;
+      try { return await realpath(candidate, ...args); }
+      catch (error) {
+        if (candidate === parent && error.code === "ENOENT" && !created) {
+          await fsp.mkdir(parent);
+          created = true;
+        }
+        throw error;
+      }
+    });
+    if (replacedWithExternalLink) {
+      t.mock.method(fsp, "lstat", async (candidate, ...args) => {
+        const entry = await lstat(candidate, ...args);
+        if (candidate === parent && created && !replaced) {
+          await fsp.rename(parent, path.join(f.cwd, "moved-concurrent"));
+          await fsp.symlink(f.outside, parent, "junction");
+          replaced = true;
+        }
+        return entry;
+      });
+      await assert.rejects(outputFs.writeFile(destination, "must stay inside"), boundaryError);
+      assert.deepEqual(await fsp.readdir(f.outside), []);
+    } else {
+      await outputFs.writeFile(destination, "ordinary concurrent directory");
+      assert.equal(await fsp.readFile(destination, "utf8"), "ordinary concurrent directory");
+    }
+    assert.equal(created, true, "realpath/lstat interleaving was exercised using a real new directory");
+    assert.equal(parentResolutions, 2, "ordinary entry is re-resolved exactly once");
+  });
+}
+
 async function fixture(t) {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "sl-artifact-boundary-"));
   const cwd = path.join(root, "workspace");

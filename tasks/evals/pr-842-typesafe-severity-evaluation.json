@@ -17,7 +17,7 @@
       "src/session/redact.js": "a92cd2e70b165e4e015edcbeff1d3119c3b1f091ef72654e776c0139ace663a2"
     },
     "testPath": "tests/unit.typesafe-severity.test.mjs",
-    "testSha256": "bedc5ceb8a9ffe21465faaa4b9e10727cc8b765fc87987a9da36ca1922f7ece0",
+    "testSha256": "a1bbdb78a7e271d8bd183da13abe007473e0bc33968230680caefc94a6f4e86d",
     "dictionaryVersion": "omar-severity-evaluation/1",
     "privacyCorrection": {
       "baseRevision": "22b8553073bb72cfccd71fb1c06217c3e6844ff4",
@@ -73,6 +73,16 @@
       },
       "scope": "Only artifact destination capability resolution and write propagation changed in the two bound files. Prompt, model selection, severity classification, cost and usage contracts, seven synthetic cases, original inputs, expected outputs, invariants, other implementation bindings and the evaluation test remain unchanged.",
       "provenance": "Earlier revisions and observations remain historical. Current canonical source hashes bind the output-boundary repair. This is deterministic mocked contract evidence, not live-provider, billing, model-accuracy, or hosted-gate acceptance evidence."
+    },
+    "outputBoundaryFixtureMaintenance": {
+      "kind": "workspace_fixture_setup_only",
+      "baseRevision": "88a6a24d96da090363ce2a649ab37b800b34d43f",
+      "baselineEvidencePath": "tasks/evals/pr-854-output-boundary/baseline-88a6a24.json",
+      "baselineEvidenceSha256": "0b72ddedbc7ec8aa5853b6e63ecbcdfa40b5b13063868a183b9ba8f0ca5543bf",
+      "priorTestSha256": "bedc5ceb8a9ffe21465faaa4b9e10727cc8b765fc87987a9da36ca1922f7ece0",
+      "currentTestSha256": "a1bbdb78a7e271d8bd183da13abe007473e0bc33968230680caefc94a6f4e86d",
+      "scope": "Creates each existing synthetic target workspace before the actual caller runs. All seven cases, mock responses, expected classifications, privacy checks, monetary-cap and usage assertions, production implementation bindings and prior evidence are unchanged.",
+      "provenance": "Required fixture setup for a realpath-constrained existing workspace. This refresh is not live-provider, model-accuracy, billing or new security acceptance evidence."
     }
   },
   "baselineMeaning": "Published base generation-only contract, with candidate off mode exercised on identical synthetic inputs; no independent baseline model/provider run.",

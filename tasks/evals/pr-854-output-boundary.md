@@ -102,16 +102,41 @@ to stay guarded; only absolute outside paths retain the unrestricted control.
 Full revised-candidate verification and hosted CI are separate gates; these
 focused results do not imply they have passed.
 
+The full native verification of 88a6a24 passed 141 E2E tests and reported 3,107
+unit passes, four failures and six skips. Three failures were legitimate fixture
+setup omissions: a direct static-check test needed its explicit capability, and
+two TypeSafe cases passed nonexistent child directories as workspaces. Their
+original credential, privacy, monetary and classification assertions are retained.
+
+The fourth failure exposed a real concurrent-creation race. One persona observed
+ENOENT from realpath, another created the shared ancestor, and lstat then found
+an ordinary directory that the helper wrongly classified as an unresolved link.
+A logging-only run of the actual two-persona workflow reproduced this twice in
+30 runs. The correction resolves a newly appeared ordinary entry once and still
+checks its real destination against the workspace; symlinks remain refused on
+that ENOENT branch. Real-filesystem tests cover both legitimate mkdir interleaving
+and replacement with an external link before the bounded re-resolution. The
+focused regression selection passes 209 tests with five Windows privilege skips.
+The same 30-call native workflow produces artifacts in all 30 runs with only the
+repaired helper overlaid; the original helper failed twice in the paired run.
+The full successor suite must pass; the prior full-run failures are not waived.
+
 ## Evaluation binding maintenance
 
 The two bound modules `src/review/ai-review.js` and `src/legacy-cli.js` now use the
 artifact write capability. Prompt/model routing, classification, cost/usage
 contracts, seven synthetic cases, expected outputs and evaluation tests are
-unchanged. The active fixture retains all eight source/test bindings and updates
-only those two source hashes, with a separate `outputBoundaryMaintenance` record.
+unchanged. The initial boundary patch retained all eight source/test bindings and
+updated only those two source hashes, with an `outputBoundaryMaintenance` record.
 `pr-854-output-boundary/baseline-265b6510.json` preserves the previous complete
 fixture. The evaluation and session-provision suites passed 82/82 after this
 refresh. This remains mocked contract evidence, not model-accuracy evidence.
+
+The full-run fixture correction adds only `mkdir(dir)` before the TypeSafe helper
+calls production review code; monetary/privacy assertions and all seven cases are
+unchanged. Its updated canonical test hash has a separate
+`outputBoundaryFixtureMaintenance` record. The full prior fixture is retained at
+`pr-854-output-boundary/baseline-88a6a24.json`; earlier evidence remains intact.
 
 ## Review and shipping gate
 

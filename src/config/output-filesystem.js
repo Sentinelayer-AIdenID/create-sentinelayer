@@ -38,11 +38,18 @@ export async function assertWorkspaceOutputPath(destination, workspaceRoot) {
           if (statError.code !== "ENOENT") throw statError;
           return null;
         });
-        if (entry) throw new Error("Unresolved artifact link");
-        const parent = path.dirname(ancestor);
-        if (parent === ancestor) throw error;
-        ancestor = parent;
-        continue;
+        if (entry) {
+          if (entry.isSymbolicLink()) throw new Error("Unresolved artifact link");
+          // A concurrent artifact writer may have created this ordinary entry
+          // after realpath saw ENOENT. Resolve it once, then apply the same real
+          // workspace check below; never treat its mere existence as authority.
+          resolved = await fsp.realpath(ancestor);
+        } else {
+          const parent = path.dirname(ancestor);
+          if (parent === ancestor) throw error;
+          ancestor = parent;
+          continue;
+        }
       }
       if (!isInside(realRoot, path.resolve(resolved, path.relative(ancestor, candidate)))) {
         throw new Error("Artifact link leaves workspace");
