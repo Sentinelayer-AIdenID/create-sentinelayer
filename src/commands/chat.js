@@ -1,4 +1,4 @@
-import fsp from "node:fs/promises";
+import { requireOutputFileSystem } from "../config/output-filesystem.js";
 import path from "node:path";
 import process from "node:process";
 
@@ -43,7 +43,8 @@ async function readPromptFromStdin() {
   });
 }
 
-async function appendTranscriptEntries({ transcriptPath, entries, outputFs = fsp } = {}) {
+async function appendTranscriptEntries({ transcriptPath, entries, outputFs } = {}) {
+  requireOutputFileSystem(outputFs);
   await outputFs.mkdir(path.dirname(transcriptPath), { recursive: true });
   const rows = entries.map((entry) => JSON.stringify(entry)).join("\n");
   await outputFs.appendFile(transcriptPath, `${rows}\n`, "utf-8");

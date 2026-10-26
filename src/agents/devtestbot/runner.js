@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { createOutputFileSystem } from "../../config/output-filesystem.js";
+import { requireOutputFileSystem } from "../../config/output-filesystem.js";
 import AxeBuilder from "@axe-core/playwright";
 import { chromium } from "playwright";
 
@@ -29,7 +29,7 @@ export class DevTestBotRunnerError extends Error {
 }
 
 export async function launch({
-  outputFs = createOutputFileSystem(),
+  outputFs,
   baseUrl,
   identityCreds = null,
   outputDir,
@@ -41,6 +41,7 @@ export async function launch({
   lighthouseTimeoutMs = DEFAULT_LIGHTHOUSE_TIMEOUT_MS,
   browserOptions = {},
 } = {}) {
+  requireOutputFileSystem(outputFs);
   const writeJson = (...args) => writeJsonWithFs(outputFs, ...args);
   const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
   const runId = "devtestbot-" + new Date().toISOString().replace(/[:.]/g, "-") + "-" + randomUUID().slice(0, 8);
@@ -385,7 +386,8 @@ export function findPlaywrightFfmpegExecutable(env = process.env, platform = pro
   return null;
 }
 
-export async function writeMp4FromPngFrames(page, frames, outputPath, viewport = DEFAULT_VIEWPORT, outputFs = createOutputFileSystem()) {
+export async function writeMp4FromPngFrames(page, frames, outputPath, viewport = DEFAULT_VIEWPORT, outputFs) {
+  requireOutputFileSystem(outputFs);
   if (!Array.isArray(frames) || frames.length === 0) {
     throw new DevTestBotRunnerError("devTestBot MP4 generation requires at least one frame.", {
       code: "DEVTESTBOT_MP4_NO_FRAMES",
@@ -601,6 +603,7 @@ function sanitizeJson(value, sensitiveValues) {
 }
 
 async function runLighthouseCli({ url, outputPath, chromePath, timeoutMs, sensitiveValues, outputFs }) {
+  requireOutputFileSystem(outputFs);
   const writeJson = (...args) => writeJsonWithFs(outputFs, ...args);
   const startedAt = new Date().toISOString();
   await outputFs.mkdir(path.dirname(outputPath), { recursive: true });
@@ -758,6 +761,7 @@ async function settlePendingCaptures(pendingCaptures) {
 }
 
 async function writeJsonWithFs(outputFs, outputPath, payload) {
+  requireOutputFileSystem(outputFs);
   await outputFs.mkdir(path.dirname(outputPath), { recursive: true });
   await outputFs.writeFile(outputPath, JSON.stringify(payload, null, 2) + "\n", "utf-8");
 }

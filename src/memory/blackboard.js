@@ -1,4 +1,4 @@
-import fsp from "node:fs/promises";
+import { requireOutputFileSystem } from "../config/output-filesystem.js";
 import path from "node:path";
 
 function normalizeString(value) {
@@ -274,7 +274,8 @@ export function summarizeBlackboard(blackboard) {
   };
 }
 
-export async function writeBlackboardArtifact(blackboard, { outputRoot = "", outputFs = fsp } = {}) {
+export async function writeBlackboardArtifact(blackboard, { outputRoot = "", outputFs } = {}) {
+  requireOutputFileSystem(outputFs);
   if (!blackboard || !Array.isArray(blackboard.entries)) {
     throw new Error("Invalid blackboard state.");
   }

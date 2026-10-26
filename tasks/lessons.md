@@ -409,3 +409,15 @@
   for regression tests. Increasing retry counts or inserting arbitrary sleeps
   does not prove ordering. Keep cross-process guarantees separate from a
   module-local queue, and ensure a rejected operation cannot poison that queue.
+
+# 2026-10-26 - Artifact policy follows the destination and the capability
+
+- A trusted configuration source does not make a path beneath the workspace safe:
+  default and explicit local paths can encounter the same descendant links.
+  Preserve unrestricted behavior only for deliberate absolute external output.
+- A guarded command is insufficient when an exported writer silently falls back
+  to native filesystem access. Require an unforgeable per-operation capability
+  and exercise missing/native/copied capabilities with zero-effect assertions.
+- Extend the concrete artifact call graph through fixed workspace roots as well
+  as configured roots. Real native symlink tests catch stale compatibility
+  assumptions that privilege-skipped Windows tests cannot execute.

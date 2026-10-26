@@ -22,6 +22,8 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
+import { resolveOutputContext } from "../config/service.js";
+import { requireOutputFileSystem } from "../config/output-filesystem.js";
 
 import { routeFilesToPersonas, summarizeRouting } from "./investor-dd-file-router.js";
 import { runAllPersonas } from "./investor-dd-persona-runner.js";
@@ -160,9 +162,10 @@ async function collectFileMetrics(rootPath, files) {
   return metrics;
 }
 
-async function writeJson(filePath, obj) {
-  await fsp.mkdir(path.dirname(filePath), { recursive: true });
-  await fsp.writeFile(filePath, JSON.stringify(obj, null, 2), "utf-8");
+async function writeJsonWithFs(outputFs, filePath, obj) {
+  requireOutputFileSystem(outputFs);
+  await outputFs.mkdir(path.dirname(filePath), { recursive: true });
+  await outputFs.writeFile(filePath, JSON.stringify(obj, null, 2), "utf-8");
 }
 
 function sha256(text) {
@@ -341,17 +344,20 @@ export async function runInvestorDd({
 
   const runId = `investor-dd-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
   const resolvedBudget = resolveInvestorDdBudget(budgetOptions);
-  const artifactBase = outputDir
-    ? path.resolve(outputDir, runId, INVESTOR_DD_ARTIFACT_SUBDIR)
-    : path.resolve(rootPath, ".sentinelayer", "runs", runId, INVESTOR_DD_ARTIFACT_SUBDIR);
+  const explicitOutputDir = String(outputDir || "").trim();
+  const { outputRoot, outputFs } = await resolveOutputContext({
+    cwd: rootPath,
+    outputDirOverride: explicitOutputDir || ".sentinelayer",
+  });
+  const writeJson = (...args) => writeJsonWithFs(outputFs, ...args);
+  const artifactBase = explicitOutputDir
+    ? path.join(outputRoot, runId, INVESTOR_DD_ARTIFACT_SUBDIR)
+    : path.join(outputRoot, "runs", runId, INVESTOR_DD_ARTIFACT_SUBDIR);
   const runRoot = path.dirname(artifactBase);
-  const outputRoot = outputDir
-    ? path.resolve(outputDir)
-    : path.resolve(rootPath, ".sentinelayer");
-  await fsp.mkdir(artifactBase, { recursive: true });
+  await outputFs.mkdir(artifactBase, { recursive: true });
 
   const streamPath = path.join(artifactBase, "stream.ndjson");
-  const streamHandle = await fsp.open(streamPath, "w");
+  const streamHandle = await outputFs.open(streamPath, "w");
   let streamClosePromise = null;
 
   const closeStream = () => {
@@ -410,6 +416,7 @@ export async function runInvestorDd({
       maxRuntimeMs: resolvedBudget.maxRuntimeMinutes * 60_000,
     });
     const runResult = await runAllPersonas({
+      outputFs,
       routing,
       rootPath,
       budget: budgetState,
@@ -434,6 +441,7 @@ export async function runInvestorDd({
     });
 
     devTestBotPhase = await runDevTestBotPhase({
+      outputFs,
       runId,
       rootPath,
       outputRoot,
@@ -539,7 +547,7 @@ export async function runInvestorDd({
 
   const markdown = buildSummaryMarkdown({ runId, summary, routing, byPersona });
   const reportPath = path.join(artifactBase, "report.md");
-  await fsp.writeFile(reportPath, markdown, "utf-8");
+  await outputFs.writeFile(reportPath, markdown, "utf-8");
 
   const htmlReport = renderInvestorDdHtml({
     runId,
@@ -549,7 +557,7 @@ export async function runInvestorDd({
     findings,
     compliance: compliance ? compliance.packs : null,
   });
-  await fsp.writeFile(path.join(artifactBase, "report.html"), htmlReport, "utf-8");
+  await outputFs.writeFile(path.join(artifactBase, "report.html"), htmlReport, "utf-8");
 
   emit({
     type: "investor_dd_complete",

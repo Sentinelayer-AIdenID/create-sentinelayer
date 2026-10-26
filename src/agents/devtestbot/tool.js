@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { getIdentityById } from "../../ai/identity-store.js";
 import { resolveOutputContext } from "../../config/service.js";
-import { createOutputFileSystem } from "../../config/output-filesystem.js";
+import { requireOutputFileSystem } from "../../config/output-filesystem.js";
 import { createAgentEvent } from "../../events/schema.js";
 import { DEVTESTBOT_DEFINITION, DEVTESTBOT_LANES } from "./config/definition.js";
 import { launch } from "./runner.js";
@@ -75,10 +75,12 @@ export async function runDevTestBotSession(input = {}, ctx = {}) {
   const recordVideo = input.recordVideo !== undefined ? Boolean(input.recordVideo) : true;
   const baseUrl = normalizeString(input.baseUrl || ctx.baseUrl);
   const identityId = normalizeString(input.identityId || ctx.identityId);
-  const artifactRoot = path.resolve(
-    input.outputDir || ctx.outputDir || path.join(outputRoot, "runs", runId, "devtestbot")
-  );
-  const outputFs = ctx.outputFs || (input.outputDir || ctx.outputDir ? createOutputFileSystem() : resolvedOutputFs);
+  const explicitOutputDir = input.outputDir || ctx.outputDir;
+  const artifactOutput = explicitOutputDir
+    ? await resolveOutputContext({ cwd: targetPath, outputDirOverride: explicitOutputDir, env: ctx.env || process.env })
+    : { outputRoot: path.join(outputRoot, "runs", runId, "devtestbot"), outputFs: resolvedOutputFs };
+  const artifactRoot = artifactOutput.outputRoot;
+  const outputFs = ctx.outputFs === undefined ? artifactOutput.outputFs : requireOutputFileSystem(ctx.outputFs);
   await outputFs.mkdir(artifactRoot, { recursive: true });
 
   const { registryPath, identity } = await resolveIdentity({
@@ -712,6 +714,7 @@ async function readJsonIfPresent(filePath) {
 }
 
 async function writeJsonWithFs(outputFs, filePath, payload) {
+  requireOutputFileSystem(outputFs);
   await outputFs.mkdir(path.dirname(filePath), { recursive: true });
   await outputFs.writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
 }

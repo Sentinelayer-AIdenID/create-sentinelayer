@@ -1,7 +1,7 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
 
-import { bindOutputFileSystem } from "../config/output-filesystem.js";
+import { bindOutputFileSystem, requireOutputFileSystem } from "../config/output-filesystem.js";
 import { loadConfig } from "../config/service.js";
 import { listAssignments, resolveAssignmentLedgerStorage } from "./assignment-ledger.js";
 import { listBudgetStates } from "./budget-governor.js";
@@ -303,12 +303,14 @@ async function readJsonFile(filePath, defaultFactory) {
   }
 }
 
-async function writeJsonFile(filePath, payload, outputFs = fsp) {
+async function writeJsonFile(filePath, payload, outputFs) {
+  requireOutputFileSystem(outputFs);
   await outputFs.mkdir(path.dirname(filePath), { recursive: true });
   await outputFs.writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
 }
 
-async function appendEvent(filePath, payload, outputFs = fsp) {
+async function appendEvent(filePath, payload, outputFs) {
+  requireOutputFileSystem(outputFs);
   await outputFs.mkdir(path.dirname(filePath), { recursive: true });
   await outputFs.appendFile(filePath, `${JSON.stringify(payload)}\n`, "utf-8");
 }

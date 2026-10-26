@@ -5,6 +5,7 @@ import process from "node:process";
 import { z } from "zod";
 
 import { resolveOutputContext } from "../config/service.js";
+import { requireOutputFileSystem } from "../config/output-filesystem.js";
 
 /** MCP tool-registry schema version used by Sentinelayer CLI generated artifacts. */
 export const MCP_TOOL_REGISTRY_SCHEMA_VERSION = "1.0.0";
@@ -1390,12 +1391,13 @@ export function stringifyJson(value) {
  *
  * @param {string} filePath
  * @param {unknown} value
- * @param {{ force?: boolean, outputFs?: typeof fsp }} [options]
+ * @param {{ force?: boolean, outputFs: ReturnType<import('../config/output-filesystem.js').createOutputFileSystem> }} options
  * @returns {Promise<string>}
  */
-export async function writeJsonFile(filePath, value, { force = false, outputFs = fsp } = {}) {
+export async function writeJsonFile(filePath, value, { force = false, outputFs } = {}) {
+  requireOutputFileSystem(outputFs);
   const resolvedPath = path.resolve(filePath);
-  await outputFs.assertPath?.(resolvedPath);
+  await outputFs.assertPath(resolvedPath);
   if (!force) {
     try {
       await outputFs.access(resolvedPath);

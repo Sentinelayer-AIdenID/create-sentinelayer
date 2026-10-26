@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { resolveOutputRoot, resolveOutputContext } from "../config/service.js";
-import { bindOutputFileSystem } from "../config/output-filesystem.js";
+import { bindOutputFileSystem, requireOutputFileSystem } from "../config/output-filesystem.js";
 
 const REVIEW_REPORT_JSON = "REVIEW_REPORT.json";
 const REVIEW_REPORT_MD = "REVIEW_REPORT.md";
@@ -524,11 +524,12 @@ export async function buildUnifiedReviewReport({
 }
 
 export async function writeUnifiedReviewArtifacts({
-  outputFs = fsp,
+  outputFs,
   runDirectory,
   report,
   markdown,
 } = {}) {
+  requireOutputFileSystem(outputFs);
   const normalizedRunDirectory = path.resolve(String(runDirectory || "."));
   await outputFs.mkdir(normalizedRunDirectory, { recursive: true });
   const reportJsonPath = path.join(normalizedRunDirectory, REVIEW_REPORT_JSON);
@@ -825,11 +826,14 @@ export async function exportUnifiedReviewReport({
     outputDir,
     env,
   });
-  const resolvedOutputPath = normalizeString(outputFile)
-    ? path.resolve(path.resolve(String(targetPath || ".")), outputFile)
+  const explicitOutput = normalizeString(outputFile)
+    ? await resolveOutputContext({ cwd: path.resolve(String(targetPath || ".")), outputDirOverride: outputFile, env })
+    : null;
+  const resolvedOutputPath = explicitOutput
+    ? explicitOutput.outputRoot
     : resolveDefaultExportPath(loaded.runDirectory, normalizedFormat);
 
-  const outputFs = normalizeString(outputFile) ? fsp : loaded.outputFs;
+  const outputFs = requireOutputFileSystem(explicitOutput ? explicitOutput.outputFs : loaded.outputFs);
   let serialized = "";
   if (normalizedFormat === "json") {
     serialized = `${JSON.stringify(loaded.report, null, 2)}\n`;

@@ -1,3 +1,4 @@
+import { requireOutputFileSystem } from "../config/output-filesystem.js";
 import { spawnSync } from "node:child_process";
 import fsp from "node:fs/promises";
 import path from "node:path";
@@ -74,7 +75,7 @@ function normalizeInvocation(invocation = {}) {
 }
 
 export async function writeReviewRunContext({
-  outputFs = fsp,
+  outputFs,
   runDirectory,
   runId,
   targetPath,
@@ -82,6 +83,7 @@ export async function writeReviewRunContext({
   invocation = {},
   replay = {},
 } = {}) {
+  requireOutputFileSystem(outputFs);
   const normalizedRunDirectory = path.resolve(String(runDirectory || "."));
   const context = {
     schemaVersion: "1.0.0",
@@ -209,12 +211,13 @@ function sanitizeRunId(value) {
 }
 
 export async function writeReviewComparisonArtifact({
-  outputFs = fsp,
+  outputFs,
   runDirectory,
   baseRunId,
   candidateRunId,
   comparison,
 } = {}) {
+  requireOutputFileSystem(outputFs);
   const normalizedRunDirectory = path.resolve(String(runDirectory || "."));
   const fileName = `REVIEW_COMPARISON_${sanitizeRunId(baseRunId)}_vs_${sanitizeRunId(
     candidateRunId

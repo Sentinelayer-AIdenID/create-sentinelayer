@@ -1,7 +1,7 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
 
-import { bindOutputFileSystem } from "../config/output-filesystem.js";
+import { bindOutputFileSystem, requireOutputFileSystem } from "../config/output-filesystem.js";
 import { appendAdminErrorEvent, resolveErrorDaemonStorage, runErrorDaemonWorker } from "./error-worker.js";
 
 const RELIABILITY_SCHEMA_VERSION = "1.0.0";
@@ -143,12 +143,14 @@ async function readJsonFile(filePath, defaultFactory) {
   }
 }
 
-async function writeJsonFile(filePath, payload = {}, outputFs = fsp) {
+async function writeJsonFile(filePath, payload = {}, outputFs) {
+  requireOutputFileSystem(outputFs);
   await outputFs.mkdir(path.dirname(filePath), { recursive: true });
   await outputFs.writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
 }
 
-async function appendJsonLine(filePath, payload = {}, outputFs = fsp) {
+async function appendJsonLine(filePath, payload = {}, outputFs) {
+  requireOutputFileSystem(outputFs);
   await outputFs.mkdir(path.dirname(filePath), { recursive: true });
   await outputFs.appendFile(filePath, `${JSON.stringify(payload)}\n`, "utf-8");
 }

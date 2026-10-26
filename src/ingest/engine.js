@@ -1,3 +1,4 @@
+import { requireOutputFileSystem } from "../config/output-filesystem.js";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
@@ -8,7 +9,7 @@ import { promisify } from "node:util";
 
 import ignore from "ignore";
 
-import { resolveOutputRoot, resolveOutputContext } from "../config/service.js";
+import { resolveOutputContext } from "../config/service.js";
 
 const DEFAULT_IGNORED_DIRS = new Set([
   ".git",
@@ -257,19 +258,6 @@ async function readExistingIngest(outputPath) {
     }
     throw error;
   }
-}
-
-async function resolveIngestOutputPath({ rootPath, outputFile = "", outputDir = "" }) {
-  const resolvedRoot = path.resolve(rootPath || process.cwd());
-  const explicitOutputFile = String(outputFile || "").trim();
-  if (explicitOutputFile) {
-    return path.resolve(resolvedRoot, explicitOutputFile);
-  }
-  const outputRoot = await resolveOutputRoot({
-    cwd: resolvedRoot,
-    outputDirOverride: outputDir,
-  });
-  return path.join(outputRoot, "CODEBASE_INGEST.json");
 }
 
 async function readGitLastCommitAt(rootPath) {
@@ -793,14 +781,16 @@ export function formatIngestSummary(ingest) {
   return lines.join("\n");
 }
 
-export async function writeCodebaseIngest({ ingest, rootPath, outputFile = "", outputDir = "", outputFs: inheritedOutputFs } = {}) {
+async function resolveIngestOutputContext({ rootPath, outputFile = "", outputDir = "" }) {
   const resolvedRoot = path.resolve(rootPath || process.cwd());
   const resolvedOutputFile = String(outputFile || "").trim();
-  const output = resolvedOutputFile ? null : await resolveOutputContext({ cwd: resolvedRoot, outputDirOverride: outputDir });
-  const outputFs = inheritedOutputFs || output?.outputFs || fsp;
-  const outputPath = resolvedOutputFile
-    ? path.resolve(resolvedRoot, resolvedOutputFile)
-    : path.join(output.outputRoot, "CODEBASE_INGEST.json");
+  const output = await resolveOutputContext({ cwd: resolvedRoot, outputDirOverride: resolvedOutputFile || outputDir });
+  return { outputPath: resolvedOutputFile ? output.outputRoot : path.join(output.outputRoot, "CODEBASE_INGEST.json"), outputFs: output.outputFs };
+}
+
+export async function writeCodebaseIngest({ ingest, rootPath, outputFile = "", outputDir = "", outputFs } = {}) {
+  requireOutputFileSystem(outputFs);
+  const { outputPath } = await resolveIngestOutputContext({ rootPath, outputFile, outputDir });
 
   await outputFs.mkdir(path.dirname(outputPath), { recursive: true });
   await outputFs.writeFile(outputPath, `${JSON.stringify(ingest, null, 2)}\n`, "utf-8");
@@ -808,18 +798,19 @@ export async function writeCodebaseIngest({ ingest, rootPath, outputFile = "", o
 }
 
 export async function resolveCodebaseIngest({
-  outputFs,
+  outputFs: inheritedOutputFs,
   rootPath = process.cwd(),
   outputFile = "",
   outputDir = "",
   refresh = false,
 } = {}) {
   const resolvedRoot = path.resolve(rootPath || process.cwd());
-  const outputPath = await resolveIngestOutputPath({
+  const { outputPath, outputFs: resolvedOutputFs } = await resolveIngestOutputContext({
     rootPath: resolvedRoot,
     outputFile,
     outputDir,
   });
+  const outputFs = inheritedOutputFs === undefined ? resolvedOutputFs : requireOutputFileSystem(inheritedOutputFs);
   const existingIngest = await readExistingIngest(outputPath);
   const fingerprint = await computeCodebaseContentFingerprint({
     rootPath: resolvedRoot,
@@ -898,11 +889,13 @@ export async function resolveCodebaseIngest({
 }
 
 export async function generateCodebaseIngest({
-  outputFs,
+  outputFs: inheritedOutputFs,
   rootPath = process.cwd(),
   outputFile = "",
   outputDir = "",
 } = {}) {
+  const { outputFs: resolvedOutputFs } = await resolveIngestOutputContext({ rootPath, outputFile, outputDir });
+  const outputFs = inheritedOutputFs === undefined ? resolvedOutputFs : requireOutputFileSystem(inheritedOutputFs);
   const ingest = await collectCodebaseIngest({ rootPath });
   const outputPath = await writeCodebaseIngest({
     outputFs,

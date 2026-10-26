@@ -1,4 +1,5 @@
 import "./setup-env.mjs";
+import { createOutputFileSystem } from "../src/config/output-filesystem.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import os from "node:os";
@@ -66,6 +67,7 @@ test("Unit audit package: manifest builder and package writer produce DD artifac
     assert.equal(Array.isArray(manifest.agents), true);
 
     const ddPackage = await writeDdPackage({
+      outputFs: createOutputFileSystem({ workspaceRoot: tempRoot }),
       report,
       runDirectory,
     });

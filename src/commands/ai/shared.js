@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
-import fsp from "node:fs/promises";
+
 import path from "node:path";
+import { requireOutputFileSystem } from "../../config/output-filesystem.js";
 
 // Shared helper utilities for ai command modules.
 
@@ -128,7 +129,8 @@ export function renderLineageRows(lineage = {}) {
     });
 }
 
-export async function writeArtifact(filePath, payload, outputFs = fsp) {
+export async function writeArtifact(filePath, payload, outputFs) {
+  requireOutputFileSystem(outputFs);
   await outputFs.mkdir(path.dirname(filePath), { recursive: true });
   await outputFs.writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
 }

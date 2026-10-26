@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
+import { requireOutputFileSystem } from "../config/output-filesystem.js";
 
 import { createMultiProviderApiClient } from "../ai/client.js";
 import { serializeProxyError } from "../ai/proxy.js";
@@ -385,6 +386,7 @@ export function createIsolatedPersonaContext({
   isolation = DEFAULT_ISOLATION_MODE,
   eventContext = null,
 } = {}) {
+  if (artifactDir) requireOutputFileSystem(outputFs);
   const normalizedAgent = normalizeAuditPersona(agent || {});
   const resolvedRootPath = path.resolve(String(rootPath || "."));
   const resolvedRunId =
@@ -1057,6 +1059,7 @@ function summarizeSwarmStatus(results = []) {
 }
 
 export async function runPersonaAgenticLoop(options = {}) {
+  if (options.artifactDir) requireOutputFileSystem(options.outputFs);
   const {
     agent,
     rootPath,

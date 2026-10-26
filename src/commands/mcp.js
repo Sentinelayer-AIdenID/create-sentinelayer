@@ -35,6 +35,7 @@ import { runMcpDoctorProbes } from "../mcp/doctor.js";
 import { runHostedMcpSmoke } from "../mcp/smoke.js";
 import { resolveActiveAuthSession } from "../auth/service.js";
 import { resolveOutputContext, resolveOutputRoot } from "../config/service.js";
+import { createOutputFileSystem } from "../config/output-filesystem.js";
 
 function shouldEmitJson(options, command) {
   const local = Boolean(options && options.json);
@@ -53,7 +54,12 @@ function normalizeOutputPath(rawValue, fallbackPath) {
 
 async function resolveWriteDestination(options, resolveDefaultPath, { suffix, ...pathOptions } = {}) {
   if (String(options.path || "").trim()) {
-    return { outputPath: normalizeOutputPath(options.path), outputFs: fs };
+    const { outputRoot: outputPath, outputFs } = await resolveOutputContext({
+      cwd: process.cwd(),
+      outputDirOverride: options.path,
+      env: process.env,
+    });
+    return { outputPath, outputFs };
   }
   const outputContext = await resolveOutputContext({
     cwd: process.cwd(),
@@ -904,7 +910,14 @@ Docs: https://github.com/mrrCarter/create-sentinelayer/blob/main/docs/mcp.md`,
         serverId,
         serverConfigFile: String(options.serverConfig || "").trim(),
       });
-      const writtenPath = await writeJsonFile(outputPath, bridgePayload, { force: Boolean(options.force) });
+      const outputFs = String(options.path || "").trim()
+        ? (await resolveOutputContext({
+          cwd: process.cwd(),
+          outputDirOverride: options.path,
+          env: process.env,
+        })).outputFs
+        : createOutputFileSystem({ workspaceRoot: process.cwd() });
+      const writtenPath = await writeJsonFile(outputPath, bridgePayload, { force: Boolean(options.force), outputFs });
 
       const payload = {
         command: "mcp bridge init-vscode",

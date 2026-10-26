@@ -7,6 +7,9 @@ import path from "node:path";
 import { Command } from "commander";
 import { registerMcpCommand } from "../src/commands/mcp.js";
 import { registerPluginCommand } from "../src/commands/plugin.js";
+import { writeJsonFile as writeMcpJsonFile } from "../src/mcp/registry.js";
+import { writeJsonFile as writePluginJsonFile } from "../src/plugin/manifest.js";
+import { createOutputFileSystem } from "../src/config/output-filesystem.js";
 
 const refusal = /Workspace artifact destination must resolve inside the workspace/;
 const writers = [
@@ -20,6 +23,36 @@ const writers = [
   { args: ["mcp", "server", "init", "--id", "fixture"], file: "mcp/servers/fixture.json" },
   { args: ["plugin", "init", "--id", "fixture"], file: "plugins/fixture/plugin.json" },
 ];
+
+for (const [name, write] of [["MCP", writeMcpJsonFile], ["plugin", writePluginJsonFile]]) {
+  test(`${name} exported JSON writer rejects missing or unregistered capabilities before mutation`, async (t) => {
+    const f = await fixture(t);
+    const destination = path.join(f.outside, "existing.json");
+    await fsp.writeFile(destination, "unchanged");
+    const mutations = [];
+    for (const method of ["mkdir", "writeFile"]) {
+      t.mock.method(fsp, method, async () => { mutations.push(method); });
+    }
+    for (const options of [undefined, {}, { force: true }, { outputFs: null }, { outputFs: fsp }, { outputFs: { ...fsp, assertPath: async () => {} } }]) {
+      await assert.rejects(() => write(destination, { changed: true }, options), TypeError);
+    }
+    assert.deepEqual(mutations, []);
+    assert.equal(await fsp.readFile(destination, "utf8"), "unchanged");
+  });
+
+  test(`${name} exported JSON writer accepts explicit factory capabilities`, async (t) => {
+    const f = await fixture(t);
+    for (const [directory, outputFs] of [
+      [f.cwd, createOutputFileSystem({ workspaceRoot: f.cwd })],
+      [f.outside, createOutputFileSystem()],
+    ]) {
+      const destination = path.join(directory, "new", "manifest.json");
+      assert.equal(await write(destination, { written: true }, { outputFs }), destination);
+      assert.deepEqual(JSON.parse(await fsp.readFile(destination, "utf8")), { written: true });
+      await assert.rejects(() => write(destination, {}, { outputFs }), /File already exists/);
+    }
+  });
+}
 
 async function fixture(t, project = ".") {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "sl-mcp-plugin-output-"));
@@ -46,6 +79,19 @@ async function fixture(t, project = ".") {
 }
 
 for (const writer of writers) {
+  test(`${writer.args.join(" ")} rejects relative explicit paths outside the workspace`, async (t) => {
+    const f = await fixture(t);
+    await assert.rejects(() => f.run([...writer.args, "--path", "../outside/escaped.json"]), /inside the workspace/);
+    await assert.rejects(() => fsp.access(path.join(f.outside, "escaped.json")), { code: "ENOENT" });
+  });
+
+  test(`${writer.args.join(" ")} guards explicit absolute paths inside the workspace`, async (t) => {
+    const f = await fixture(t);
+    await fsp.symlink(f.outside, path.join(f.cwd, "linked"), "junction");
+    await assert.rejects(() => f.run([...writer.args, "--path", path.join(f.cwd, "linked", "escaped.json")]), /inside the workspace/);
+    await assert.rejects(() => fsp.access(path.join(f.outside, "escaped.json")), { code: "ENOENT" });
+  });
+
   test(`${writer.args.join(" ")} rejects a linked descendant before changing outside files`, async (t) => {
     const f = await fixture(t);
     const [directory, ...rest] = writer.file.split("/");
@@ -120,3 +166,16 @@ for (const writer of [writers[0], writers.at(-1)]) {
     assert.equal(await fsp.readFile(external, "utf8"), "unchanged");
   });
 }
+
+test("MCP VS Code bridge binds its default destination and preserves trusted absolute override", async (t) => {
+  const f = await fixture(t);
+  const args = ["mcp", "bridge", "init-vscode", "--server-id", "fixture", "--server-config", "server.json"];
+  await fsp.symlink(f.outside, path.join(f.cwd, ".vscode"), "junction");
+  await assert.rejects(() => f.run(args), /inside the workspace/);
+  await assert.rejects(() => fsp.access(path.join(f.outside, "mcp.json")), { code: "ENOENT" });
+  await assert.rejects(() => f.run([...args, "--path", "../outside/relative.json"]), /inside the workspace/);
+  const destination = path.join(f.outside, "explicit.json");
+  const result = await f.run([...args, "--path", destination]);
+  assert.equal(result.outputPath, destination);
+  assert.equal(typeof JSON.parse(await fsp.readFile(destination, "utf8")), "object");
+});

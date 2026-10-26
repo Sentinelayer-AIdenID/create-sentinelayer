@@ -106,12 +106,45 @@ test("project output preserves internal links and a workspace reached through a 
 });
 
 for (const absolute of [true, false]) {
-  test(`trusted global ${absolute ? "absolute" : "relative"} output remains available`, async (t) => {
+  test(`global ${absolute ? "absolute external" : "relative internal"} output remains available`, async (t) => {
     const f = await fixture(t);
-    await f.global(absolute ? path.join(f.sibling, "global") : "../workspace-sibling/global");
+    await f.global(absolute ? path.join(f.sibling, "global") : "global");
     const result = await appendRunEvent(f.options, { eventType: "run_start", runId: "global-fixture" });
-    assert.equal(result.filePath, path.join(f.sibling, "global/observability/run-events.jsonl"));
+    assert.equal(result.filePath, path.join(absolute ? f.sibling : f.cwd, "global/observability/run-events.jsonl"));
   });
+}
+
+for (const layer of ["global", "cli"]) {
+  for (const value of ["../workspace-sibling/out", "..\\workspace-sibling\\out", "nested/..\\..\\workspace-sibling/out"]) {
+    test(`${layer} relative escapes refuse before artifact writes: ${value}`, async (t) => {
+      const f = await fixture(t);
+      const options = { ...f.options };
+      if (layer === "global") await f.global(value);
+      else options.outputDirOverride = value;
+      await rejectedBeforeWrite(t, options);
+    });
+  }
+}
+
+for (const layer of ["default", "project", "global-relative", "cli-relative", "global-absolute-inside", "cli-absolute-inside"]) {
+  for (const linkAtRoot of [true, false]) {
+    test(`${layer} output refuses ${linkAtRoot ? "root" : "descendant"} junction before append`, async (t) => {
+      const f = await fixture(t);
+      const localRoot = path.join(f.cwd, ".sentinelayer");
+      const options = { ...f.options };
+      if (layer === "project") await f.project(".sentinelayer");
+      if (layer.startsWith("global")) await f.global(layer.endsWith("inside") ? localRoot : ".sentinelayer");
+      if (layer.startsWith("cli")) options.outputDirOverride = layer.endsWith("inside") ? localRoot : ".sentinelayer";
+      if (!linkAtRoot) await fsp.mkdir(localRoot);
+      await fsp.symlink(f.sibling, linkAtRoot ? localRoot : path.join(localRoot, "observability"), "junction");
+      const outsideFile = path.join(f.sibling, "run-events.jsonl");
+      await fsp.writeFile(outsideFile, "sentinel\n");
+      await assert.rejects(appendRunEvent(options, { eventType: "run_start", runId: "must-refuse" }),
+        linkAtRoot ? { message: rejection } : /Workspace artifact destination must resolve inside the workspace/);
+      assert.equal(await fsp.readFile(outsideFile, "utf8"), "sentinel\n");
+      assert.deepEqual(await fsp.readdir(f.sibling), ["run-events.jsonl"]);
+    });
+  }
 }
 
 test("explicit user override remains trusted even with unsafe project configuration", async (t) => {

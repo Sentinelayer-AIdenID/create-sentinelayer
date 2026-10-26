@@ -1,3 +1,4 @@
+import { requireOutputFileSystem } from "../config/output-filesystem.js";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -110,7 +111,8 @@ async function readCostHistoryFile(filePath) {
   }
 }
 
-export async function saveCostHistory({ filePath, history, outputFs = fsp }) {
+export async function saveCostHistory({ filePath, history, outputFs }) {
+  requireOutputFileSystem(outputFs);
   const payload = {
     version: HISTORY_VERSION,
     entries: Array.isArray(history?.entries) ? history.entries : [],

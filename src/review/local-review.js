@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { buildScrubbedEnv } from "../agents/shared-tools/shell.js";
 import { resolveOutputContext } from "../config/service.js";
-import { bindOutputFileSystem } from "../config/output-filesystem.js";
+import { bindOutputFileSystem, requireOutputFileSystem } from "../config/output-filesystem.js";
 import { resolveCodebaseIngest } from "../ingest/engine.js";
 import { runSpecBindingChecks } from "./spec-binding.js";
 
@@ -853,7 +853,8 @@ export function staticCheckEnv(env = process.env) {
   return { ...buildScrubbedEnv(env), CI: "1", FORCE_COLOR: "0" };
 }
 
-async function executeStaticCheck({ check, targetPath, runDir, outputFs = fsp } = {}) {
+async function executeStaticCheck({ check, targetPath, runDir, outputFs } = {}) {
+  requireOutputFileSystem(outputFs);
   const checksDir = path.join(runDir, "checks");
   await outputFs.mkdir(checksDir, { recursive: true });
 
@@ -934,7 +935,8 @@ async function executeStaticCheck({ check, targetPath, runDir, outputFs = fsp } 
 
 export const __localReviewForTests = Object.freeze({ executeStaticCheck });
 
-async function runStaticAnalysisLayer({ targetPath, ingest, runDir, outputFs = fsp, maxFindings = MAX_FINDINGS } = {}) {
+async function runStaticAnalysisLayer({ targetPath, ingest, runDir, outputFs, maxFindings = MAX_FINDINGS } = {}) {
+  requireOutputFileSystem(outputFs);
   const checks = buildStaticChecks(ingest);
   const results = [];
   const findings = [];
@@ -1147,7 +1149,8 @@ ${formatDeterministicFindingsMarkdown(result.findings)}
 `;
 }
 
-async function writeDeterministicReviewArtifacts({ result, runDir, outputFs = fsp } = {}) {
+async function writeDeterministicReviewArtifacts({ result, runDir, outputFs } = {}) {
+  requireOutputFileSystem(outputFs);
   const markdownPath = path.join(runDir, "REVIEW_DETERMINISTIC.md");
   const jsonPath = path.join(runDir, "REVIEW_DETERMINISTIC.json");
 
@@ -1177,7 +1180,7 @@ export async function runDeterministicReviewPipeline({
     cwd: normalizedTargetPath,
     outputDirOverride: outputDir,
   });
-  const outputFs = inheritedOutputFs || resolvedOutputFs;
+  const outputFs = inheritedOutputFs === undefined ? resolvedOutputFs : requireOutputFileSystem(inheritedOutputFs);
   const runId = `review-${formatTimestampForFile()}-${randomUUID().slice(0, 8)}`;
   const runDir = path.join(outputRoot, "reviews", runId);
   await outputFs.mkdir(runDir, { recursive: true });

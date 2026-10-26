@@ -82,7 +82,7 @@ test("telemetry rejects an existing final-file link without appending to its tar
 });
 
 for (const [name, file, payload, write] of [
-  ["ingest", "CODEBASE_INGEST.json", "outside sentinel", (f) => writeCodebaseIngest({ rootPath: f.cwd, ingest: {} })],
+  ["ingest", "CODEBASE_INGEST.json", "outside sentinel", async (f) => writeCodebaseIngest({ rootPath: f.cwd, ingest: {}, outputFs: (await resolveOutputContext({ cwd: f.cwd })).outputFs })],
   ["cost history", "cost-history.json", '{"entries":[]}', (f) => appendCostEntry(f.options, { provider: "openai", model: "fixture" })],
 ]) {
   test(`${name} rejects an existing final-file link without overwriting its target`, async (t) => {
@@ -161,8 +161,15 @@ test("constrained writes refuse final-file links even when their targets remain 
   }
   assert.equal(await fsp.readFile(target, "utf8"), "inside sentinel");
   const explicit = await resolveOutputContext({ cwd: f.cwd, outputDirOverride: f.cwd });
-  await explicit.outputFs.appendFile(link, " explicit");
-  assert.equal(await fsp.readFile(target, "utf8"), "inside sentinel explicit");
+  await assert.rejects(explicit.outputFs.appendFile(link, "bad"), boundaryError);
+  assert.equal(await fsp.readFile(target, "utf8"), "inside sentinel");
+  const outsideTarget = path.join(f.outside, "target.txt");
+  const outsideLink = path.join(f.outside, "linked.txt");
+  await fsp.writeFile(outsideTarget, "outside sentinel");
+  await fsp.symlink(outsideTarget, outsideLink, "file");
+  const trusted = await resolveOutputContext({ cwd: f.cwd, outputDirOverride: f.outside });
+  await trusted.outputFs.appendFile(outsideLink, " explicit");
+  assert.equal(await fsp.readFile(outsideTarget, "utf8"), "outside sentinel explicit");
 });
 
 test("native no-follow refuses a final link introduced after validation", { skip: !constants.O_NOFOLLOW }, async (t) => {
@@ -200,18 +207,21 @@ test("constrained writes preserve encoding, mode, exclusive flags, flush and abo
   await readHandle.close();
 });
 
-test("concurrent configured and explicit operations at the same root keep separate policies", async (t) => {
+test("concurrent local outputs stay guarded while an absolute external override stays independent", async (t) => {
   const f = await fixture(t);
   await linkDirectory(f.outside, path.join(f.cwd, "observability"));
   const results = await Promise.allSettled([
     appendRunEvent(f.options, { ...event, runId: "restricted" }),
     appendRunEvent({ ...f.options, outputDirOverride: f.cwd }, { ...event, runId: "explicit" }),
+    appendRunEvent({ ...f.options, outputDirOverride: f.outside }, { ...event, runId: "external" }),
   ]);
   assert.equal(results[0].status, "rejected");
   assert.match(results[0].reason.message, boundaryError);
-  assert.equal(results[1].status, "fulfilled");
-  const lines = (await fsp.readFile(path.join(f.outside, "run-events.jsonl"), "utf8")).trim().split("\n");
-  assert.deepEqual(lines.map((line) => JSON.parse(line).runId), ["explicit"]);
+  assert.equal(results[1].status, "rejected");
+  assert.match(results[1].reason.message, boundaryError);
+  assert.equal(results[2].status, "fulfilled");
+  const lines = (await fsp.readFile(path.join(f.outside, "observability/run-events.jsonl"), "utf8")).trim().split("\n");
+  assert.deepEqual(lines.map((line) => JSON.parse(line).runId), ["external"]);
 });
 
 test("internal descendant links and explicit external file overrides stay usable", async (t) => {
@@ -222,7 +232,8 @@ test("internal descendant links and explicit external file overrides stay usable
   await appendRunEvent(f.options, event);
   assert.equal(JSON.parse((await fsp.readFile(path.join(actual, "run-events.jsonl"), "utf8")).trim()).runId, "boundary");
   const outsideFile = path.join(f.outside, "explicit-ingest.json");
-  await writeCodebaseIngest({ rootPath: f.cwd, outputFile: outsideFile, ingest: { allowed: true } });
+  const { outputFs } = await resolveOutputContext({ cwd: f.cwd, outputDirOverride: outsideFile });
+  await writeCodebaseIngest({ rootPath: f.cwd, outputFile: outsideFile, ingest: { allowed: true }, outputFs });
   assert.equal(JSON.parse(await fsp.readFile(outsideFile, "utf8")).allowed, true);
 });
 
@@ -230,8 +241,8 @@ test("inherited browser and ingest paths retain the configured boundary through 
   const f = await fixture(t);
   const { outputFs } = await resolveOutputContext({ cwd: f.cwd, env: {} });
   await linkDirectory(f.outside, path.join(f.cwd, "child"));
-  await assert.rejects(runDevTestBotSession({ targetPath: f.cwd, outputRoot: f.cwd, outputDir: path.join(f.cwd, "child"), execute: false }, { outputFs }), boundaryError);
-  await assert.rejects(writeCodebaseIngest({ rootPath: f.cwd, outputDir: path.join(f.cwd, "child"), outputFs, ingest: {} }), boundaryError);
+  await assert.rejects(runDevTestBotSession({ targetPath: f.cwd, outputRoot: f.cwd, outputDir: path.join(f.cwd, "child"), execute: false }, { outputFs }), /Workspace outputDir must resolve/);
+  await assert.rejects(writeCodebaseIngest({ rootPath: f.cwd, outputDir: path.join(f.cwd, "child"), outputFs, ingest: {} }), /Workspace outputDir must resolve/);
   assert.deepEqual(await fsp.readdir(f.outside), []);
 });
 

@@ -3,6 +3,16 @@ import { constants } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+const outputCapabilities = new WeakSet();
+
+/** Writers accept only a capability created for this operation's output policy. */
+export function requireOutputFileSystem(outputFs) {
+  if (!outputCapabilities.has(outputFs)) {
+    throw new TypeError("An output filesystem capability is required for artifact writes.");
+  }
+  return outputFs;
+}
+
 function isInside(root, candidate) {
   const relative = path.relative(root, candidate);
   return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
@@ -46,6 +56,7 @@ export async function assertWorkspaceOutputPath(destination, workspaceRoot) {
 
 /** Per-operation capability; never stored in a process-global path registry. */
 export function createOutputFileSystem({ workspaceRoot = null } = {}) {
+  workspaceRoot = workspaceRoot ? path.resolve(workspaceRoot) : null;
   const assertPath = async (destination) => {
     if (workspaceRoot) return assertWorkspaceOutputPath(destination, workspaceRoot);
     return destination;
@@ -57,7 +68,9 @@ export function createOutputFileSystem({ workspaceRoot = null } = {}) {
         if (error.code !== "ENOENT") throw new Error("Workspace artifact destination must resolve inside the workspace.");
         return null;
       });
-      if (entry?.isSymbolicLink()) throw new Error("Workspace artifact destination must resolve inside the workspace.");
+      if (entry?.isSymbolicLink() || (entry?.isFile() && entry.nlink > 1)) {
+        throw new Error("Workspace artifact destination must resolve inside the workspace without linked files.");
+      }
     }
     return checked;
   };
@@ -103,6 +116,7 @@ export function createOutputFileSystem({ workspaceRoot = null } = {}) {
       });
     };
   }
+  outputCapabilities.add(io);
   return Object.freeze(io);
 }
 
@@ -130,6 +144,6 @@ function numericOpenFlags(flags) {
 // Storage objects are often returned as JSON. Keep the executable capability
 // out of that public data shape while allowing explicit downstream propagation.
 export function bindOutputFileSystem(storage, outputFs) {
-  Object.defineProperty(storage, "outputFs", { value: outputFs, enumerable: false });
+  Object.defineProperty(storage, "outputFs", { value: requireOutputFileSystem(outputFs), enumerable: false });
   return storage;
 }

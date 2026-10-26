@@ -1,3 +1,4 @@
+import { requireOutputFileSystem } from "../config/output-filesystem.js";
 import fsp from "node:fs/promises";
 import path from "node:path";
 
@@ -116,7 +117,8 @@ export function buildDdPackageManifest(report = {}) {
   };
 }
 
-export async function writeDdPackage({ report = {}, runDirectory, outputFs = fsp } = {}) {
+export async function writeDdPackage({ report = {}, runDirectory, outputFs } = {}) {
+  requireOutputFileSystem(outputFs);
   const resolvedRunDirectory = normalizeRunDirectory(runDirectory || report.runDirectory);
   const manifest = buildDdPackageManifest({
     ...report,

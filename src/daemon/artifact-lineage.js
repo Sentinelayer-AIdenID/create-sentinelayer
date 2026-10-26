@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import fsp from "node:fs/promises";
 import path from "node:path";
 
-import { bindOutputFileSystem } from "../config/output-filesystem.js";
+import { bindOutputFileSystem, requireOutputFileSystem } from "../config/output-filesystem.js";
 import { listAssignments, resolveAssignmentLedgerStorage } from "./assignment-ledger.js";
 import { getBudgetHealthColor, resolveOperatorControlStorage } from "./operator-control.js";
 import { listBudgetStates, resolveBudgetGovernorStorage } from "./budget-governor.js";
@@ -391,12 +391,14 @@ export async function verifyArtifactChain({
   };
 }
 
-async function writeJsonFile(filePath, payload = {}, outputFs = fsp) {
+async function writeJsonFile(filePath, payload = {}, outputFs) {
+  requireOutputFileSystem(outputFs);
   await outputFs.mkdir(path.dirname(filePath), { recursive: true });
   await outputFs.writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
 }
 
-async function appendJsonLine(filePath, payload = {}, outputFs = fsp) {
+async function appendJsonLine(filePath, payload = {}, outputFs) {
+  requireOutputFileSystem(outputFs);
   await outputFs.mkdir(path.dirname(filePath), { recursive: true });
   await outputFs.appendFile(filePath, `${JSON.stringify(payload)}\n`, "utf-8");
 }

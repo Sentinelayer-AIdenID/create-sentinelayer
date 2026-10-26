@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import fsp from "node:fs/promises";
 import path from "node:path";
 
-import { bindOutputFileSystem } from "../config/output-filesystem.js";
+import { bindOutputFileSystem, requireOutputFileSystem } from "../config/output-filesystem.js";
 import { WORK_ITEM_STATUSES, resolveErrorDaemonStorage } from "./error-worker.js";
 
 const LEDGER_SCHEMA_VERSION = "1.0.0";
@@ -171,12 +171,14 @@ async function loadJsonFile(filePath, defaultFactory) {
   }
 }
 
-async function writeJsonFile(filePath, payload = {}, outputFs = fsp) {
+async function writeJsonFile(filePath, payload = {}, outputFs) {
+  requireOutputFileSystem(outputFs);
   await outputFs.mkdir(path.dirname(filePath), { recursive: true });
   await outputFs.writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
 }
 
-async function appendEvent(filePath, payload = {}, outputFs = fsp) {
+async function appendEvent(filePath, payload = {}, outputFs) {
+  requireOutputFileSystem(outputFs);
   await outputFs.mkdir(path.dirname(filePath), { recursive: true });
   await outputFs.appendFile(filePath, `${JSON.stringify(payload)}\n`, "utf-8");
 }
@@ -194,7 +196,8 @@ async function loadLedger(ledgerPath, nowIso = new Date().toISOString()) {
   };
 }
 
-async function writeLedger(ledgerPath, ledger = {}, nowIso = new Date().toISOString(), outputFs = fsp) {
+async function writeLedger(ledgerPath, ledger = {}, nowIso = new Date().toISOString(), outputFs) {
+  requireOutputFileSystem(outputFs);
   const normalized = {
     schemaVersion: LEDGER_SCHEMA_VERSION,
     generatedAt: normalizeIsoTimestamp(nowIso, nowIso),
@@ -219,7 +222,8 @@ async function loadQueue(queuePath, nowIso = new Date().toISOString()) {
   };
 }
 
-async function writeQueue(queuePath, queue = {}, nowIso = new Date().toISOString(), outputFs = fsp) {
+async function writeQueue(queuePath, queue = {}, nowIso = new Date().toISOString(), outputFs) {
+  requireOutputFileSystem(outputFs);
   const normalized = {
     schemaVersion: QUEUE_SCHEMA_VERSION,
     generatedAt: normalizeIsoTimestamp(nowIso, nowIso),
@@ -232,6 +236,7 @@ async function writeQueue(queuePath, queue = {}, nowIso = new Date().toISOString
 }
 
 function getAssignmentStoragePaths(baseStorage = {}) {
+  requireOutputFileSystem(baseStorage.outputFs);
   return bindOutputFileSystem({
     ...baseStorage,
     ledgerPath: path.join(baseStorage.baseDir, "assignment-ledger.json"),

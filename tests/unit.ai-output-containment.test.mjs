@@ -45,6 +45,21 @@ async function seed(dir) {
 }
 
 for (const [name, filename, operation] of operations) {
+  for (const supplied of ["missing", "null", "raw filesystem"]) {
+    test(`AI ${name} refuses ${supplied} output capability before changing files`, async (t) => {
+      const f = await fixture(t);
+      const target = path.join(f.cwd, "aidenid");
+      await seed(target);
+      const context = { outputRoot: f.cwd };
+      if (supplied !== "missing") context.outputFs = supplied === "null" ? null : fsp;
+      await assert.rejects(() => operation(context), { name: "TypeError" });
+      assert.equal(await fsp.readFile(path.join(target, filename), "utf8"), initial[filename]);
+      assert.deepEqual((await fsp.readdir(target)).sort(), Object.keys(initial).sort());
+    });
+  }
+}
+
+for (const [name, filename, operation] of operations) {
   test(`AI ${name} rejects a descendant directory link without changing external files`, async (t) => {
     const f = await fixture(t);
     await seed(f.outside);

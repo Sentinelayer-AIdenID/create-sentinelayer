@@ -63,9 +63,9 @@ export function registerPluginCommand(program) {
       const packType = normalizePluginPackType(options.packType);
       const stage = normalizePluginLoadStage(options.stage);
       const explicitPath = String(options.path || "").trim();
-      const outputContext = explicitPath ? null : await resolveOutputContext({
+      const outputContext = await resolveOutputContext({
         cwd: process.cwd(),
-        outputDirOverride: options.outputDir,
+        outputDirOverride: explicitPath || options.outputDir,
         env: process.env,
       });
       const defaultPath = explicitPath ? undefined : await resolveDefaultPluginManifestPath({
@@ -81,7 +81,7 @@ export function registerPluginCommand(program) {
       const manifest = validatePluginManifest(template);
       const writtenPath = await writeJsonFile(outputPath, manifest, {
         force: Boolean(options.force),
-        outputFs: outputContext?.outputFs,
+        outputFs: outputContext.outputFs,
       });
 
       const payload = {

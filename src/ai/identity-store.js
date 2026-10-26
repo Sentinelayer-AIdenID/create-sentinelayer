@@ -1,5 +1,6 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
+import { requireOutputFileSystem } from "../config/output-filesystem.js";
 
 const REGISTRY_SCHEMA_VERSION = "1.0.0";
 const TERMINAL_IDENTITY_STATUSES = new Set(["SQUASHED"]);
@@ -96,7 +97,8 @@ async function loadRegistryInternal(filePath) {
   }
 }
 
-async function writeRegistryInternal(filePath, registry = {}, outputFs = fsp) {
+async function writeRegistryInternal(filePath, registry = {}, outputFs) {
+  requireOutputFileSystem(outputFs);
   const normalized = {
     schemaVersion: REGISTRY_SCHEMA_VERSION,
     generatedAt: new Date().toISOString(),
@@ -130,11 +132,12 @@ export async function getIdentityById({ outputRoot, identityId } = {}) {
 }
 
 export async function recordProvisionedIdentity({
-  outputFs = fsp,
+  outputFs,
   outputRoot,
   response = {},
   context = {},
 } = {}) {
+  requireOutputFileSystem(outputFs);
   const registryPath = resolveIdentityRegistryPath({ outputRoot });
   const registry = await loadRegistryInternal(registryPath);
   const identityId = normalizeString(response.id);
@@ -190,7 +193,7 @@ export async function recordProvisionedIdentity({
 }
 
 export async function updateIdentityStatus({
-  outputFs = fsp,
+  outputFs,
   outputRoot,
   identityId,
   status,
@@ -198,6 +201,7 @@ export async function updateIdentityStatus({
   squashedAt = "",
   metadataPatch = {},
 } = {}) {
+  requireOutputFileSystem(outputFs);
   const normalizedIdentityId = normalizeString(identityId);
   if (!normalizedIdentityId) {
     throw new Error("identityId is required.");

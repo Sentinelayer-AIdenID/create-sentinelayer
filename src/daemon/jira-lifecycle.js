@@ -1,7 +1,7 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
 
-import { bindOutputFileSystem } from "../config/output-filesystem.js";
+import { bindOutputFileSystem, requireOutputFileSystem } from "../config/output-filesystem.js";
 import { createAgentEvent } from "../events/schema.js";
 import { appendToStream } from "../session/stream.js";
 import { resolveAssignmentLedgerStorage } from "./assignment-ledger.js";
@@ -166,12 +166,14 @@ async function loadJsonFile(filePath, defaultFactory) {
   }
 }
 
-async function writeJsonFile(filePath, payload = {}, outputFs = fsp) {
+async function writeJsonFile(filePath, payload = {}, outputFs) {
+  requireOutputFileSystem(outputFs);
   await outputFs.mkdir(path.dirname(filePath), { recursive: true });
   await outputFs.writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
 }
 
-async function appendEvent(filePath, payload = {}, outputFs = fsp) {
+async function appendEvent(filePath, payload = {}, outputFs) {
+  requireOutputFileSystem(outputFs);
   await outputFs.mkdir(path.dirname(filePath), { recursive: true });
   await outputFs.appendFile(filePath, `${JSON.stringify(payload)}\n`, "utf-8");
 }
@@ -201,7 +203,8 @@ async function loadLifecycle(lifecyclePath, nowIso = new Date().toISOString()) {
   };
 }
 
-async function writeLifecycle(lifecyclePath, lifecycle = {}, nowIso = new Date().toISOString(), outputFs = fsp) {
+async function writeLifecycle(lifecyclePath, lifecycle = {}, nowIso = new Date().toISOString(), outputFs) {
+  requireOutputFileSystem(outputFs);
   const normalized = {
     schemaVersion: LIFECYCLE_SCHEMA_VERSION,
     generatedAt: normalizeIsoTimestamp(nowIso, nowIso),

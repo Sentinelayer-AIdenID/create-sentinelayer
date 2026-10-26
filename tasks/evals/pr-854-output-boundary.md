@@ -3,7 +3,9 @@
 ## Contract and scope
 
 AI change class D: local artifact filesystem security boundary. Workspace YAML
-`outputDir` values remain relative and confined to the workspace. A valid root
+`outputDir` values remain relative and confined to the workspace. Default roots
+and every CLI/global root lexically inside the workspace are confined as well;
+relative escapes are refused regardless of source. A valid root
 does not authorize an existing descendant link to an external directory or file.
 Each actual mutation now validates its complete destination using a per-operation
 filesystem capability returned by `resolveOutputContext`. Paths passed to IO are
@@ -11,14 +13,17 @@ the same normalized paths that were validated. No process-global policy registry
 is used.
 
 Constrained file writes, appends, and writable opens refuse final-component
-symlinks, including links to another file inside the workspace. They add native
+symlinks, including links to another file inside the workspace, and pre-existing
+regular files with more than one hard link. They add native
 `O_NOFOLLOW` when the platform provides it. Safe parent directory links inside the
 real workspace remain supported. The boundary does not promise protection from
-concurrent replacement of a parent directory between validation and IO.
+concurrent replacement of a parent directory or creation of a new hard link
+between validation and IO.
 
-Explicit CLI output directories/files and global output configuration retain
-their existing trusted behavior. Default output when no project output setting
-exists retains its existing behavior. Read-only operations remain read-only and
+Only explicit absolute CLI/global output paths outside the workspace retain
+unrestricted behavior. An absolute workspace-local override does not disable
+containment. The current environment mapping has no outputDir variable; no new
+environment option is introduced. Read-only operations remain read-only and
 unrestricted; copying an external input into an allowed destination remains valid.
 
 ## Writer inventory
@@ -29,22 +34,29 @@ unrestricted; copying an external input into an allowed destination remains vali
 | Ingest and command reports | `ingest/engine.js`, `legacy-cli.js`, `commands/chat.js`, `commands/scan.js`, `commands/watch.js` | Ingest JSON, report Markdown, transcript append, watch events and summaries |
 | Review | `review/local-review.js`, `ai-review.js`, `report.js`, `replay.js`, `omargate-cache.js`, `commands/review.js` | Deterministic checks/logs, AI artifacts, unified reports, decisions/exports, replay/context and cache files |
 | Audit and memory | `audit/orchestrator.js`, `package.js`, `replay.js`, `persona-loop.js`, `commands/audit.js`, `memory/blackboard.js`, `agents/shared-tools/dispatch-core.js` | Agent reports, shared-memory reports, package/comparison files, tool-result persistence and derived telemetry |
-| Swarm and browser | `swarm/factory.js`, `runtime.js`, `report.js`, `pentest.js`, `agents/devtestbot/tool.js`, `runner.js` | Plans, runtime logs/reports, screenshot buffers, pentest files, browser JSON/MP4 files; destination validation before delegated video/Lighthouse writes |
+| Swarm and browser | `swarm/factory.js`, `runtime.js`, `report.js`, `pentest.js`, `scenario-dsl.js`, `agents/devtestbot/tool.js`, `runner.js` | Plans, scenario templates, runtime logs/reports, screenshot buffers, pentest files, browser JSON/MP4 files; destination validation before delegated video/Lighthouse writes |
 | Identity and domain artifacts | `commands/ai/shared.js`, `identity-lifecycle.js`, `provision-governance.js`, `commands/session.js`, `ai/identity-store.js`, `domain-target-store.js`, `site-store.js` | Identity/site/target registry rewrites and related JSON artifacts, including session email provisioning |
-| Daemon | `daemon/error-worker.js`, `scope-engine.js`, `assignment-ledger.js`, `budget-governor.js`, `jira-lifecycle.js`, `operator-control.js`, `hybrid-mapper.js`, `reliability-lane.js`, `watchdog.js`, `artifact-lineage.js` | Intake/queue/state JSON, event appends, derived run records and closeout/lineage artifacts |
+| Daemon | `daemon/error-worker.js`, `scope-engine.js`, `assignment-ledger.js`, `budget-governor.js`, `jira-lifecycle.js`, `operator-control.js`, `hybrid-mapper.js`, `reliability-lane.js`, `watchdog.js`, `artifact-lineage.js`, `ast-drift.js`, `fix-cycle.js` | Intake/queue/state JSON, event appends, derived run records, atomic AST snapshot replacement, fix-cycle and closeout/lineage artifacts |
 | MCP and plugins | `mcp/registry.js`, `commands/mcp.js`, `plugin/manifest.js`, `commands/plugin.js` | All eight configured MCP JSON destinations plus plugin initialization |
+| Investor DD | `review/investor-dd-orchestrator.js`, `investor-dd-devtestbot.js` | Stream, metrics, plans, findings, reports, browser-phase output and identity-registry propagation |
 
 Storage objects carry the executable capability as a nonenumerable property;
 serialized JSON shapes remain stable. Derived storage and explicit child paths
 receive the capability explicitly instead of reclassifying an inherited output
 root as a trusted CLI override.
 
-Read-only `resolveOutputRoot` uses remain in report/ingest lookup, watch history,
-swarm dashboard and session analytics. Fixed workspace destinations in
-`daemon/ast-drift.js`, `daemon/fix-cycle.js`, investor-DD and scenario templates do
-not consume workspace-configured output roots and were not moved into this policy.
+Low-level exported artifact writers require an explicit factory capability and
+throw TypeError before effects when it is omitted, null, native fs/promises, or a
+copied/forged interface. A module-private WeakSet checks capability identity;
+it stores no path policy. Root-owning entry points resolve their own scoped
+capability and forward it through all lower-level calls. No native filesystem
+fallback remains for these artifact writes.
 
-## Verification
+Read-only `resolveOutputRoot` uses remain in report lookup, watch history,
+swarm dashboard and session analytics. Generated source documents and unrelated
+auth/session persistence are outside this artifact-root change.
+
+## Initial candidate verification (b85394d, superseded after first review)
 
 - Actual baseline writer controls reproduced external writes or missing rejection
   in daemon, AI, and all nine MCP/plugin command cases before the repair.
@@ -67,6 +79,28 @@ not consume workspace-configured output roots and were not moved into this polic
   received proxy 503 denials. Its deterministic scan had zero P0/P1 and 15 P2
   scope/credential-name heuristics. Remote sync and daemon autostart were disabled
   for these local commands. These are not hosted-gate acceptance results.
+
+## First-review follow-up verification
+
+Warden requested default/local trusted-layer containment and removal of native
+writer fallbacks. The revised tests exercise both directly. Loading the actual
+b85394d resolver in the new P1 suite produces 16 expected failures; loading its
+actual writer modules produces failures in all 40 missing/null/native/forged
+capability cases. Source is substituted only by a test loader, without editing
+the candidate. Test payloads use isolated temporary files and no live model calls.
+
+The central Windows regression selection passes 127 tests with five native
+file-symlink privilege skips. The four central native Linux suites pass 115/115,
+without skips, including the final-file link and no-follow witnesses.
+Daemon/persona/watch/AST integration passes 69/69 on native Linux; MCP/plugin
+passes 88/88 on native Linux; the original 11 daemon suites pass 29/29 on Windows.
+Six direct-writer compatibility suites, including browser capture, pass 16/16.
+Investor-DD boundary and existing compatibility suites pass 37/37 on Windows
+and native Linux. Syntax checks pass for 420 files and documentation validation
+passes. The test expectations now require absolute workspace-local overrides
+to stay guarded; only absolute outside paths retain the unrestricted control.
+Full revised-candidate verification and hosted CI are separate gates; these
+focused results do not imply they have passed.
 
 ## Evaluation binding maintenance
 

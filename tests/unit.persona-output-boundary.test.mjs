@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { resolveOutputContext } from "../src/config/service.js";
+import { createOutputFileSystem } from "../src/config/output-filesystem.js";
 import { createAgentContext, createToolDispatcher } from "../src/agents/shared-tools/dispatch-core.js";
 import { createIsolatedPersonaContext, runPersonaAgenticLoop } from "../src/audit/persona-loop.js";
 import { resolveRunEventsPath } from "../src/telemetry/ledger.js";
@@ -82,11 +83,28 @@ test("dispatcher telemetry preserves the inherited boundary even when failures a
 test("dispatcher keeps explicit external output and standalone context behavior", async (t) => {
   const { workspace, outside } = await fixture(t);
   const { outputFs } = await resolveOutputContext({ cwd: workspace, outputDirOverride: outside });
-  for (const [name, capability] of [["explicit", outputFs], ["standalone", undefined]]) {
+  for (const [name, capability] of [["explicit", outputFs], ["standalone", createOutputFileSystem({ workspaceRoot: outside })]]) {
     const artifactDir = path.join(outside, name);
     const dispatcher = createToolDispatcher({ Evidence: () => largeResult });
     const result = await dispatcher.dispatchTool("Evidence", {}, createAgentContext({ artifactDir, outputFs: capability }));
     assert.equal(result._persisted, true);
     assert.deepEqual(JSON.parse(await fsp.readFile(result._refPath, "utf8")), largeResult);
   }
+});
+
+test("artifact-producing persona entries refuse missing, null, raw and forged IO before effects", async (t) => {
+  const { workspace, artifactDir, outputFs } = await fixture(t);
+  let calls = 0;
+  const dispatcher = createToolDispatcher({ Evidence: () => { calls += 1; return largeResult; } });
+  const clientFactory = () => { calls += 1; return { invoke: async () => ({ text: "[]" }) }; };
+  for (const method of ["mkdir", "writeFile", "appendFile", "open"]) {
+    t.mock.method(fsp, method, async () => { calls += 1; throw new Error("Unexpected file mutation"); });
+  }
+  for (const capability of [undefined, null, fsp, Object.freeze({ ...outputFs }), new Proxy(outputFs, {})]) {
+    assert.throws(() => createAgentContext({ artifactDir, outputFs: capability }), TypeError);
+    assert.throws(() => createIsolatedPersonaContext({ agent, rootPath: workspace, artifactDir, outputFs: capability, clientFactory }), TypeError);
+    await assert.rejects(runPersonaAgenticLoop({ agent, rootPath: workspace, artifactDir, outputFs: capability, clientFactory }), TypeError);
+    await assert.rejects(dispatcher.dispatchTool("Evidence", {}, { artifactDir, outputFs: capability }), TypeError);
+  }
+  assert.equal(calls, 0, "invalid capability must not reach the filesystem, tool, or model factory");
 });

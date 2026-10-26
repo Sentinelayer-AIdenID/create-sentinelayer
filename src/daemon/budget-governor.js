@@ -1,7 +1,7 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
 
-import { bindOutputFileSystem } from "../config/output-filesystem.js";
+import { bindOutputFileSystem, requireOutputFileSystem } from "../config/output-filesystem.js";
 import { resolveAssignmentLedgerStorage } from "./assignment-ledger.js";
 import { resolveErrorDaemonStorage } from "./error-worker.js";
 
@@ -180,12 +180,14 @@ async function loadJsonFile(filePath, defaultFactory) {
   }
 }
 
-async function writeJsonFile(filePath, payload = {}, outputFs = fsp) {
+async function writeJsonFile(filePath, payload = {}, outputFs) {
+  requireOutputFileSystem(outputFs);
   await outputFs.mkdir(path.dirname(filePath), { recursive: true });
   await outputFs.writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
 }
 
-async function appendEvent(filePath, payload = {}, outputFs = fsp) {
+async function appendEvent(filePath, payload = {}, outputFs) {
+  requireOutputFileSystem(outputFs);
   await outputFs.mkdir(path.dirname(filePath), { recursive: true });
   await outputFs.appendFile(filePath, `${JSON.stringify(payload)}\n`, "utf-8");
 }
@@ -203,7 +205,8 @@ async function loadQueue(queuePath, nowIso = new Date().toISOString()) {
   };
 }
 
-async function writeQueue(queuePath, queue = {}, nowIso = new Date().toISOString(), outputFs = fsp) {
+async function writeQueue(queuePath, queue = {}, nowIso = new Date().toISOString(), outputFs) {
+  requireOutputFileSystem(outputFs);
   await writeJsonFile(queuePath, {
     schemaVersion: QUEUE_SCHEMA_VERSION,
     generatedAt: normalizeIsoTimestamp(nowIso, nowIso),
@@ -219,7 +222,8 @@ async function loadAssignmentLedger(ledgerPath, nowIso = new Date().toISOString(
   }));
 }
 
-async function writeAssignmentLedger(ledgerPath, ledger = {}, nowIso = new Date().toISOString(), outputFs = fsp) {
+async function writeAssignmentLedger(ledgerPath, ledger = {}, nowIso = new Date().toISOString(), outputFs) {
+  requireOutputFileSystem(outputFs);
   await writeJsonFile(ledgerPath, {
     ...ledger,
     generatedAt: normalizeIsoTimestamp(nowIso, nowIso),
@@ -393,7 +397,8 @@ async function loadBudgetState(filePath, nowIso = new Date().toISOString()) {
   };
 }
 
-async function writeBudgetState(filePath, state = {}, nowIso = new Date().toISOString(), outputFs = fsp) {
+async function writeBudgetState(filePath, state = {}, nowIso = new Date().toISOString(), outputFs) {
+  requireOutputFileSystem(outputFs);
   const normalized = {
     schemaVersion: BUDGET_STATE_SCHEMA_VERSION,
     generatedAt: normalizeIsoTimestamp(nowIso, nowIso),

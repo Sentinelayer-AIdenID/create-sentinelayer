@@ -4,6 +4,7 @@ import path from "node:path";
 import { ZodError, z } from "zod";
 
 import { resolveOutputContext } from "../config/service.js";
+import { requireOutputFileSystem } from "../config/output-filesystem.js";
 
 export const PLUGIN_MANIFEST_SCHEMA_VERSION = "1.0.0";
 export const PLUGIN_MANIFEST_KIND = "sentinelayer.cli.plugin";
@@ -284,9 +285,10 @@ export function stringifyJson(value) {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
 
-export async function writeJsonFile(filePath, value, { force = false, outputFs = fsp } = {}) {
+export async function writeJsonFile(filePath, value, { force = false, outputFs } = {}) {
+  requireOutputFileSystem(outputFs);
   const resolvedPath = path.resolve(filePath);
-  await outputFs.assertPath?.(resolvedPath);
+  await outputFs.assertPath(resolvedPath);
   if (!force) {
     try {
       await outputFs.access(resolvedPath);

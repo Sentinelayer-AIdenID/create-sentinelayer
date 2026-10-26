@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
-import fsp from "node:fs/promises";
-import { bindOutputFileSystem } from "../../config/output-filesystem.js";
+import { bindOutputFileSystem, requireOutputFileSystem } from "../../config/output-filesystem.js";
 import { evaluateBudget } from "../../cost/budget.js";
 import {
   normalizeRunEvent,
@@ -30,6 +29,7 @@ export function createToolDispatcher(toolMap, readOnlyTools) {
   const READ_ONLY_TOOLS = new Set(readOnlyTools || []);
 
   async function dispatchTool(toolName, input, ctx) {
+    if (ctx.artifactDir) requireOutputFileSystem(ctx.outputFs);
     const handler = TOOL_MAP[toolName];
     if (!handler) {
       throw new ToolDispatchError(`Unknown tool: ${toolName}`);
@@ -188,7 +188,7 @@ export function createToolDispatcher(toolMap, readOnlyTools) {
     const serialized = JSON.stringify(result);
     if (serialized.length > RESULT_PERSIST_THRESHOLD && ctx.artifactDir) {
       const refPath = `${ctx.artifactDir}/tool-results/${eventId}.json`;
-      const outputFs = ctx.outputFs || fsp;
+      const outputFs = requireOutputFileSystem(ctx.outputFs);
       await outputFs.mkdir(`${ctx.artifactDir}/tool-results`, { recursive: true });
       await outputFs.writeFile(refPath, serialized, "utf-8");
       return {
@@ -229,7 +229,8 @@ export function createAgentContext({
   outputFs,
   onEvent,
 }) {
-  return bindOutputFileSystem({
+  if (artifactDir || outputFs !== undefined) requireOutputFileSystem(outputFs);
+  const context = {
     agentIdentity,
     budget: {
       maxCostUsd: budget?.maxCostUsd ?? 5.0,
@@ -252,7 +253,8 @@ export function createAgentContext({
     lastToolCallAt: Date.now(),
     lastToolName: null,
     onEvent,
-  }, outputFs);
+  };
+  return outputFs === undefined ? context : bindOutputFileSystem(context, outputFs);
 }
 
 function snapshotUsage(ctx) {

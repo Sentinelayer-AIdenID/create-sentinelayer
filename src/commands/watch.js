@@ -12,7 +12,7 @@ import {
   resolveActiveAuthSession,
 } from "../auth/service.js";
 import { resolveOutputRoot, resolveOutputContext } from "../config/service.js";
-import { bindOutputFileSystem } from "../config/output-filesystem.js";
+import { bindOutputFileSystem, requireOutputFileSystem } from "../config/output-filesystem.js";
 import { authLoginHint } from "../ui/command-hints.js";
 import { isAuthenticated } from "../auth/credential-destinations.js";
 
@@ -260,6 +260,7 @@ async function resolveWatchArtifacts({
     outputDirOverride: outputDir,
     env: process.env,
   });
+  requireOutputFileSystem(outputFs);
   const watchStamp = stableTimestampForFile();
   const watchDir = path.join(
     outputRoot,

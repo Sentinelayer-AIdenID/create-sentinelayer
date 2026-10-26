@@ -5,7 +5,7 @@ import path from "node:path";
 import { resolveAgentIdPath } from "../agents/agent-id-path.js";
 import { userCredential } from "../auth/credential-destinations.js";
 import { resolveOutputContext } from "../config/service.js";
-import { bindOutputFileSystem } from "../config/output-filesystem.js";
+import { bindOutputFileSystem, requireOutputFileSystem } from "../config/output-filesystem.js";
 import { createAgentEvent } from "../events/schema.js";
 import { resolveCodebaseIngest } from "../ingest/engine.js";
 import { runDeterministicReviewPipeline } from "../review/local-review.js";
@@ -272,8 +272,9 @@ async function buildSpecialistSeed({
   deterministicBaseline,
   ingest,
   agentsDirectory,
-  outputFs = fsp,
+  outputFs,
 }) {
+  requireOutputFileSystem(outputFs);
   let findings = [];
   let summary = severitySummary(findings);
   let confidence = computeConfidenceFloor(agent.confidenceFloor, findings.length);

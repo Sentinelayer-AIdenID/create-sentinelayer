@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import fsp from "node:fs/promises";
 import path from "node:path";
 
-import { bindOutputFileSystem } from "../config/output-filesystem.js";
+import { bindOutputFileSystem, requireOutputFileSystem } from "../config/output-filesystem.js";
 import { resolveOutputContext } from "../config/service.js";
 import { createAgentEvent } from "../events/schema.js";
 import { appendToStream } from "../session/stream.js";
@@ -291,7 +291,8 @@ async function loadQueueFile(queuePath, nowIso = new Date().toISOString()) {
   }
 }
 
-async function writeQueueFile(queuePath, queue = {}, nowIso = new Date().toISOString(), outputFs = fsp) {
+async function writeQueueFile(queuePath, queue = {}, nowIso = new Date().toISOString(), outputFs) {
+  requireOutputFileSystem(outputFs);
   const normalized = {
     schemaVersion: QUEUE_SCHEMA_VERSION,
     generatedAt: normalizeIsoTimestamp(nowIso, nowIso),
@@ -328,7 +329,8 @@ async function loadWorkerStateFile(statePath, nowIso = new Date().toISOString())
   }
 }
 
-async function writeWorkerStateFile(statePath, state = {}, nowIso = new Date().toISOString(), outputFs = fsp) {
+async function writeWorkerStateFile(statePath, state = {}, nowIso = new Date().toISOString(), outputFs) {
+  requireOutputFileSystem(outputFs);
   const normalized = {
     schemaVersion: STATE_SCHEMA_VERSION,
     updatedAt: normalizeIsoTimestamp(nowIso, nowIso),
@@ -434,6 +436,7 @@ export async function resolveErrorDaemonStorage({
     env,
     homeDir,
   });
+  requireOutputFileSystem(outputFs);
   const observabilityRoot = path.join(outputRoot, "observability");
   const baseDir = path.join(observabilityRoot, "error-daemon");
   return bindOutputFileSystem({
@@ -507,6 +510,7 @@ async function writeWorkItemIntakeArtifact(
     nowIso = new Date().toISOString(),
   } = {}
 ) {
+  requireOutputFileSystem(storage.outputFs);
   const normalizedNow = normalizeIsoTimestamp(nowIso, new Date().toISOString());
   const intakePath = resolveWorkItemIntakePath(storage, queueItem, normalizedNow);
   await storage.outputFs.mkdir(path.dirname(intakePath), { recursive: true });

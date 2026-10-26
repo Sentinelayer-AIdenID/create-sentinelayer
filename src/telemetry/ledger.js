@@ -1,3 +1,4 @@
+import { requireOutputFileSystem } from "../config/output-filesystem.js";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -263,7 +264,7 @@ async function resolveRunEventsOutput({
   });
   return {
     filePath: path.join(outputRoot, OBSERVABILITY_DIR_NAME, RUN_EVENTS_FILE_NAME),
-    outputFs: inheritedOutputFs || outputFs,
+    outputFs: inheritedOutputFs === undefined ? outputFs : requireOutputFileSystem(inheritedOutputFs),
   };
 }
 
