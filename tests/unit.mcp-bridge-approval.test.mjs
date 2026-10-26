@@ -1,8 +1,9 @@
 import "./setup-env.mjs";
-// The MCP server enforces each tool's approval flag. Every CLI bridge tool requires human
-// approval, and no server-validated, argument-bound approval exists yet, so the dispatcher refuses
-// all of them, before any handler, spawn or file read. These tests drive the real stdio server
-// (`sl mcp server run`) over JSON-RPC, with a preload that records any file opened by the server.
+// The MCP server enforces each tool's approval flag. In a generic host context, without a trusted
+// caller agent id, every generated CLI tool remains refused. The two caller-bound
+// self-provisioning exceptions are exercised in unit.mcp-self-provisioning.test.mjs. These tests
+// drive the real stdio server (`sl mcp server run`) over JSON-RPC, with a preload that records any
+// file opened by the server.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -69,7 +70,7 @@ async function fixture() {
     FS_SPY_MATCH: "canary",
     FS_SPY_LOG: spyLog,
   };
-  for (const name of ["SENTINELAYER_TOKEN", "SENTINELAYER_API_TOKEN", "SENTINELAYER_MCP_BRIDGE"]) delete env[name];
+  for (const name of ["SENTINELAYER_TOKEN", "SENTINELAYER_API_TOKEN", "SENTINELAYER_MCP_BRIDGE", "SENTINELAYER_AGENT_ID"]) delete env[name];
   return {
     root,
     ws,

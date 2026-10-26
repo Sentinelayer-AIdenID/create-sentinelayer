@@ -1886,3 +1886,282 @@ test("Unit session sync: orchestrator role is normalized to 'coder' in grant pay
   assert.equal(grantBody.role, "coder", "orchestrator must fall back to coder pending API enum extension");
   resetSessionSyncStateForTests();
 });
+
+test("Unit session sync: noAutoGrant=true skips grant+retry on 403 IDENTITY_FORGERY", async () => {
+  resetSessionSyncStateForTests();
+  __resetAutoGrantCacheForTests();
+  const calls = [];
+  const result = await syncSessionEventToApi(
+    "sess-grant-7",
+    buildIdentityForgeryEventEnvelope({ agentId: "codex", role: "coder" }),
+    {
+      noAutoGrant: true,
+      resolveAuthSession: async () => ({
+        token: "tok_test_grant",
+        apiUrl: "https://api.sentinelayer.com",
+      }),
+      fetchImpl: async (url, options) => {
+        calls.push({ url, method: options.method });
+        return makeJsonResponse({
+          ok: false,
+          status: 403,
+          body: { error: { code: "IDENTITY_FORGERY", message: "agent identity 'codex' is not granted" } },
+        });
+      },
+      nowMs: () => 1_700_000_700_700,
+    }
+  );
+
+  assert.equal(result.synced, false, "noAutoGrant must suppress grant and return failure");
+  assert.equal(result.reason, "api_403");
+  assert.equal(result.autoGranted, undefined);
+  assert.equal(calls.length, 1, "only one /events POST, no grant call");
+  assert.equal(calls[0].url, "https://api.sentinelayer.com/api/v1/sessions/sess-grant-7/events");
+  resetSessionSyncStateForTests();
+});
+
+test("Unit session sync: stored credential noAutoGrant skips grant+retry on 403 IDENTITY_FORGERY", async () => {
+  resetSessionSyncStateForTests();
+  __resetAutoGrantCacheForTests();
+  const calls = [];
+  const result = await syncSessionEventToApi(
+    "sess-grant-8",
+    buildIdentityForgeryEventEnvelope({ agentId: "keeper-bot", role: "coder" }),
+    {
+      noAutoGrant: false,
+      resolveAuthSession: async () => ({
+        token: "tok_test_grant",
+        apiUrl: "https://api.sentinelayer.com",
+      }),
+      readCredential: async () => ({
+        state: "live",
+        credential: { noAutoGrant: true },
+      }),
+      fetchImpl: async (url, options) => {
+        calls.push({ url, method: options.method });
+        return makeJsonResponse({
+          ok: false,
+          status: 403,
+          body: { error: { code: "IDENTITY_FORGERY", message: "agent identity 'keeper-bot' is not granted" } },
+        });
+      },
+      nowMs: () => 1_700_000_800_800,
+    }
+  );
+
+  assert.equal(result.synced, false, "stored noAutoGrant must suppress grant and return failure");
+  assert.equal(result.reason, "api_403");
+  assert.equal(result.autoGranted, undefined);
+  assert.equal(calls.length, 1, "only one /events POST, no grant call");
+  assert.equal(calls[0].url, "https://api.sentinelayer.com/api/v1/sessions/sess-grant-8/events");
+  resetSessionSyncStateForTests();
+});
+
+test("Unit session sync: stored credential without noAutoGrant proceeds to grant", async () => {
+  resetSessionSyncStateForTests();
+  __resetAutoGrantCacheForTests();
+  const calls = [];
+  const result = await syncSessionEventToApi(
+    "sess-grant-9",
+    buildIdentityForgeryEventEnvelope({ agentId: "keeper-bot", role: "coder" }),
+    {
+      noAutoGrant: false,
+      resolveAuthSession: async () => ({
+        token: "tok_test_grant",
+        apiUrl: "https://api.sentinelayer.com",
+      }),
+      readCredential: async () => ({
+        state: "live",
+        credential: { noAutoGrant: false },
+      }),
+      fetchImpl: async (url, options) => {
+        calls.push({ url, method: options.method });
+        if (calls.length === 1) {
+          return makeJsonResponse({
+            ok: false,
+            status: 403,
+            body: { error: { code: "IDENTITY_FORGERY", message: "agent identity 'keeper-bot' is not granted" } },
+          });
+        }
+        if (calls.length === 2) {
+          return makeJsonResponse({
+            ok: true,
+            status: 201,
+            body: { grantId: "grant-test", agentId: "keeper-bot" },
+          });
+        }
+        return makeJsonResponse({ ok: true, status: 200, body: { synced: true } });
+      },
+      nowMs: () => 1_700_000_900_900,
+    }
+  );
+
+  assert.equal(result.synced, true, "grant proceeds when stored noAutoGrant is false");
+  assert.equal(result.autoGranted, true);
+  assert.ok(calls.length >= 2, "grant call was made");
+  resetSessionSyncStateForTests();
+});
+
+test("Unit session sync: corrupt credential file fails closed on 403 IDENTITY_FORGERY", async () => {
+  resetSessionSyncStateForTests();
+  __resetAutoGrantCacheForTests();
+  const calls = [];
+  const result = await syncSessionEventToApi(
+    "sess-grant-10",
+    buildIdentityForgeryEventEnvelope({ agentId: "keeper-bot", role: "coder" }),
+    {
+      noAutoGrant: false,
+      resolveAuthSession: async () => ({
+        token: "tok_test_grant",
+        apiUrl: "https://api.sentinelayer.com",
+      }),
+      readCredential: async () => {
+        throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+      },
+      fetchImpl: async (url, options) => {
+        calls.push({ url, method: options.method });
+        return makeJsonResponse({
+          ok: false,
+          status: 403,
+          body: { error: { code: "IDENTITY_FORGERY", message: "agent identity 'keeper-bot' is not granted" } },
+        });
+      },
+      nowMs: () => 1_700_001_000_000,
+    }
+  );
+  // The outer try/catch in syncSessionEventToApi catches the thrown error and
+  // returns { synced: false }. The key assertion: the function did NOT proceed
+  // to auto-grant (calls should only have the original /events POST, no grant call).
+  assert.equal(result.synced, false, "non-ENOENT credential read error must fail closed");
+  assert.equal(calls.length, 1, "only the initial /events POST, no grant+retry loop");
+  resetSessionSyncStateForTests();
+});
+
+test("Unit session sync: refused credential state fails closed on 403 IDENTITY_FORGERY", async () => {
+  resetSessionSyncStateForTests();
+  __resetAutoGrantCacheForTests();
+  const calls = [];
+  const result = await syncSessionEventToApi(
+    "sess-grant-11",
+    buildIdentityForgeryEventEnvelope({ agentId: "keeper-bot", role: "coder" }),
+    {
+      noAutoGrant: false,
+      resolveAuthSession: async () => ({
+        token: "tok_test_grant",
+        apiUrl: "https://api.sentinelayer.com",
+      }),
+      readCredential: async () => ({
+        state: "refused",
+        reason: "malformed",
+        credential: null,
+      }),
+      fetchImpl: async (url, options) => {
+        calls.push({ url, method: options.method });
+        return makeJsonResponse({
+          ok: false,
+          status: 403,
+          body: { error: { code: "IDENTITY_FORGERY", message: "agent identity 'keeper-bot' is not granted" } },
+        });
+      },
+      nowMs: () => 1_700_001_100_000,
+    }
+  );
+  // A present-but-corrupt credential file must fail closed: no grant attempt.
+  assert.equal(result.synced, false, "refused credential state must fail closed");
+  assert.equal(result.reason, "api_403");
+  assert.equal(calls.length, 1, "only the initial /events POST, no grant+retry loop");
+  resetSessionSyncStateForTests();
+});
+
+// --- CLI parsing: --no-auto-grant on the real session join command ---
+// These tests register the application's actual session join command (via
+// registerSessionCommand) and verify that the Commander-negated option
+// --no-auto-grant sets autoGrant=false and is derivable as noAutoGrant=true.
+// The action handler is replaced with a no-op to avoid network I/O.
+
+import { Command } from "commander";
+import { buildAdmissionJoinOptions, registerSessionCommand } from "../src/commands/session.js";
+
+function buildJoinProgram() {
+  const program = new Command();
+  program.name("sl").exitOverride();
+  registerSessionCommand(program);
+  // Replace the join action with a no-op so parse() does not invoke network I/O.
+  const joinCmd = program.commands.find(c => c.name() === "session")?.commands?.find(c => c.name() === "join");
+  if (joinCmd) joinCmd.action(() => {});
+  return program;
+}
+
+test("Unit session sync: --no-auto-grant on registered session join sets autoGrant=false", () => {
+  const program = buildJoinProgram();
+  program.parse(["session", "join", "sess-test1", "--no-auto-grant"], { from: "user" });
+  const joinCmd = program.commands.find(c => c.name() === "session")?.commands?.find(c => c.name() === "join");
+  assert.ok(joinCmd, "session join command must be registered");
+  const opts = joinCmd.opts();
+  assert.equal(opts.autoGrant, false, "Commander sets autoGrant=false for --no-auto-grant on real join command");
+  assert.equal(opts.noAutoGrant, undefined, "Commander does NOT set noAutoGrant directly");
+  const noAutoGrant = opts.autoGrant === false;
+  assert.equal(noAutoGrant, true, "derived noAutoGrant must be true when --no-auto-grant is given on join");
+});
+
+test("Unit session sync: without --no-auto-grant on registered session join, autoGrant defaults to true", () => {
+  const program = buildJoinProgram();
+  program.parse(["session", "join", "sess-test2"], { from: "user" });
+  const joinCmd = program.commands.find(c => c.name() === "session")?.commands?.find(c => c.name() === "join");
+  assert.ok(joinCmd, "session join command must be registered");
+  const opts = joinCmd.opts();
+  assert.equal(opts.autoGrant, true, "Commander defaults autoGrant to true when --no-auto-grant omitted on join");
+  assert.equal(opts.noAutoGrant, undefined, "Commander does NOT set noAutoGrant");
+  const noAutoGrant = opts.autoGrant === false;
+  assert.equal(noAutoGrant, false, "derived noAutoGrant must be false when --no-auto-grant is omitted on join");
+});
+
+test("Unit session sync: --no-auto-grant is defined on the session join command", () => {
+  const program = buildJoinProgram();
+  const joinCmd = program.commands.find(c => c.name() === "session")?.commands?.find(c => c.name() === "join");
+  assert.ok(joinCmd, "session join command must be registered");
+  const noAutoGrantOpt = joinCmd.options.find(o => o.long === "--no-auto-grant");
+  assert.ok(noAutoGrantOpt, "--no-auto-grant option must be defined on session join");
+  assert.equal(noAutoGrantOpt.long, "--no-auto-grant");
+});
+
+test("Unit session sync: --no-auto-grant forwards through buildAdmissionJoinOptions to runAdmissionJoin", () => {
+  // Verify that the production join handler derives noAutoGrant from the
+  // Commander-negated option and includes it in the options object that it
+  // passes to runAdmissionJoin.  Calling buildAdmissionJoinOptions directly
+  // exercises the exact same derivation that the real action handler uses
+  // (src/commands/session.js line 3558).
+  const opts = buildAdmissionJoinOptions({ autoGrant: false, goal: "test goal" }, {
+    agentId: "test-agent",
+    targetPath: "/tmp",
+  });
+  assert.equal(opts.noAutoGrant, true,
+    "buildAdmissionJoinOptions must set noAutoGrant=true when autoGrant=false");
+});
+
+test("Unit session sync: without --no-auto-grant, buildAdmissionJoinOptions sets noAutoGrant=false", () => {
+  const opts = buildAdmissionJoinOptions({ autoGrant: true, goal: "test goal" }, {
+    agentId: "test-agent",
+    targetPath: "/tmp",
+  });
+  assert.equal(opts.noAutoGrant, false,
+    "buildAdmissionJoinOptions must set noAutoGrant=false when autoGrant=true (default)");
+});
+test("Unit session sync: without --no-auto-grant, handler receives autoGrant=true (noAutoGrant=false)", () => {
+  const program = buildJoinProgram();
+  const joinCmd = program.commands.find(c => c.name() === "session")?.commands?.find(c => c.name() === "join");
+  assert.ok(joinCmd, "session join command must be registered");
+
+  let capturedOpts = null;
+  joinCmd.action((sessionId, options) => {
+    capturedOpts = { sessionId, options };
+  });
+
+  program.parse(["session", "join", "sess-noflag"], { from: "user" });
+  assert.ok(capturedOpts, "action handler must be called");
+  assert.equal(capturedOpts.options.autoGrant, true,
+    "Commander defaults autoGrant to true when --no-auto-grant is omitted");
+  const noAutoGrant = capturedOpts.options.autoGrant === false;
+  assert.equal(noAutoGrant, false,
+    "derived noAutoGrant must be false when --no-auto-grant is omitted");
+});

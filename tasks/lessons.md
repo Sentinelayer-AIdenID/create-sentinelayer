@@ -1,5 +1,9 @@
 # Lessons
 
+## 2026-10-24
+
+- A route allow-list proves only that a command name is admitted. For self-provisioning commands that accept an agent target, bind the parsed target to a trusted bridge caller before dispatch, and test the real action with different caller and target identities. A label-only test cannot prove a leave is self-only or a pending cancellation cannot cross agents.
+
 ## 2026-09-28
 
 - A broad-suite failure after a patch is not a baseline issue without a same-environment A/B proof. Faster optional work can expose concurrency bugs: creation must share the stream writer's lock, re-read under that lock, and preserve an already-created room rather than resetting metadata.
@@ -373,3 +377,44 @@
 - Token-bearing output proves a call occurred, not that a review completed.
   Preserve permissive diagnostic parsing separately from strict structured-review
   validity; error envelopes and fabricated field defaults cannot prove coverage.
+
+# 2026-10-24 - Field names do not determine whether typed metadata is money
+
+- Pattern: treating every typed quantity under a monetary prefix as an amount
+  rejected valid `refundWindow` days, `paymentTerms` days, and `costCenter`
+  counts. String metadata tests alone did not expose the rule.
+- Rule: test each semantic metadata exception with strings, supported typed
+  units, and bare numbers on both assertion and entity paths. Reserve monetary
+  enforcement for amount-bearing names such as `priceNumber` and explicit
+  compact aliases; keep nested facts and untyped numbers under validation.
+
+# 2026-10-24 - CLI route permission is not MCP tool availability
+
+- Pattern: classifying join/leave as self-provisioning at the CLI guard did not make
+  the generated MCP tools usable; the stock dispatcher hid every approval-gated
+  CLI tool and its handler independently refused calls.
+- Rule: when promising a bridged capability, test `tools/list` and `tools/call`
+  through the stock runtime. A narrow exception must validate the trusted caller
+  and each call's exact arguments at both gates, while leaving the generic CLI
+  human-approval policy fail-closed.
+
+# 2026-10-24 - Caller binding includes identity-bearing metadata
+
+- Pattern: checking `agent` against the trusted caller still allowed `name` to
+  become an unrelated display identity, and an unvalidated `role` could exceed
+  the documented agent roles.
+- Rule: for privileged bridge exceptions, trace every accepted argument to its
+  downstream meaning. Reject a second identity-bearing label and restrict role
+  metadata before either the dispatcher or handler can launch the CLI.
+
+# 2026-10-21 - Serialize complete credential-store operations
+
+- Atomic file replacement alone does not serialize a transaction that also
+  reads metadata, changes a shared keyring, migrates plaintext and syncs files.
+  Queue the complete operation, including reads that can migrate; otherwise an
+  older migration can recreate credentials after logout or expose a temporary
+  signed-out state during backup replacement.
+- Preserve natural contention evidence, then use explicit operation barriers
+  for regression tests. Increasing retry counts or inserting arbitrary sleeps
+  does not prove ordering. Keep cross-process guarantees separate from a
+  module-local queue, and ensure a rejected operation cannot poison that queue.

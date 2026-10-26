@@ -603,7 +603,7 @@ async function issueBootstrapToken({ apiUrl, credential }) {
 }
 
 // The init flow's credential steps, for tests.
-export const __legacyCredentialFlowForTests = Object.freeze({ pollCliSession, generateArtifacts, issueBootstrapToken, requestJson });
+export const __initCallsForTests = Object.freeze({ pollCliSession, generateArtifacts, issueBootstrapToken, requestJson });
 
 function detectRepoSlug(cwd) {
   const gitRemote = spawnSync("git", ["config", "--get", "remote.origin.url"], {

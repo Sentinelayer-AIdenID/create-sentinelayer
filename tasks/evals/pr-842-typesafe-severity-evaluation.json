@@ -13,7 +13,7 @@
       "src/review/omargate-orchestrator.js": "80bb2c8e57f8784cd0ccb52191be548df269c030a8eb854b5f8958dd7c3152e0",
       "src/commands/omargate.js": "5ccbf2f1bb3f2f1e9ed5e35a8a8197bfc2b1cb699365987a2a979caf834c3567",
       "src/commands/legacy-args.js": "83772b6ccd5765d1a0bd1f3ee3eefcf5c1fdaf4e9fb1a301c0312b286dbc0d29",
-      "src/legacy-cli.js": "bba2ea2547e1862b17811596af44dc17c2d08164bd23083ba458d6d235b8f350",
+      "src/legacy-cli.js": "38441388708e72f5e0e08261af273e65ed8b18bce53e4174ea8adc207d440c05",
       "src/session/redact.js": "a92cd2e70b165e4e015edcbeff1d3119c3b1f091ef72654e776c0139ace663a2"
     },
     "testPath": "tests/unit.typesafe-severity.test.mjs",
@@ -60,6 +60,20 @@
       "scope": "Primary structured-response validity, complete requested-roster/partition aggregation, CLI incomplete-result reporting and cost-threshold help changed. Legacy finding normalization and the TypeSafe transport/classifier, all seven synthetic scenarios, input, responses, expectations, invariants and test bytes remain unchanged. The full TypeSafe contract suite is rerun against these current bindings.",
       "evaluation": "tests/evals/omargate-coverage-cases.json",
       "limitation": "Synthetic contract evidence only; no model accuracy, live provider, hard dollar ceiling or completed release-gate claim."
+    },
+    "credentialHelperMaintenance": {
+      "kind": "test_export_rename_source_binding_refresh",
+      "revision": "fcb0912835a3c81d9e346f5c175ac73be87cfe60",
+      "priorLegacySha256": "2068189e38e67d71b195b2716ae873aa303b296b76cf4f046b99169a4f0b6490",
+      "currentLegacySha256": "284fb9798504f3b3bd13d12208e805b3d091f50456d8918ec92eaf25d57d1601",
+      "scope": "Only the test-only credential helper export name changed in src/legacy-cli.js, with its two credential test imports updated. The seven synthetic cases, shared input, mock responses, expected outcomes, TypeSafe implementation files and unchanged evaluation test hash are retained.",
+      "provenance": "Earlier source bindings and mock observations remain historical anchors. This refresh binds the current CLI source after CRLF-to-LF normalization only; it is not a new model-accuracy, live-provider, billing, or security-acceptance result."
+    },
+    "currentMainIntegration": {
+      "kind": "coverage_gate_and_credential_helper_integration",
+      "prHead": "0c42c4c590f63608afe248124b8bc743bfa37138",
+      "mainRevision": "c45ab6615cfbfc45b001108297e5cd81f7d78700",
+      "scope": "Preserve both historical maintenance records and every synthetic case/expectation/test byte. Refresh current canonical source bindings after clean product-source merge. Verification results are separately recorded; no live model or hard-dollar claim."
     }
   },
   "baselineMeaning": "Published base generation-only contract, with candidate off mode exercised on identical synthetic inputs; no independent baseline model/provider run.",

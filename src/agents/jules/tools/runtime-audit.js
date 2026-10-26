@@ -3,6 +3,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import { randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { credentialedRequest, isAuthenticated } from "../../../auth/credential-destinations.js";
 import { urlPathSegment } from "../../../net/url-path.js";
 import { assertPermittedAuditTarget } from "./url-policy.js";
@@ -52,16 +53,24 @@ const RUNTIME_DISPATCH = {
 /**
  * How Lighthouse runs. No shell: the target URL can come from the repository (package.json,
  * vercel.json, .env files), and a shell would expand variables and operators inside it. Credentials
- * are removed from npx's environment, so a repository .npmrc cannot place them in a request.
- * On Windows, where npx is a .cmd file, npm's npx script runs under this Node.js instead.
+ * are removed from the child environment. Resolve the installed Lighthouse dependency and run
+ * its CLI with Node directly, so this fallback cannot download another Lighthouse version.
  */
 function lighthouseInvocation(
   targetUrl,
   outputPath,
-  { platform = process.platform, execPath = process.execPath, exists = fs.existsSync, env = process.env } = {},
+  { execPath = process.execPath, exists = fs.existsSync, resolve = import.meta.resolve, env = process.env } = {},
 ) {
+  let lighthouseCli;
+  try {
+    lighthouseCli = fileURLToPath(resolve("lighthouse/cli/index.js"));
+  } catch {
+    return null;
+  }
+  if (!exists(lighthouseCli)) return null;
+
   const args = [
-    "--yes", "lighthouse@12", targetUrl,
+    lighthouseCli, targetUrl,
     "--output", "json", "--output-path", outputPath,
     "--chrome-flags=--headless --no-sandbox --disable-gpu", "--quiet",
   ];
@@ -71,17 +80,13 @@ function lighthouseInvocation(
     stdio: ["pipe", "pipe", "pipe"],
     env: buildScrubbedEnv(env),
   };
-  if (platform !== "win32") {
-    return { file: "npx", args, options };
-  }
-  const npxCli = path.join(path.dirname(execPath), "node_modules", "npm", "bin", "npx-cli.js");
-  return exists(npxCli) ? { file: execPath, args: [npxCli, ...args], options } : null;
+  return { file: execPath, args, options };
 }
 
 export const __runtimeAuditForTests = Object.freeze({ lighthouseInvocation, detectDeployedUrl });
 
 /**
- * Run Lighthouse via npx (no install required).
+ * Run the installed Lighthouse CLI.
  * Returns performance, accessibility, best-practices, SEO scores + key metrics.
  */
 async function lighthouseScan(input) {
@@ -92,7 +97,7 @@ async function lighthouseScan(input) {
   const targetUrl = resolveRuntimeTargetUrl(url, input, "lighthouse_scan");
 
   // Prefer SentinelLayer API scanner (authenticated, server-side Lighthouse).
-  // Falls back to local npx lighthouse if API unavailable.
+  // Falls back to the local Lighthouse dependency if API unavailable.
   try {
     const apiResult = await callScannerApi(targetUrl);
     if (apiResult.available) return apiResult;
@@ -110,7 +115,7 @@ async function lighthouseScan(input) {
 
     const invocation = lighthouseInvocation(targetUrl, outputPath);
     if (!invocation) {
-      return { available: false, reason: "npx is not available next to this Node.js" };
+      return { available: false, reason: "Lighthouse is not installed locally" };
     }
     execFileSync(invocation.file, invocation.args, invocation.options);
 

@@ -4167,3 +4167,118 @@ Scope: result/coverage gating only. No token/price guarantee, model routing, pro
 
 - Independent review corrections: invalid/empty requested rosters refuse before dispatch; primary structured-review validity prevents token-bearing error/malformed output from proving coverage.
 - Eighteen new controls fail against held81784e5 and pass on the successor; valid empty findings/legacy arrays/fenced JSON and explicit no-ai remain compatible.
+
+# 2026-10-24 - EW02 PR862 round-two review corrections
+
+## Plan
+- [x] Reproduce Sol and Luna's exact-head counterexamples as fail-first contract tests (0/5 passed before repair).
+- [x] Restrict compound money-name enforcement to number-carrying values, normalize plural words, and preserve exact money-name strictness.
+- [x] Require provenance on factual entity labels/attributes; verify authoritative entity claims with the same trusted callback as assertions and links.
+- [x] Require a freshness basis for graph/assertion isStale and use one unpadded nonblank identity validator for source and capability scopes.
+- [x] Run focused and full contract/unit/static gates, review the bounded diff, commit a direct child of 0b41c210, and report SHA without pushing.
+
+## Review
+- Fail-first at 0b41c210: all five review classes failed. Final focused ENGRAM contract matrix: 213/213 passed.
+- Sequential full unit suite: 2,720 passed, three skipped, zero failed. Final static check: 417 source files passed; docs validation passed; package dry-run succeeded. Git diff check is clean.
+- `npm run verify` reached E2E: 134/136 passed. The two unrelated, unchanged tests fail on an old hardcoded help URL and a legacy session-join request returning `LEGACY_AGENT_ACCESS_UNAVAILABLE` 503. The first concurrent unit attempt also saw Windows EPERM in an untouched auth-store file-rename test; the sequential full rerun passed.
+- Fact-bearing entity label/attributes now share one explicit provenance class. Mixed-provenance fields belong in separate assertions; source-only entities retain their existing shape. An observed or unknown wrong price remains structurally valid but does not become authoritative; only a trusted verifier checking the exact entity payload can accept an authoritative claim.
+
+## Exact-faa7 review follow-up
+- [x] Reproduce string-encoded price bypass and structured merchant metadata false positives in both assertion and entity paths.
+- [x] Exempt semantic metadata terminal words while still validating nested facts; require canonical money under other monetary names regardless of payload type.
+- [x] Run focused/static/full unit gates on the direct child, inspect diff, commit locally, and report SHA without pushing.
+
+Review: The added fail-first tests both failed at faa7; no-digit monetary strings and refundWindow also failed under the intermediate matcher. After the bounded repair, all 215 ENGRAM contract tests pass, static check passes on 417 files, and package dry-run succeeds. The final full unit run had 2,721 passed, three skipped, and one Windows EPERM temporary-file rename in the untouched session-agent-registry test; that file passed 4/4 when rerun alone. The known two unrelated E2E failures from the preceding verify attempt remain outside this three-file correction.
+
+## Exact-971 release review follow-up
+- [x] Reproduce invalid minor-unit formatting, future entity evidence, and untyped MSRP facts with fail-first tests (36/39 passed before repair).
+- [x] Reject invalid formatter arguments, bound entity evidence time to graph generation, and recognize MSRP as a money alias.
+- [x] Run focused, static, and full unit checks; inspect the direct-child diff and commit locally without pushing.
+
+Scope note: No `priceRange` representation or consumer exists in the current contract. A range needs an explicit typed schema and ordering rule before it can be accepted; this narrow review repair does not add one.
+
+Review: All three new tests failed against 971459b (36/39 targeted passed) and now pass (39/39). The complete ENGRAM contract suite passes 218/218, static check passes 417 files, package dry-run succeeds, and the final full unit run passes 2,725 tests with three skipped and no failures. The former Windows EPERM did not recur in this run. The direct-child diff check is clean.
+
+## 2026-10-24 EnGram canonical Omar gpt-6.1-sol restore (isolated, unpublished)
+
+- [x] Keep the existing Omar Gate job/check names, trusted OIDC boundary, fork static scan, artifacts, and merge enforcer.
+- [x] Route the primary deep Action to direct OpenAI gpt-6.1-sol with legacy review and fail-closed policy; pin reviewed PR135 release 2d5a8edd.
+- [x] Make the workflow contract and focused tests reject old Codex/Gemini/managed/Jev paths and state bounded legacy deep evidence honestly.
+- [x] Run YAML, contract self-test, forbidden-surface, focused unit and diff checks; commit exact local patch for warden review only.
+
+### Review
+
+Local proof: PyYAML parsed all three jobs; contract and forbidden-surface self-tests passed; 14 focused tests passed; `npm run check` passed 405 files. The default workflow is currently disabled on GitHub, so this worktree did not trigger an Omar run. Independent warden review and hosted exact-head gate remain before merge.
+
+# 2026-10-24 - PR866 local Lighthouse fallback
+
+## Plan
+
+- [x] Replace the `npx lighthouse@12` fallback with the installed, pinned Lighthouse 13 CLI via the current Node executable.
+- [x] Update the invocation test to prove literal URL and credential handling, offline local execution, and graceful absence of the package.
+- [x] Run focused tests, repository checks, and review the diff before a local commit.
+
+## Review
+
+- Clean `npm ci`: 213 packages, zero vulnerabilities. The installed CLI reports 13.5.0.
+- Focused runtime-audit tests: 15/15 pass. `npm run check`: 405 files pass. Docs validation passes; `git diff --check` is clean.
+- Full `npm run verify` reaches an inherited E2E assertion at `tests/e2e.test.mjs:1379`: help text now names `Sentinelayer-AIdenID`, while the test expects `mrrCarter`. The same focused assertion fails on untouched PR866 head `48604c4`.
+- No paid model call or hosted gate run; branch awaits independent review.
+## EW02 exact-764 final contract repair (local review successor)
+
+- [x] Reproduce compact monetary aliases, incompatible tenant scope schemas, and incomplete media SHA-256 digest on PR862 head `76490b9`.
+- [x] Make the capability tenant key one string contract, distinguish the optional descriptor, and share the receipt/media digest validator.
+- [x] Confirm an unknown graph link can be served without source, version, or time; require all three for every link.
+- [x] Keep the work on an isolated direct-child branch; run contract, full unit, static, docs, package, and diff checks.
+- [ ] Root review, publication to PR862, fresh permitted Omar Gate and attestation, and original board acceptance.
+
+Review: Four fail-first contract gaps reproduced on the untouched head. The repaired tree passes 222/222 focused ENGRAM contracts and 2,729/2,732 full unit tests (three skips, no failures); static check passes 418 files, docs validation and package dry-run pass, and the diff check is clean. The separate ENGRAM 21.3 conformance suite remains 2/4 on both this tree and untouched `76490b9` because of pre-existing observation-ID and recall-watermark behavior outside this contract patch. No hosted gate or merge is claimed by this local successor.
+
+Review correction: An independent review caught broad compact suffix matching misclassifying `percent`, `recent`, `scent`, `coffee`, `syntax`, and `nonprofit` as monetary. A new fail-first test reproduced the false positive; the matcher now recognizes only curated modifier + whole monetary-terminal pairs while preserving `grandtotal`, `purchaseprice`, `totaldollars`, `shippingcost`, `orderamount`, and `lineitemprices`. The focused contract suite passes 223/223. Replay on the PR's newer head and full verification remain before publication.
+
+## EW02 metadata quantity review correction on PR862 head `ae3a4fe`
+
+- [x] Reproduce the false money classification for typed day/count/ratio metadata facts in both assertions and entity attributes.
+- [x] Narrow the metadata-name rule while retaining strict `priceNumber`, `priceTier` quantity, and compact monetary aliases.
+- [x] Run focused ENGRAM contracts, full unit/static/docs/package checks; review diff and commit a direct child of `ae3a4fe` locally.
+- [ ] Independent warden review and publication; keep PR862 draft until accepted gates pass.
+
+Review: The new test failed on `refundWindow` before the correction. Final focused ENGRAM contracts pass 224/224; a bounded full unit run passes 2,733 tests with three skips and no failures. Final static check passes 418 files, docs validation and package dry-run pass, and the diff check is clean. The first highly parallel full run failed five unrelated billing/Omar/session tests while the Windows host ran over 130 Node processes; all those files passed 25/25 in isolation before the bounded full rerun. No hosted gate or merge is claimed by this local successor.
+
+## PR853 self-provisioning caller binding (local repair)
+
+- [x] Replay `cae80a9` on current main after #864 in an isolated branch.
+- [x] Add fail-first command-level attacker-to-victim tests for bridged leave and admission cancellation, with same-agent and direct-human controls.
+- [x] Bind bridged self-provisioning to the trusted caller and reject ambiguous or cross-agent identity before action.
+- [x] Run focused tests, static check, diff review, and commit local successor for independent review.
+
+Review: Four command-level cases failed on the replayed PR before repair. The corrected real leave action refuses attacker-to-victim requests before changing the victim roster and permits same-agent and direct-human leaves. Bridged admission cancellation rejects a mismatched `--agent` or legacy `--name` before the action reads local pending state; same-agent calls proceed to ordinary pending-state validation. Nine related unit files pass 239/239; static check passes 418 files, docs validation passes. No live remote cancellation, push, or hosted gate is claimed.
+
+## PR853 stock MCP self-provisioning follow-up (local, unpublished)
+
+- [x] Trace dispatcher and generated-handler approval policy, and specify a two-layer exception for exactly self-join/self-leave.
+- [x] Reproduce stock-runtime tools/list and tools/call failures before the change.
+- [x] Require host caller identity, exact generated command metadata, and per-call identity match at both gates; retain approval refusal for other CLI commands.
+- [x] Prove real stock-runtime allowed and rejected calls, including attacker-to-victim and ordinary owner/control tools.
+- [x] Run focused/static/docs checks, inspect diff, commit local successor, and report exact head/tree for independent review. No push.
+
+Review: Fail-first stock-runtime tests saw both tools hidden and same-agent admission cancellation rejected before dispatch. The repaired runtime advertises only join/leave among generated CLI tools when a canonical trusted caller is present; its dispatcher and generated handler both validate the same exact command and call arguments. A loopback API test proves self-join files a pending request for room-owner approval, and a real CLI child self-leaves without altering another agent's roster. Cross-agent leave/cancel, malformed/unbound arguments, absent or noncanonical caller, the bridge kill switch, and owner/control commands are refused before execution. Nine focused files pass 134/134; static check passes 418 files; docs validation and diff check pass. No general MCP per-call human-approval receipt was added, and no remote push or hosted gate is claimed.
+
+## PR853 original-lineage publish candidate and identity metadata correction
+
+- [x] Build a nonforce local successor of remote PR head `cae80a9`, merge current main `8f4399c3`, and replay the reviewed caller-binding and MCP fixes.
+- [x] Verify the replayed merge tree equals the prior feature replay and the two-fix tree equals reviewed `69e11d0`.
+- [x] Reproduce MCP display-name impersonation with a fail-first stock-runtime call and cover invalid owner-role requests in the same real-runtime regression.
+- [x] Restrict paired `agent`/`name` and optional `role` in the caller-bound MCP exception while preserving legacy `name`-only self-join.
+- [x] Run focused, static, docs, lineage, and diff checks; commit a local successor for independent review without pushing.
+
+Review: The fail-first call with `agent: "attacker", name: "victim"` reached the pending-admission API on the replayed successor. After the correction, paired names and unsupported `owner`/`daemon` roles are refused by both dispatcher and handler without an API request. Same-caller `role: "reviewer"` and legacy name-only self-join still produce pending admissions requiring owner approval. Nine focused files pass 136/136; static check passes 418 files; docs validation and diff check pass. The replayed two-fix tree matches reviewed `69e11d0`, the final branch descends from both the PR head and main, and the remote branch remains at `cae80a9`. No push or hosted gate is claimed.
+
+## PR855 auth-store contention replay on current main
+
+- [x] Reproduce the old baseline's Windows credential-file EPERM under concurrent writers and keep the reviewed module-local FIFO repair in PR855.
+- [x] Merge current main into the existing PR head, preserving current task notes and the credential-store lesson.
+- [x] Verify focused auth tests, repository checks and current-main integration in the isolated replay.
+- [ ] Obtain independent exact-head review and fresh direct Sol 6.1 hosted gates before any branch update or merge.
+
+Review: The original PR demonstrated 1,024 decryptable concurrent writes, five ordering regressions, and recovery after an operation failure. This replay changes no credential-store source beyond that reviewed PR. On current main, the focused auth/session suite passed 21/21, static check passed 418 files, and docs validation passed. E2E passed 140/141; the legacy session-join fixture returned `LEGACY_AGENT_ACCESS_UNAVAILABLE` 503. The same named test fails identically on untouched current main `aa68b9f`, so this is not evidence of a PR855 regression. Fresh hosted direct Sol 6.1 gates remain before any merge.

@@ -2904,6 +2904,33 @@ async function sessionListenAgent(options) {
   return { sessionId: resolveSessionIdOption(options), agentId: normalizeAgentId(options.agent, "cli-user") };
 }
 
+
+/**
+ * Build the admission-join options object from parsed Commander options.
+ * Extracted so tests can assert the full derivation from CLI flag to
+ * runAdmissionJoin input without network I/O.
+ */
+export function buildAdmissionJoinOptions(options, overrides = {}) {
+  const waitSeconds = Number.parseInt(String(options.waitSeconds ?? "900"), 10);
+  return {
+    agentId: overrides.agentId ?? "",
+    displayName: overrides.displayName ?? "",
+    model: options.model,
+    provider: options.provider,
+    goal: options.goal,
+    deliverables: options.deliverable || [],
+    stopConditions: options.stopWhen || [],
+    actions: parseAdmissionScope(options.scope),
+    ttlSeconds: parseAdmissionTtlSeconds(options.ttl),
+    wait: options.wait !== false,
+    recoverActive: Boolean(options.recoverAdmission),
+    noAutoGrant: options.autoGrant === false,
+    waitTimeoutMs: (Number.isFinite(waitSeconds) && waitSeconds >= 0 ? waitSeconds : 900) * 1000,
+    targetPath: overrides.targetPath ?? process.cwd(),
+    onPending: overrides.onPending ?? (() => {}),
+  };
+}
+
 export function registerSessionCommand(program) {
   const session = program
     .command("session")
@@ -3439,6 +3466,7 @@ export function registerSessionCommand(program) {
     .option("--wait-seconds <n>", "How long to wait for approval before returning pending", "900")
     .option("--cancel-admission", "Cancel this workspace's pending admission request for the session")
     .option("--recover-admission", "Recover a live admission with the retained agent key; requires the unchanged --goal/scope/ttl")
+    .option("--no-auto-grant", "Skip auto-grant on 403 IDENTITY_FORGERY; fail immediately instead")
     .option("--json", "Emit machine-readable output")
     .action(async (sessionId, options, command) => {
       const normalizedSessionId = normalizeString(sessionId);
@@ -3527,20 +3555,9 @@ export function registerSessionCommand(program) {
         if (!admissionAgent) {
           throw new Error("--goal requires --agent <id>: admission is requested for one named agent.");
         }
-        const waitSeconds = Number.parseInt(String(options.waitSeconds ?? "900"), 10);
-        admissionJoinOptions = {
+        admissionJoinOptions = buildAdmissionJoinOptions(options, {
           agentId: admissionAgent,
           displayName: legacyName && explicitAgent ? legacyName : "",
-          model: options.model,
-          provider: options.provider,
-          goal: options.goal,
-          deliverables: options.deliverable || [],
-          stopConditions: options.stopWhen || [],
-          actions: parseAdmissionScope(options.scope),
-          ttlSeconds: parseAdmissionTtlSeconds(options.ttl),
-          wait: options.wait !== false,
-          recoverActive: Boolean(options.recoverAdmission),
-          waitTimeoutMs: (Number.isFinite(waitSeconds) && waitSeconds >= 0 ? waitSeconds : 900) * 1000,
           targetPath,
           onPending: ({ approveUrl, phase }) => {
             // stderr, so --json stdout stays a single parseable document.
@@ -3555,7 +3572,7 @@ export function registerSessionCommand(program) {
             else if (phase === "identity") console.log(pc.yellow(line));
             else console.log(line);
           },
-        };
+        });
         admission = await runAdmissionJoin(normalizedSessionId, admissionJoinOptions);
         if (admission.status !== "active") {
           // Only an ACTIVE admission joins. Pending, denied, cancelled or expired never
@@ -3884,6 +3901,7 @@ export function registerSessionCommand(program) {
     .option("--stdin", "Read the message body from stdin")
     .option("--force-cli-user", "Allow fallback sends as cli-user when no agent identity can be resolved")
     .option("--local-only", "Append only to the local session cache without remote send confirmation")
+    .option("--no-auto-grant", "Skip auto-grant on 403 IDENTITY_FORGERY; fail immediately instead")
     .option("--path <path>", "Workspace path for the session", ".")
     .option("--json", "Emit machine-readable output")
     .action(asAdmittedAgent(sessionSayAgent, async (sessionId, messageParts, options, command) => {
@@ -3962,6 +3980,7 @@ export function registerSessionCommand(program) {
         for (let attempt = 0; attempt < 2; attempt += 1) {
           remoteSync = await syncSessionEventToApi(normalizedSessionId, event, {
             targetPath,
+            noAutoGrant: options.autoGrant === false,
           });
           if (remoteSync?.synced) break;
         }
@@ -4024,6 +4043,7 @@ export function registerSessionCommand(program) {
     .option("--display-name <name>", "Human-readable agent display name")
     .option("--role <role>", "Agent role metadata: coder, reviewer, tester, observer", "coder")
     .option("--to <agent>", "Direct the message to a specific agent id")
+    .option("--no-auto-grant", "Skip auto-grant on 403 IDENTITY_FORGERY; fail immediately instead")
     .option("--path <path>", "Workspace path for the session", ".")
     .option("--json", "Emit machine-readable output")
     .action(async (sessionId, message, options, command) => {
@@ -4093,6 +4113,7 @@ export function registerSessionCommand(program) {
       }
       const remoteSync = await syncSessionEventToApi(normalizedSessionId, event, {
         targetPath,
+        noAutoGrant: options.autoGrant === false,
       });
       if (!remoteSync?.synced) {
         throw new Error(
@@ -4160,6 +4181,7 @@ export function registerSessionCommand(program) {
     .option("--proposal <text>", "Suggested remediation or next step")
     .option("--message-file <path>", "Read the observation summary from a UTF-8 file")
     .option("--stdin", "Read the observation summary from stdin")
+    .option("--no-auto-grant", "Skip auto-grant on 403 IDENTITY_FORGERY; fail immediately instead")
     .option("--path <path>", "Workspace path for the session", ".")
     .option("--json", "Emit machine-readable output")
     .action(async (sessionId, summaryParts, options, command) => {
@@ -4265,6 +4287,7 @@ export function registerSessionCommand(program) {
       }
       const remoteSync = await syncSessionEventToApi(normalizedSessionId, event, {
         targetPath,
+        noAutoGrant: options.autoGrant === false,
       });
       if (!remoteSync?.synced) {
         throw new Error(
@@ -6860,6 +6883,170 @@ export function registerSessionCommand(program) {
     });
 
   session
+    .command("events <sessionId>")
+    .description("Return one raw, verifiable page of session events from the remote API (ascending by sequence, no local merge). Use --before-sequence to walk backwards.")
+    .option("--remote", "Fetch from the SentinelLayer API (required; this command is remote-only)")
+    .option("--before-sequence <n>", "Return events older than this sequence id (omit for newest)")
+    .option("--limit <n>", "Maximum events (1-200, default 50)", "50")
+    .option("--path <path>", "Workspace path for the session", ".")
+    .option("--no-auto-grant", "Accepted, has no effect (session events is read-only; reads never auto-grant)")
+    .option("--json", "Emit machine-readable output")
+    .action(async (sessionId, options, command) => {
+      const normalizedSessionId = normalizeString(sessionId);
+      if (!normalizedSessionId) {
+        throw new Error("session id is required.");
+      }
+      if (!options.remote) {
+        throw new Error("session events requires --remote (this command is remote-only; use 'session read' for local streams).");
+      }
+      const targetPath = path.resolve(process.cwd(), String(options.path || "."));
+      const beforeSequence = parseOptionalPositiveInteger(options.beforeSequence, "before-sequence");
+      const rawLimit = parsePositiveInteger(options.limit, "limit", 50);
+      if (rawLimit > 200) {
+        throw new Error("limit must be between 1 and 200.");
+      }
+      const limit = Math.max(1, rawLimit);
+      const emitJson = shouldEmitJson(options, command);
+
+      const authSession = await resolveActiveAuthSession({
+        cwd: targetPath,
+        env: process.env,
+        autoRotate: false,
+      });
+      if (!isAuthenticated(authSession)) {
+        throw new Error(`Remote session events requires authentication. Run \`${authLoginHint()}\` first.`);
+      }
+
+      const result = await pollSessionEventsBefore(normalizedSessionId, {
+        targetPath,
+        beforeSequence,
+        limit,
+        timeoutMs: 15_000,
+      });
+
+      const contractViolation = pageContractViolation(normalizedSessionId, beforeSequence, limit, result);
+      const rawNext = result?.rawNextBeforeSequence;
+
+      const payload = {
+        command: "session events",
+        targetPath,
+        sessionId: normalizedSessionId,
+        ok: result.ok && !contractViolation,
+        beforeSequence: beforeSequence || null,
+        count: Array.isArray(result.events) ? result.events.length : 0,
+        nextBeforeSequence: rawNext ?? null,
+        hasMore: Boolean(result.hasMore),
+        partial: Boolean(result.partial),
+        events: Array.isArray(result.events) ? result.events : [],
+        reason: contractViolation ? "page_contract_violation" : (result.reason || ""),
+        contractViolation: contractViolation || undefined,
+      };
+
+      // C3: non-zero exit on failure in --json mode
+      if (emitJson && !payload.ok) {
+        process.exitCode = 1;
+        console.log(JSON.stringify(payload, null, 2));
+        return;
+      }
+
+      if (emitJson) {
+        console.log(JSON.stringify(payload, null, 2));
+        return;
+      }
+      if (!payload.ok) {
+        if (contractViolation) {
+          throw new Error(`Session events page contract violated: ${contractViolation}`);
+        }
+        throw new Error(`Session events fetch failed (${result.reason || "unknown"}).`);
+      }
+      for (const event of result.events || []) {
+        const seq = Number(event.sequenceId || event.sequence_id || 0);
+        const seqLabel = Number.isFinite(seq) && seq > 0 ? `#${Math.floor(seq)}` : "";
+        console.log(`${seqLabel} ${formatEventLine(event)}`);
+      }
+      if (result.beforeSequence && result.events && result.events.length >= limit) {
+        console.log(pc.gray(`More events before sequence ${result.beforeSequence}.`));
+      }
+    });
+
+
+function pageContractViolation(requestedSessionId, beforeSequence, limit, result) {
+  if (!result || !result.ok) return null;
+
+  const rawEvents = result.rawEvents;
+  const rawNextBeforeSequence = result.rawNextBeforeSequence;
+  const hasMore = result.hasMore;
+  const partial = result.partial;
+
+  // 1. rawEvents is not an Array (missing, or an object)
+  if (!Array.isArray(rawEvents)) {
+    return "page_events_not_array";
+  }
+
+  // C6: coverage fields must be present booleans; absence is fail-closed
+  if (typeof hasMore !== "boolean") {
+    return "page_coverage_fields_missing";
+  }
+  if (typeof partial !== "boolean") {
+    return "page_coverage_fields_missing";
+  }
+
+  // C6: the bridge cannot use a partial page
+  if (partial === true) {
+    return "page_partial";
+  }
+
+  // 5. hasMore === true and rawNextBeforeSequence is null or missing
+  if (hasMore === true && (rawNextBeforeSequence === null || rawNextBeforeSequence === undefined)) {
+    return "page_has_more_without_cursor";
+  }
+
+  // 4. rawNextBeforeSequence is not null and is not a safe positive integer
+  if (rawNextBeforeSequence !== null && rawNextBeforeSequence !== undefined) {
+    if (!Number.isSafeInteger(rawNextBeforeSequence) || rawNextBeforeSequence <= 0) {
+      return "page_next_before_not_safe_positive_integer";
+    }
+    if (Number.isFinite(beforeSequence) && rawNextBeforeSequence >= beforeSequence) {
+      return "next_before_sequence_not_less_than_requested";
+    }
+  }
+
+  // 3. rawEvents.length > the requested limit
+  if (rawEvents.length > limit) {
+    return "page_too_many_events";
+  }
+
+  // 2. Validate each raw event's sequenceId
+  const seen = new Set();
+  for (const event of rawEvents) {
+    const rawSeq = event?.sequenceId;
+    if (typeof rawSeq !== "number" || !Number.isSafeInteger(rawSeq) || rawSeq <= 0) {
+      return "event_sequence_not_safe_positive_integer";
+    }
+
+    // event's sequenceId >= beforeSequence
+    if (Number.isFinite(beforeSequence) && rawSeq >= beforeSequence) {
+      return "event_sequence_not_before_requested";
+    }
+
+    // event carries a sessionId other than the one requested
+    const eventSessionId = normalizeString(event?.sessionId ?? event?.session_id);
+    if (eventSessionId && eventSessionId !== requestedSessionId) {
+      return "event_session_id_mismatch";
+    }
+
+    // duplicate sequence ids
+    if (seen.has(rawSeq)) {
+      return "duplicate_event_sequence";
+    }
+    seen.add(rawSeq);
+  }
+
+  return null;
+}
+
+
+  session
     .command("recall <need>")
     .description(
       "Hydrate a session by RETRIEVAL, not full-tail replay: return the top-K relevant memories (dense int8 exact-scan + BM25 + RRF + graph diffusion + ACT-R) each with a one-line provenance path (ENGRAM §1)",
@@ -7299,7 +7486,19 @@ export function registerSessionCommand(program) {
   // an ACTOR command: the runCli choke point runs it on the agent's admission.
   const ticket = session
     .command("ticket")
-    .description("The room's shared backlog: list, claim, renew, release and submit tickets");
+    .description("The room's shared backlog: list, claim, renew, release and submit tickets")
+    .addHelpText("after", `
+Workflow:
+  sl session ticket list <sessionId> --available --json
+  sl session ticket claim <sessionId> <ticketId> --expected-version <version>
+  sl session ticket renew <sessionId> <ticketId>
+  sl session ticket submit <sessionId> <ticketId> --sha <commit> --evidence-file evidence.json
+
+The evidence file is a JSON array of re-checkable claims. Submit means in_review,
+not done. Use release --reason "handoff" when you cannot continue.
+Agent work requires that agent's live admission; --agent is not authorization.
+Guide: https://sentinelayer.com/docs/senti/overview/
+`);
 
   // Ticket work is attributed by the CREDENTIAL, never by a label: the lease routes take the
   // holder from authentication alone. So an agent identity is allowed only with that agent's
