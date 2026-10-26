@@ -6924,7 +6924,8 @@ export function registerSessionCommand(program) {
         timeoutMs: 15_000,
       });
 
-      const contractViolation = pageContractViolation(normalizedSessionId, beforeSequence, result);
+      const contractViolation = pageContractViolation(normalizedSessionId, beforeSequence, limit, result);
+      const rawNext = result?.rawNextBeforeSequence;
 
       const payload = {
         command: "session events",
@@ -6933,7 +6934,7 @@ export function registerSessionCommand(program) {
         ok: result.ok && !contractViolation,
         beforeSequence: beforeSequence || null,
         count: Array.isArray(result.events) ? result.events.length : 0,
-        nextBeforeSequence: result.beforeSequence || null,
+        nextBeforeSequence: rawNext ?? null,
         hasMore: Boolean(result.hasMore),
         partial: Boolean(result.partial),
         events: Array.isArray(result.events) ? result.events : [],
@@ -6969,37 +6970,62 @@ export function registerSessionCommand(program) {
     });
 
 
-function pageContractViolation(requestedSessionId, beforeSequence, result) {
+function pageContractViolation(requestedSessionId, beforeSequence, limit, result) {
   if (!result || !result.ok) return null;
-  const events = Array.isArray(result.events) ? result.events : [];
+
+  const rawEvents = result.rawEvents;
+  const rawNextBeforeSequence = result.rawNextBeforeSequence;
+  const hasMore = result.hasMore;
+  const partial = result.partial;
+
+  // 1. rawEvents is not an Array (missing, or an object)
+  if (!Array.isArray(rawEvents)) {
+    return "page_events_not_array";
+  }
 
   // C6: coverage fields must be present booleans; absence is fail-closed
-  if (typeof result.hasMore !== "boolean") {
+  if (typeof hasMore !== "boolean") {
     return "page_coverage_fields_missing";
   }
-  if (typeof result.partial !== "boolean") {
+  if (typeof partial !== "boolean") {
     return "page_coverage_fields_missing";
   }
 
   // C6: the bridge cannot use a partial page
-  if (result.partial === true) {
+  if (partial === true) {
     return "page_partial";
   }
 
-  // C2: no events is not a violation (empty page is valid)
-  if (events.length === 0) return null;
+  // 5. hasMore === true and rawNextBeforeSequence is null or missing
+  if (hasMore === true && (rawNextBeforeSequence === null || rawNextBeforeSequence === undefined)) {
+    return "page_has_more_without_cursor";
+  }
 
+  // 4. rawNextBeforeSequence is not null and is not a safe positive integer
+  if (rawNextBeforeSequence !== null && rawNextBeforeSequence !== undefined) {
+    if (!Number.isSafeInteger(rawNextBeforeSequence) || rawNextBeforeSequence <= 0) {
+      return "page_next_before_not_safe_positive_integer";
+    }
+    if (Number.isFinite(beforeSequence) && rawNextBeforeSequence >= beforeSequence) {
+      return "next_before_sequence_not_less_than_requested";
+    }
+  }
+
+  // 3. rawEvents.length > the requested limit
+  if (rawEvents.length > limit) {
+    return "page_too_many_events";
+  }
+
+  // 2. Validate each raw event's sequenceId
   const seen = new Set();
-  for (const event of events) {
-    const seq = eventSequenceNumber(event);
-
-    // sequenceId is not a safe positive integer
-    if (!Number.isSafeInteger(seq) || seq <= 0) {
+  for (const event of rawEvents) {
+    const rawSeq = event?.sequenceId;
+    if (typeof rawSeq !== "number" || !Number.isSafeInteger(rawSeq) || rawSeq <= 0) {
       return "event_sequence_not_safe_positive_integer";
     }
 
     // event's sequenceId >= beforeSequence
-    if (Number.isFinite(beforeSequence) && seq >= beforeSequence) {
+    if (Number.isFinite(beforeSequence) && rawSeq >= beforeSequence) {
       return "event_sequence_not_before_requested";
     }
 
@@ -7010,18 +7036,10 @@ function pageContractViolation(requestedSessionId, beforeSequence, result) {
     }
 
     // duplicate sequence ids
-    if (seen.has(seq)) {
+    if (seen.has(rawSeq)) {
       return "duplicate_event_sequence";
     }
-    seen.add(seq);
-  }
-
-  // nextBeforeSequence is not < beforeSequence
-  if (Number.isFinite(beforeSequence)) {
-    const nextBefore = result.beforeSequence;
-    if (Number.isFinite(nextBefore) && nextBefore >= beforeSequence) {
-      return "next_before_sequence_not_less_than_requested";
-    }
+    seen.add(rawSeq);
   }
 
   return null;
