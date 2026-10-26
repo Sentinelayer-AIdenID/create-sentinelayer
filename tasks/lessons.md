@@ -1,5 +1,11 @@
 # Lessons
 
+## 2026-10-26
+
+- An output-root check does not protect descendant writers. Carry the configuration trust policy through derived storage and check the complete destination immediately before each mutation; keep executable policy out of serialized JSON.
+- Validation and IO must use the same normalized path. POSIX resolves a symlink before a following `..`; validating a normalized string then writing the raw string can escape despite a correct containment predicate.
+- Refuse final-file symlinks and use native no-follow flags where supported, while distinguishing that protection from concurrent parent-directory replacement. Exercise actual links on Linux when Windows privilege limits would otherwise skip the witness.
+
 ## 2026-10-24
 
 - A route allow-list proves only that a command name is admitted. For self-provisioning commands that accept an agent target, bind the parsed target to a trusted bridge caller before dispatch, and test the real action with different caller and target identities. A label-only test cannot prove a leave is self-only or a pending cancellation cannot cross agents.

@@ -2,7 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 import fsp from "node:fs/promises";
 import path from "node:path";
 
-import { resolveOutputRoot } from "../config/service.js";
+import { bindOutputFileSystem } from "../config/output-filesystem.js";
+import { resolveOutputContext } from "../config/service.js";
 import { createAgentEvent } from "../events/schema.js";
 import { appendToStream } from "../session/stream.js";
 
@@ -290,7 +291,7 @@ async function loadQueueFile(queuePath, nowIso = new Date().toISOString()) {
   }
 }
 
-async function writeQueueFile(queuePath, queue = {}, nowIso = new Date().toISOString()) {
+async function writeQueueFile(queuePath, queue = {}, nowIso = new Date().toISOString(), outputFs = fsp) {
   const normalized = {
     schemaVersion: QUEUE_SCHEMA_VERSION,
     generatedAt: normalizeIsoTimestamp(nowIso, nowIso),
@@ -300,8 +301,8 @@ async function writeQueueFile(queuePath, queue = {}, nowIso = new Date().toISOSt
           .filter((item) => normalizeString(item.fingerprint))
       : [],
   };
-  await fsp.mkdir(path.dirname(queuePath), { recursive: true });
-  await fsp.writeFile(queuePath, `${JSON.stringify(normalized, null, 2)}\n`, "utf-8");
+  await outputFs.mkdir(path.dirname(queuePath), { recursive: true });
+  await outputFs.writeFile(queuePath, `${JSON.stringify(normalized, null, 2)}\n`, "utf-8");
   return normalized;
 }
 
@@ -327,7 +328,7 @@ async function loadWorkerStateFile(statePath, nowIso = new Date().toISOString())
   }
 }
 
-async function writeWorkerStateFile(statePath, state = {}, nowIso = new Date().toISOString()) {
+async function writeWorkerStateFile(statePath, state = {}, nowIso = new Date().toISOString(), outputFs = fsp) {
   const normalized = {
     schemaVersion: STATE_SCHEMA_VERSION,
     updatedAt: normalizeIsoTimestamp(nowIso, nowIso),
@@ -338,8 +339,8 @@ async function writeWorkerStateFile(statePath, state = {}, nowIso = new Date().t
     totalQueuedItems: normalizeNonNegativeInteger(state.totalQueuedItems, 0),
     totalDedupeHits: normalizeNonNegativeInteger(state.totalDedupeHits, 0),
   };
-  await fsp.mkdir(path.dirname(statePath), { recursive: true });
-  await fsp.writeFile(statePath, `${JSON.stringify(normalized, null, 2)}\n`, "utf-8");
+  await outputFs.mkdir(path.dirname(statePath), { recursive: true });
+  await outputFs.writeFile(statePath, `${JSON.stringify(normalized, null, 2)}\n`, "utf-8");
   return normalized;
 }
 
@@ -427,7 +428,7 @@ export async function resolveErrorDaemonStorage({
   env,
   homeDir,
 } = {}) {
-  const outputRoot = await resolveOutputRoot({
+  const { outputRoot, outputFs } = await resolveOutputContext({
     cwd: path.resolve(String(targetPath || ".")),
     outputDirOverride: outputDir,
     env,
@@ -435,7 +436,7 @@ export async function resolveErrorDaemonStorage({
   });
   const observabilityRoot = path.join(outputRoot, "observability");
   const baseDir = path.join(observabilityRoot, "error-daemon");
-  return {
+  return bindOutputFileSystem({
     outputRoot,
     observabilityRoot,
     baseDir,
@@ -445,7 +446,7 @@ export async function resolveErrorDaemonStorage({
     intakeDir: path.join(baseDir, "intake"),
     runsDir: path.join(baseDir, "runs"),
     sweepsDir: path.join(baseDir, "sweeps"),
-  };
+  }, outputFs);
 }
 
 export async function appendAdminErrorEvent({
@@ -464,15 +465,15 @@ export async function appendAdminErrorEvent({
     homeDir,
   });
 
-  await fsp.mkdir(storage.baseDir, { recursive: true });
-  await fsp.appendFile(storage.streamPath, `${JSON.stringify(normalizedEvent)}\n`, "utf-8");
+  await storage.outputFs.mkdir(storage.baseDir, { recursive: true });
+  await storage.outputFs.appendFile(storage.streamPath, `${JSON.stringify(normalizedEvent)}\n`, "utf-8");
 
-  await fsp.mkdir(storage.intakeDir, { recursive: true });
+  await storage.outputFs.mkdir(storage.intakeDir, { recursive: true });
   const intakePath = path.join(
     storage.intakeDir,
     `intake-${stableTimestampForFile(new Date(normalizedEvent.recordedAt))}-${normalizedEvent.eventId.slice(0, 8)}.json`
   );
-  await fsp.writeFile(
+  await storage.outputFs.writeFile(
     intakePath,
     `${JSON.stringify(
       {
@@ -508,7 +509,7 @@ async function writeWorkItemIntakeArtifact(
 ) {
   const normalizedNow = normalizeIsoTimestamp(nowIso, new Date().toISOString());
   const intakePath = resolveWorkItemIntakePath(storage, queueItem, normalizedNow);
-  await fsp.mkdir(path.dirname(intakePath), { recursive: true });
+  await storage.outputFs.mkdir(path.dirname(intakePath), { recursive: true });
   const normalizedRequestIds = normalizeRequestIds(queueItem.requestIds || []);
   const payload = {
     schemaVersion: "1.0.0",
@@ -537,7 +538,7 @@ async function writeWorkItemIntakeArtifact(
     status: queueItem.status,
     message: queueItem.message,
   };
-  await fsp.writeFile(intakePath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
+  await storage.outputFs.writeFile(intakePath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
   return {
     intakePath,
     payload,
@@ -696,7 +697,7 @@ export async function runErrorDaemonWorker({
   }
 
   queue.generatedAt = normalizedNow;
-  const savedQueue = await writeQueueFile(storage.queuePath, queue, normalizedNow);
+  const savedQueue = await writeQueueFile(storage.queuePath, queue, normalizedNow, storage.outputFs);
 
   const savedState = await writeWorkerStateFile(
     storage.statePath,
@@ -710,7 +711,8 @@ export async function runErrorDaemonWorker({
       totalQueuedItems: savedQueue.items.length,
       totalDedupeHits: state.totalDedupeHits + dedupedCount,
     },
-    normalizedNow
+    normalizedNow,
+    storage.outputFs
   );
 
   const intakeArtifacts = [];
@@ -759,10 +761,10 @@ export async function runErrorDaemonWorker({
     }
   }
 
-  await fsp.mkdir(storage.runsDir, { recursive: true });
+  await storage.outputFs.mkdir(storage.runsDir, { recursive: true });
   const runId = `error-daemon-run-${stableTimestampForFile(new Date(normalizedNow))}-${randomUUID().slice(0, 8)}`;
   const runPath = path.join(storage.runsDir, `${runId}.json`);
-  await fsp.writeFile(
+  await storage.outputFs.writeFile(
     runPath,
     `${JSON.stringify(
       {
@@ -893,9 +895,9 @@ export async function scheduledErrorSweep({
     })),
   };
 
-  await fsp.mkdir(storage.sweepsDir, { recursive: true });
+  await storage.outputFs.mkdir(storage.sweepsDir, { recursive: true });
   const sweepPath = path.join(storage.sweepsDir, `${runId}.json`);
-  await fsp.writeFile(sweepPath, `${JSON.stringify(digest, null, 2)}\n`, "utf-8");
+  await storage.outputFs.writeFile(sweepPath, `${JSON.stringify(digest, null, 2)}\n`, "utf-8");
 
   let sweepEvent = null;
   if (normalizedSessionId) {

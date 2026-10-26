@@ -22,7 +22,7 @@ import {
   recordProvisionedIdentity,
   updateIdentityStatus,
 } from "../../ai/identity-store.js";
-import { resolveOutputRoot } from "../../config/service.js";
+import { resolveOutputRoot, resolveOutputContext } from "../../config/service.js";
 import {
   delay,
   hasExtractionSignal,
@@ -145,7 +145,7 @@ legalHold
   .action(async (identityId, options, command) => {
     const emitJson = shouldEmitJson(options, command);
     const targetPath = path.resolve(process.cwd(), String(options.path || "."));
-    const outputRoot = await resolveOutputRoot({
+    const { outputRoot, outputFs } = await resolveOutputContext({
       cwd: targetPath,
       outputDirOverride: options.outputDir,
       env: process.env,
@@ -172,7 +172,7 @@ legalHold
       status,
       underHold,
       identity: identityRecord,
-    });
+    }, outputFs);
 
     const payload = {
       command: "ai identity legal-hold status",
@@ -204,7 +204,7 @@ identity
   .action(async (options, command) => {
     const emitJson = shouldEmitJson(options, command);
     const targetPath = path.resolve(process.cwd(), String(options.path || "."));
-    const outputRoot = await resolveOutputRoot({
+    const { outputRoot, outputFs } = await resolveOutputContext({
       cwd: targetPath,
       outputDirOverride: options.outputDir,
       env: process.env,
@@ -223,7 +223,7 @@ identity
       staleCount: staleScan.stale.length,
       totalCount: staleScan.identities.length,
       identities,
-    });
+    }, outputFs);
 
     const payload = {
       command: "ai identity audit",
@@ -269,7 +269,7 @@ identity
       throw new Error("At least one tag is required via --tags.");
     }
     const targetPath = path.resolve(process.cwd(), String(options.path || "."));
-    const outputRoot = await resolveOutputRoot({
+    const { outputRoot, outputFs } = await resolveOutputContext({
       cwd: targetPath,
       outputDirOverride: options.outputDir,
       env: process.env,
@@ -293,7 +293,7 @@ identity
       candidateIdentityIds: candidates.map((item) => item.identityId),
       blockedIdentityIds: blocked.map((item) => item.identityId),
       eligibleIdentityIds: eligible.map((item) => item.identityId),
-    });
+    }, outputFs);
 
     if (!options.execute) {
       const payload = {
@@ -345,6 +345,7 @@ identity
         revokeResponse = revokeExecution.response || null;
       }
       const updated = await updateIdentityStatus({
+        outputFs,
         outputRoot,
         identityId: identityRecord.identityId,
         status: "SQUASHED",
@@ -379,7 +380,7 @@ identity
       updated: updates,
       apiCalled: canCallApi,
       credentialsMissing: resolvedCredentials.missing,
-    });
+    }, outputFs);
 
     const payload = {
       command: "ai identity kill-all",
@@ -426,7 +427,7 @@ identity
   .action(async (identityId, options, command) => {
     const emitJson = shouldEmitJson(options, command);
     const targetPath = path.resolve(process.cwd(), String(options.path || "."));
-    const outputRoot = await resolveOutputRoot({
+    const { outputRoot, outputFs } = await resolveOutputContext({
       cwd: targetPath,
       outputDirOverride: options.outputDir,
       env: process.env,
@@ -441,7 +442,7 @@ identity
       apiUrl,
       idempotencyKey,
       identityId,
-    });
+    }, outputFs);
 
     const { registryPath, identity: trackedIdentity } = await getIdentityById({
       outputRoot,
@@ -517,10 +518,11 @@ identity
       apiUrl,
       idempotencyKey,
       response: execution.response,
-    });
+    }, outputFs);
 
     const revokedAt = String(execution.response?.revokedAt || "").trim() || new Date().toISOString();
     const updated = await updateIdentityStatus({
+      outputFs,
       outputRoot,
       identityId,
       status: String(execution.response?.status || "REVOKED"),
@@ -576,7 +578,7 @@ identity
   .action(async (parentIdentityId, options, command) => {
     const emitJson = shouldEmitJson(options, command);
     const targetPath = path.resolve(process.cwd(), String(options.path || "."));
-    const outputRoot = await resolveOutputRoot({
+    const { outputRoot, outputFs } = await resolveOutputContext({
       cwd: targetPath,
       outputDirOverride: options.outputDir,
       env: process.env,
@@ -617,7 +619,7 @@ identity
       idempotencyKey,
       parentIdentityId,
       payload,
-    });
+    }, outputFs);
 
     const resolvedCredentials = await resolveAidenIdCredentials({
       apiKey: options.apiKey,
@@ -695,9 +697,10 @@ identity
       idempotencyKey,
       parentIdentityId,
       response: execution.response,
-    });
+    }, outputFs);
 
     const registryUpdate = await recordProvisionedIdentity({
+      outputFs,
       outputRoot,
       response: execution.response || {},
       context: {
@@ -758,7 +761,7 @@ identity
   .action(async (identityId, options, command) => {
     const emitJson = shouldEmitJson(options, command);
     const targetPath = path.resolve(process.cwd(), String(options.path || "."));
-    const outputRoot = await resolveOutputRoot({
+    const { outputRoot, outputFs } = await resolveOutputContext({
       cwd: targetPath,
       outputDirOverride: options.outputDir,
       env: process.env,
@@ -796,7 +799,7 @@ identity
       generatedAt: new Date().toISOString(),
       identityId,
       response: execution.response,
-    });
+    }, outputFs);
 
     const rows = renderLineageRows({
       nodes: execution.nodes,
@@ -843,7 +846,7 @@ identity
   .action(async (identityId, options, command) => {
     const emitJson = shouldEmitJson(options, command);
     const targetPath = path.resolve(process.cwd(), String(options.path || "."));
-    const outputRoot = await resolveOutputRoot({
+    const { outputRoot, outputFs } = await resolveOutputContext({
       cwd: targetPath,
       outputDirOverride: options.outputDir,
       env: process.env,
@@ -865,7 +868,7 @@ identity
       apiUrl,
       idempotencyKey,
       identityId,
-    });
+    }, outputFs);
 
     const resolvedCredentials = await resolveAidenIdCredentials({
       apiKey: options.apiKey,
@@ -937,12 +940,13 @@ identity
       idempotencyKey,
       identityId,
       response: execution.response,
-    });
+    }, outputFs);
 
     const updateResults = await Promise.all(
       execution.revokedIdentityIds.map(async (revokedIdentityId) => {
         try {
           const updated = await updateIdentityStatus({
+            outputFs,
             outputRoot,
             identityId: revokedIdentityId,
             status: "SQUASHED",
@@ -1003,7 +1007,7 @@ identity
   .action(async (identityId, options, command) => {
     const emitJson = shouldEmitJson(options, command);
     const targetPath = path.resolve(process.cwd(), String(options.path || "."));
-    const outputRoot = await resolveOutputRoot({
+    const { outputRoot, outputFs } = await resolveOutputContext({
       cwd: targetPath,
       outputDirOverride: options.outputDir,
       env: process.env,
@@ -1048,7 +1052,7 @@ identity
       cursor: String(options.cursor || "").trim() || null,
       limit,
       response: execution.response,
-    });
+    }, outputFs);
 
     const payload = {
       command: "ai identity events",
@@ -1096,7 +1100,7 @@ identity
   .action(async (identityId, options, command) => {
     const emitJson = shouldEmitJson(options, command);
     const targetPath = path.resolve(process.cwd(), String(options.path || "."));
-    const outputRoot = await resolveOutputRoot({
+    const { outputRoot, outputFs } = await resolveOutputContext({
       cwd: targetPath,
       outputDirOverride: options.outputDir,
       env: process.env,
@@ -1149,7 +1153,7 @@ identity
       latestEvent,
       extraction: latestExtraction.extraction,
       extractionResponse: latestExtraction.response,
-    });
+    }, outputFs);
 
     const payload = {
       command: "ai identity latest",
@@ -1207,7 +1211,7 @@ identity
   .action(async (identityId, options, command) => {
     const emitJson = shouldEmitJson(options, command);
     const targetPath = path.resolve(process.cwd(), String(options.path || "."));
-    const outputRoot = await resolveOutputRoot({
+    const { outputRoot, outputFs } = await resolveOutputContext({
       cwd: targetPath,
       outputDirOverride: options.outputDir,
       env: process.env,
@@ -1309,7 +1313,7 @@ identity
             extraction: lastExtraction,
           },
     };
-    await writeArtifact(outputPath, artifactPayload);
+    await writeArtifact(outputPath, artifactPayload, outputFs);
 
     if (!success) {
       throw new Error(

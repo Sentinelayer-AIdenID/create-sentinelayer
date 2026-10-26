@@ -5,6 +5,7 @@ import fsp from "node:fs/promises";
 import { getConfigPaths } from "./paths.js";
 import { ensureConfigFile, readConfigFile, writeConfigFile } from "./io.js";
 import { CONFIG_KEYS, configSchema } from "./schema.js";
+import { createOutputFileSystem } from "./output-filesystem.js";
 
 const ENV_MAPPING = Object.freeze({
   SENTINELAYER_API_URL: "apiUrl",
@@ -248,7 +249,7 @@ async function resolveProjectOutputDir(value, cwd) {
   }
 }
 
-export async function resolveOutputRoot({
+export async function resolveOutputContext({
   cwd = process.cwd(),
   outputDirOverride = "",
   env = process.env,
@@ -256,17 +257,24 @@ export async function resolveOutputRoot({
 } = {}) {
   const overrideValue = String(outputDirOverride || "").trim();
   if (overrideValue) {
-    return path.resolve(cwd, overrideValue);
+    return { outputRoot: path.resolve(cwd, overrideValue), outputFs: createOutputFileSystem() };
   }
 
   const config = await loadConfig({ cwd, env, homeDir });
   const configuredOutputDir = String(config.resolved.outputDir || "").trim();
   if (configuredOutputDir) {
     if (findConfigSource(config, "outputDir") === "project") {
-      return resolveProjectOutputDir(configuredOutputDir, cwd);
+      return {
+        outputRoot: await resolveProjectOutputDir(configuredOutputDir, cwd),
+        outputFs: createOutputFileSystem({ workspaceRoot: path.resolve(cwd) }),
+      };
     }
-    return path.resolve(cwd, configuredOutputDir);
+    return { outputRoot: path.resolve(cwd, configuredOutputDir), outputFs: createOutputFileSystem() };
   }
 
-  return path.resolve(cwd, ".sentinelayer");
+  return { outputRoot: path.resolve(cwd, ".sentinelayer"), outputFs: createOutputFileSystem() };
+}
+
+export async function resolveOutputRoot(options = {}) {
+  return (await resolveOutputContext(options)).outputRoot;
 }

@@ -134,12 +134,14 @@ async function executeReviewRun({
     specFile,
   });
   const unifiedArtifacts = await writeUnifiedReviewArtifacts({
+    outputFs: deterministic.artifacts.outputFs,
     runDirectory: deterministic.artifacts.runDirectory,
     report: unified.report,
     markdown: unified.markdown,
   });
 
   const contextWrite = await writeReviewRunContext({
+    outputFs: deterministic.artifacts.outputFs,
     runDirectory: deterministic.artifacts.runDirectory,
     runId: deterministic.runId,
     targetPath: deterministic.targetPath,
@@ -511,6 +513,7 @@ export function registerReviewCommand(program) {
       const comparison = compareUnifiedReports(source.report, replayOutcome.unified.report);
       const artifact = await writeReviewComparisonArtifact({
         runDirectory: replayOutcome.deterministic.artifacts.runDirectory,
+        outputFs: replayOutcome.deterministic.artifacts.outputFs,
         baseRunId: source.report.runId,
         candidateRunId: replayOutcome.unified.report.runId,
         comparison,
@@ -571,6 +574,7 @@ export function registerReviewCommand(program) {
       const comparison = compareUnifiedReports(base.report, candidate.report);
       const artifact = await writeReviewComparisonArtifact({
         runDirectory: candidate.runDirectory,
+        outputFs: candidate.outputFs,
         baseRunId: base.report.runId,
         candidateRunId: candidate.report.runId,
         comparison,

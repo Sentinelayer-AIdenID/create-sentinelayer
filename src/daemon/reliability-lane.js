@@ -1,6 +1,7 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
 
+import { bindOutputFileSystem } from "../config/output-filesystem.js";
 import { appendAdminErrorEvent, resolveErrorDaemonStorage, runErrorDaemonWorker } from "./error-worker.js";
 
 const RELIABILITY_SCHEMA_VERSION = "1.0.0";
@@ -142,14 +143,14 @@ async function readJsonFile(filePath, defaultFactory) {
   }
 }
 
-async function writeJsonFile(filePath, payload = {}) {
-  await fsp.mkdir(path.dirname(filePath), { recursive: true });
-  await fsp.writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
+async function writeJsonFile(filePath, payload = {}, outputFs = fsp) {
+  await outputFs.mkdir(path.dirname(filePath), { recursive: true });
+  await outputFs.writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
 }
 
-async function appendJsonLine(filePath, payload = {}) {
-  await fsp.mkdir(path.dirname(filePath), { recursive: true });
-  await fsp.appendFile(filePath, `${JSON.stringify(payload)}\n`, "utf-8");
+async function appendJsonLine(filePath, payload = {}, outputFs = fsp) {
+  await outputFs.mkdir(path.dirname(filePath), { recursive: true });
+  await outputFs.appendFile(filePath, `${JSON.stringify(payload)}\n`, "utf-8");
 }
 
 async function listRunArtifacts(runsDir, outputRoot) {
@@ -197,14 +198,14 @@ export async function resolveReliabilityLaneStorage({
     homeDir,
   });
   const reliabilityDir = path.join(daemonStorage.baseDir, "reliability");
-  return {
+  return bindOutputFileSystem({
     ...daemonStorage,
     reliabilityDir,
     configPath: path.join(reliabilityDir, "lane-config.json"),
     billboardPath: path.join(reliabilityDir, "maintenance-billboard.json"),
     eventsPath: path.join(reliabilityDir, "reliability-events.ndjson"),
     runsDir: path.join(reliabilityDir, "runs"),
-  };
+  }, daemonStorage.outputFs);
 }
 
 export async function setMaintenanceBillboard({
@@ -249,7 +250,7 @@ export async function setMaintenanceBillboard({
   };
 
   await Promise.all([
-    writeJsonFile(storage.billboardPath, next),
+    writeJsonFile(storage.billboardPath, next, storage.outputFs),
     appendJsonLine(storage.eventsPath, {
       timestamp: normalizedNow,
       eventType: "maintenance_update",
@@ -258,7 +259,7 @@ export async function setMaintenanceBillboard({
       actor: normalizedActor,
       reason: normalizedReason,
       message: next.message,
-    }),
+    }, storage.outputFs),
   ]);
 
   return {
@@ -439,11 +440,11 @@ export async function runReliabilityLane({
       : null,
   };
 
-  await fsp.mkdir(storage.runsDir, { recursive: true });
+  await storage.outputFs.mkdir(storage.runsDir, { recursive: true });
   await Promise.all([
-    writeJsonFile(storage.configPath, config),
-    writeJsonFile(storage.billboardPath, billboard),
-    writeJsonFile(runPath, runPayload),
+    writeJsonFile(storage.configPath, config, storage.outputFs),
+    writeJsonFile(storage.billboardPath, billboard, storage.outputFs),
+    writeJsonFile(runPath, runPayload, storage.outputFs),
     appendJsonLine(storage.eventsPath, {
       timestamp: normalizedNow,
       eventType: "reliability_run",
@@ -454,7 +455,7 @@ export async function runReliabilityLane({
       checkCount: checkResults.length,
       failureCount: failureResults.length,
       maintenanceEnabled: billboard.enabled,
-    }),
+    }, storage.outputFs),
   ]);
 
   return {

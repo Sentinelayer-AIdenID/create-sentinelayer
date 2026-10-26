@@ -3,7 +3,8 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 
 import { getIdentityById } from "../../ai/identity-store.js";
-import { resolveOutputRoot } from "../../config/service.js";
+import { resolveOutputContext } from "../../config/service.js";
+import { createOutputFileSystem } from "../../config/output-filesystem.js";
 import { createAgentEvent } from "../../events/schema.js";
 import { DEVTESTBOT_DEFINITION, DEVTESTBOT_LANES } from "./config/definition.js";
 import { launch } from "./runner.js";
@@ -63,7 +64,7 @@ export async function executeDevTestBotRunSessionTool(input = {}, ctx = {}) {
 
 export async function runDevTestBotSession(input = {}, ctx = {}) {
   const targetPath = path.resolve(String(input.targetPath || ctx.targetPath || process.cwd()));
-  const outputRoot = await resolveOutputRoot({
+  const { outputRoot, outputFs: resolvedOutputFs } = await resolveOutputContext({
     cwd: targetPath,
     outputDirOverride: input.outputRoot || ctx.outputRoot || "",
     env: ctx.env || process.env,
@@ -77,7 +78,8 @@ export async function runDevTestBotSession(input = {}, ctx = {}) {
   const artifactRoot = path.resolve(
     input.outputDir || ctx.outputDir || path.join(outputRoot, "runs", runId, "devtestbot")
   );
-  await fsp.mkdir(artifactRoot, { recursive: true });
+  const outputFs = ctx.outputFs || (input.outputDir || ctx.outputDir ? createOutputFileSystem() : resolvedOutputFs);
+  await outputFs.mkdir(artifactRoot, { recursive: true });
 
   const { registryPath, identity } = await resolveIdentity({
     outputRoot,
@@ -142,6 +144,7 @@ export async function runDevTestBotSession(input = {}, ctx = {}) {
         scope,
         baseUrl,
         artifactRoot,
+        outputFs,
         sensitiveValues,
       });
       for (const finding of dryRun.findings) {
@@ -168,6 +171,7 @@ export async function runDevTestBotSession(input = {}, ctx = {}) {
         completed: true,
         dryRun: true,
         artifactRoot,
+        outputFs,
         artifactBundle: dryRun.artifactBundle,
         artifacts: dryRun.artifacts,
         findings: dryRun.findings,
@@ -183,6 +187,7 @@ export async function runDevTestBotSession(input = {}, ctx = {}) {
       baseUrl: normalizedBaseUrl,
       identityCreds,
       outputDir: artifactRoot,
+      outputFs,
       recordVideo,
       runLighthouse: input.runLighthouse !== undefined ? Boolean(input.runLighthouse) : true,
       lighthouseTimeoutMs: input.lighthouseTimeoutMs,
@@ -229,6 +234,7 @@ export async function runDevTestBotSession(input = {}, ctx = {}) {
       completed: true,
       dryRun: false,
       artifactRoot,
+      outputFs,
       artifacts,
       findings,
       laneSummaries,
@@ -249,6 +255,7 @@ export async function runDevTestBotSession(input = {}, ctx = {}) {
       completed: false,
       dryRun: !execute,
       artifactRoot,
+      outputFs,
       artifacts: {},
       findings: [],
       laneSummaries: {},
@@ -351,7 +358,8 @@ async function driveScope({ runner, scope }) {
   }
 }
 
-async function buildDryRunResult({ runId, scope, baseUrl, artifactRoot, sensitiveValues }) {
+async function buildDryRunResult({ runId, scope, baseUrl, artifactRoot, sensitiveValues, outputFs }) {
+  const writeJson = (...args) => writeJsonWithFs(outputFs, ...args);
   const artifacts = {
     manifestPath: path.join(artifactRoot, "manifest.json"),
   };
@@ -561,6 +569,7 @@ function normalizeFinding(input, sensitiveValues) {
 }
 
 async function writeDevTestBotResult({
+  outputFs,
   runId,
   scope,
   completed,
@@ -574,6 +583,7 @@ async function writeDevTestBotResult({
   sensitiveValues,
   error = "",
 }) {
+  const writeJson = (...args) => writeJsonWithFs(outputFs, ...args);
   const findingsPath = path.join(artifactRoot, "findings.json");
   const eventsPath = path.join(artifactRoot, "events.ndjson");
   const resultPath = path.join(artifactRoot, "devtestbot-result.json");
@@ -586,7 +596,7 @@ async function writeDevTestBotResult({
     artifacts: sanitizeArtifacts(artifacts || artifactBundle?.artifacts || {}, sensitiveValues),
   };
   await writeJson(findingsPath, findings);
-  await fsp.writeFile(eventsPath, `${events.map((event) => JSON.stringify(event)).join("\n")}\n`, "utf-8");
+  await outputFs.writeFile(eventsPath, `${events.map((event) => JSON.stringify(event)).join("\n")}\n`, "utf-8");
   const result = sanitizeJson({
     schemaVersion: 1,
     runId,
@@ -701,7 +711,7 @@ async function readJsonIfPresent(filePath) {
   }
 }
 
-async function writeJson(filePath, payload) {
-  await fsp.mkdir(path.dirname(filePath), { recursive: true });
-  await fsp.writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
+async function writeJsonWithFs(outputFs, filePath, payload) {
+  await outputFs.mkdir(path.dirname(filePath), { recursive: true });
+  await outputFs.writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
 }

@@ -4,7 +4,7 @@ import process from "node:process";
 
 import { z } from "zod";
 
-import { resolveOutputRoot } from "../config/service.js";
+import { resolveOutputContext } from "../config/service.js";
 
 /** MCP tool-registry schema version used by Sentinelayer CLI generated artifacts. */
 export const MCP_TOOL_REGISTRY_SCHEMA_VERSION = "1.0.0";
@@ -1390,14 +1390,15 @@ export function stringifyJson(value) {
  *
  * @param {string} filePath
  * @param {unknown} value
- * @param {{ force?: boolean }} [options]
+ * @param {{ force?: boolean, outputFs?: typeof fsp }} [options]
  * @returns {Promise<string>}
  */
-export async function writeJsonFile(filePath, value, { force = false } = {}) {
+export async function writeJsonFile(filePath, value, { force = false, outputFs = fsp } = {}) {
   const resolvedPath = path.resolve(filePath);
+  await outputFs.assertPath?.(resolvedPath);
   if (!force) {
     try {
-      await fsp.access(resolvedPath);
+      await outputFs.access(resolvedPath);
       throw new Error(`File already exists: ${resolvedPath}. Use --force to overwrite.`);
     } catch (error) {
       if (error && typeof error === "object" && error.code === "ENOENT") {
@@ -1409,8 +1410,8 @@ export async function writeJsonFile(filePath, value, { force = false } = {}) {
       }
     }
   }
-  await fsp.mkdir(path.dirname(resolvedPath), { recursive: true });
-  await fsp.writeFile(resolvedPath, stringifyJson(value), "utf-8");
+  await outputFs.mkdir(path.dirname(resolvedPath), { recursive: true });
+  await outputFs.writeFile(resolvedPath, stringifyJson(value), "utf-8");
   return resolvedPath;
 }
 
@@ -1435,8 +1436,8 @@ export async function readJsonFile(filePath) {
  * @param {{ cwd?: string, outputDir?: string, env?: NodeJS.ProcessEnv }} [options]
  * @returns {Promise<string>}
  */
-export async function resolveDefaultMcpOutputPath({ cwd, outputDir, env } = {}) {
-  const outputRoot = await resolveOutputRoot({
+export async function resolveDefaultMcpOutputPath({ cwd, outputDir, env, outputContext } = {}) {
+  const { outputRoot } = outputContext || await resolveOutputContext({
     cwd,
     outputDirOverride: outputDir,
     env,
@@ -1450,8 +1451,8 @@ export async function resolveDefaultMcpOutputPath({ cwd, outputDir, env } = {}) 
  * @param {{ cwd?: string, outputDir?: string, env?: NodeJS.ProcessEnv }} [options]
  * @returns {Promise<string>}
  */
-export async function resolveDefaultAidenIdAdapterContractPath({ cwd, outputDir, env } = {}) {
-  const outputRoot = await resolveOutputRoot({
+export async function resolveDefaultAidenIdAdapterContractPath({ cwd, outputDir, env, outputContext } = {}) {
+  const { outputRoot } = outputContext || await resolveOutputContext({
     cwd,
     outputDirOverride: outputDir,
     env,
@@ -1465,8 +1466,8 @@ export async function resolveDefaultAidenIdAdapterContractPath({ cwd, outputDir,
  * @param {{ cwd?: string, outputDir?: string, env?: NodeJS.ProcessEnv }} [options]
  * @returns {Promise<string>}
  */
-export async function resolveDefaultHostedSentiSessionConnectorContractPath({ cwd, outputDir, env } = {}) {
-  const outputRoot = await resolveOutputRoot({
+export async function resolveDefaultHostedSentiSessionConnectorContractPath({ cwd, outputDir, env, outputContext } = {}) {
+  const { outputRoot } = outputContext || await resolveOutputContext({
     cwd,
     outputDirOverride: outputDir,
     env,
@@ -1485,8 +1486,9 @@ export async function resolveDefaultMcpServerConfigPath({
   outputDir,
   env,
   serverId,
+  outputContext,
 } = {}) {
-  const outputRoot = await resolveOutputRoot({
+  const { outputRoot } = outputContext || await resolveOutputContext({
     cwd,
     outputDirOverride: outputDir,
     env,

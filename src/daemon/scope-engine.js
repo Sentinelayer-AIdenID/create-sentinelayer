@@ -3,7 +3,8 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 
-import { resolveOutputRoot } from "../config/service.js";
+import { bindOutputFileSystem } from "../config/output-filesystem.js";
+import { resolveOutputContext } from "../config/service.js";
 import { createAgentEvent } from "../events/schema.js";
 import { collectCodebaseIngest } from "../ingest/engine.js";
 import { appendToStream } from "../session/stream.js";
@@ -707,7 +708,7 @@ export async function resolveScopeEngineStorage({
   env,
   homeDir,
 } = {}) {
-  const outputRoot = await resolveOutputRoot({
+  const { outputRoot, outputFs } = await resolveOutputContext({
     cwd: path.resolve(String(targetPath || ".")),
     outputDirOverride: outputDir,
     env,
@@ -715,12 +716,12 @@ export async function resolveScopeEngineStorage({
   });
   const observabilityRoot = path.join(outputRoot, "observability");
   const baseDir = path.join(observabilityRoot, "scope-engine");
-  return {
+  return bindOutputFileSystem({
     outputRoot,
     observabilityRoot,
     baseDir,
     runsDir: path.join(baseDir, "runs"),
-  };
+  }, outputFs);
 }
 
 async function writeScopeEnvelopeArtifact(storage, workItemId, envelope, nowIso) {
@@ -730,8 +731,8 @@ async function writeScopeEnvelopeArtifact(storage, workItemId, envelope, nowIso)
     normalizeString(workItemId),
     "scope_envelope.json"
   );
-  await fsp.mkdir(path.dirname(artifactPath), { recursive: true });
-  await fsp.writeFile(artifactPath, `${JSON.stringify(envelope, null, 2)}\n`, "utf-8");
+  await storage.outputFs.mkdir(path.dirname(artifactPath), { recursive: true });
+  await storage.outputFs.writeFile(artifactPath, `${JSON.stringify(envelope, null, 2)}\n`, "utf-8");
   return artifactPath;
 }
 
@@ -741,8 +742,8 @@ function buildRunMetadataPath(storage, runId) {
 
 async function persistRunMetadata(storage, payload) {
   const runPath = buildRunMetadataPath(storage, payload.runId);
-  await fsp.mkdir(path.dirname(runPath), { recursive: true });
-  await fsp.writeFile(runPath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
+  await storage.outputFs.mkdir(path.dirname(runPath), { recursive: true });
+  await storage.outputFs.writeFile(runPath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
   return runPath;
 }
 

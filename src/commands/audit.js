@@ -7,7 +7,7 @@ import { runAuditOrchestrator } from "../audit/orchestrator.js";
 import { loadAuditRunReport, resolveAuditRunDirectory, writeDdPackage } from "../audit/package.js";
 import { writeAuditComparisonArtifact } from "../audit/replay.js";
 import { loadAuditRegistry, selectAuditAgents } from "../audit/registry.js";
-import { resolveOutputRoot } from "../config/service.js";
+import { resolveOutputContext } from "../config/service.js";
 import { createAgentEvent } from "../events/schema.js";
 import { createAuditSessionReporter, resolveAuditSessionId } from "../session/audit-reporter.js";
 import { resolveActionOptions } from "./action-options.js";
@@ -217,7 +217,7 @@ export function registerAuditCommand(program, invokeLegacy) {
       const actionOptions = resolveActionOptions(options, command);
       const emitJson = shouldEmitJson(actionOptions, command);
       const targetPath = path.resolve(process.cwd(), String(actionOptions.path || "."));
-      const outputRoot = await resolveOutputRoot({
+      const { outputRoot, outputFs } = await resolveOutputContext({
         cwd: targetPath,
         outputDirOverride: actionOptions.outputDir,
         env: process.env,
@@ -228,6 +228,7 @@ export function registerAuditCommand(program, invokeLegacy) {
       });
       const { report } = await loadAuditRunReport(runDirectory);
       const ddPackage = await writeDdPackage({
+        outputFs,
         report,
         runDirectory,
       });
@@ -269,7 +270,7 @@ export function registerAuditCommand(program, invokeLegacy) {
       const actionOptions = resolveActionOptions(options, command);
       const emitJson = shouldEmitJson(actionOptions, command);
       const initialTargetPath = path.resolve(process.cwd(), String(actionOptions.path || "."));
-      const outputRoot = await resolveOutputRoot({
+      const { outputRoot } = await resolveOutputContext({
         cwd: initialTargetPath,
         outputDirOverride: actionOptions.outputDir,
         env: process.env,
@@ -306,6 +307,7 @@ export function registerAuditCommand(program, invokeLegacy) {
         baseReport,
         candidateReport: replayResult,
         outputDirectory: replayResult.runDirectory,
+        outputFs: replayResult.outputFs,
       });
 
       const payload = {
@@ -347,7 +349,7 @@ export function registerAuditCommand(program, invokeLegacy) {
       const actionOptions = resolveActionOptions(options, command);
       const emitJson = shouldEmitJson(actionOptions, command);
       const targetPath = path.resolve(process.cwd(), String(actionOptions.path || "."));
-      const outputRoot = await resolveOutputRoot({
+      const { outputRoot, outputFs } = await resolveOutputContext({
         cwd: targetPath,
         outputDirOverride: actionOptions.outputDir,
         env: process.env,
@@ -366,6 +368,7 @@ export function registerAuditCommand(program, invokeLegacy) {
         baseReport,
         candidateReport,
         outputDirectory: candidateRunDirectory,
+        outputFs,
       });
 
       const payload = {
@@ -869,14 +872,12 @@ export function registerAuditCommand(program, invokeLegacy) {
       const { julesAuditLoop } = await import("../agents/jules/loop.js");
       const { JULES_DEFINITION } = await import("../agents/jules/config/definition.js");
       const { collectCodebaseIngest, generateCodebaseIngest } = await import("../ingest/engine.js");
-      const { resolveOutputRoot: resolveOut } = await import("../config/service.js");
       const { createBlackboard } = await import("../memory/blackboard.js");
       const { runDeterministicReviewPipeline } = await import("../review/local-review.js");
-      const fsp = await import("node:fs/promises");
 
-      const outputRoot = await resolveOut({ targetPath, outputDir: actionOptions.outputDir });
+      const { outputRoot, outputFs } = await resolveOutputContext({ cwd: targetPath, outputDirOverride: actionOptions.outputDir });
       const artifactDir = path.join(outputRoot, "reports", "jules-" + Date.now());
-      await fsp.mkdir(artifactDir, { recursive: true });
+      await outputFs.mkdir(artifactDir, { recursive: true });
 
       // Build event handler
       const onEvent = buildEventHandler(emitStream, emitJson, JULES_DEFINITION);
@@ -888,7 +889,7 @@ export function registerAuditCommand(program, invokeLegacy) {
       let ingest;
       try {
         ingest = await generateCodebaseIngest({
-          rootPath: targetPath, outputDir: outputRoot,
+          rootPath: targetPath, outputDir: actionOptions.outputDir,
           refresh: Boolean(actionOptions.refresh),
         });
       } catch {
@@ -907,6 +908,7 @@ export function registerAuditCommand(program, invokeLegacy) {
             targetPath,
             mode: "full",
             outputDir: artifactDir,
+            outputFs,
           });
           emitProgress(onEvent, JULES_DEFINITION,
             "Baseline complete: P0=" + (omarBaseline?.summary?.P0 || 0) +
@@ -1085,21 +1087,21 @@ export function registerAuditCommand(program, invokeLegacy) {
         signature: JULES_DEFINITION.signature,
       };
 
-      await fsp.writeFile(
+      await outputFs.writeFile(
         path.join(artifactDir, "JULES_AUDIT.json"),
         JSON.stringify(reportPayload, null, 2),
       );
 
       // Write baseline artifact if it exists
       if (omarBaseline) {
-        await fsp.writeFile(
+        await outputFs.writeFile(
           path.join(artifactDir, "OMAR_BASELINE.json"),
           JSON.stringify(omarBaseline, null, 2),
         );
       }
 
       // Write reconciliation artifact
-      await fsp.writeFile(
+      await outputFs.writeFile(
         path.join(artifactDir, "RECONCILIATION.json"),
         JSON.stringify(reconciliation, null, 2),
       );

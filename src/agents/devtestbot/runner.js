@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { createOutputFileSystem } from "../../config/output-filesystem.js";
 import AxeBuilder from "@axe-core/playwright";
 import { chromium } from "playwright";
 
@@ -28,6 +29,7 @@ export class DevTestBotRunnerError extends Error {
 }
 
 export async function launch({
+  outputFs = createOutputFileSystem(),
   baseUrl,
   identityCreds = null,
   outputDir,
@@ -39,11 +41,12 @@ export async function launch({
   lighthouseTimeoutMs = DEFAULT_LIGHTHOUSE_TIMEOUT_MS,
   browserOptions = {},
 } = {}) {
+  const writeJson = (...args) => writeJsonWithFs(outputFs, ...args);
   const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
   const runId = "devtestbot-" + new Date().toISOString().replace(/[:.]/g, "-") + "-" + randomUUID().slice(0, 8);
   const artifactRoot = path.resolve(outputDir || path.join(process.cwd(), ".sentinelayer", "runs", runId, "devtestbot"));
-  const videoDir = path.join(artifactRoot, "video");
-  await fsp.mkdir(videoDir, { recursive: true });
+  const videoDir = await outputFs.assertPath(path.join(artifactRoot, "video"));
+  await outputFs.mkdir(videoDir, { recursive: true });
 
   const browserExecutable = resolvePlaywrightChromiumExecutable();
   const playwrightFfmpeg = findPlaywrightFfmpegExecutable();
@@ -73,6 +76,7 @@ export async function launch({
     ...omit(browserOptions, ["args"]),
   });
 
+  await outputFs.assertPath(videoDir);
   const context = await browser.newContext({
     baseURL: normalizedBaseUrl,
     viewport,
@@ -260,6 +264,7 @@ export async function launch({
       url: targetUrl,
       outputPath,
       chromePath: browserExecutable,
+      outputFs,
       timeoutMs: options.timeoutMs || lighthouseTimeoutMs,
       sensitiveValues,
     });
@@ -284,7 +289,7 @@ export async function launch({
       await captureVideoFrame("final");
       if (videoFrames.length > 0) {
         const mp4Path = path.join(videoDir, "recording.mp4");
-        await writeMp4FromPngFrames(page, videoFrames, mp4Path, viewport);
+        await writeMp4FromPngFrames(page, videoFrames, mp4Path, viewport, outputFs);
         artifacts.videoMp4Path = mp4Path;
       }
     } catch (error) {
@@ -380,7 +385,7 @@ export function findPlaywrightFfmpegExecutable(env = process.env, platform = pro
   return null;
 }
 
-export async function writeMp4FromPngFrames(page, frames, outputPath, viewport = DEFAULT_VIEWPORT) {
+export async function writeMp4FromPngFrames(page, frames, outputPath, viewport = DEFAULT_VIEWPORT, outputFs = createOutputFileSystem()) {
   if (!Array.isArray(frames) || frames.length === 0) {
     throw new DevTestBotRunnerError("devTestBot MP4 generation requires at least one frame.", {
       code: "DEVTESTBOT_MP4_NO_FRAMES",
@@ -480,8 +485,8 @@ export async function writeMp4FromPngFrames(page, frames, outputPath, viewport =
     return Array.from(new Uint8Array(target.buffer));
   }, { payloadFrames, width, height });
 
-  await fsp.mkdir(path.dirname(outputPath), { recursive: true });
-  await fsp.writeFile(outputPath, Buffer.from(bytes));
+  await outputFs.mkdir(path.dirname(outputPath), { recursive: true });
+  await outputFs.writeFile(outputPath, Buffer.from(bytes));
   const stat = await fsp.stat(outputPath).catch(() => null);
   if (!stat || stat.size <= 0) {
     throw new DevTestBotRunnerError("devTestBot MP4 generation produced no output.", {
@@ -595,12 +600,14 @@ function sanitizeJson(value, sensitiveValues) {
   return value;
 }
 
-async function runLighthouseCli({ url, outputPath, chromePath, timeoutMs, sensitiveValues }) {
+async function runLighthouseCli({ url, outputPath, chromePath, timeoutMs, sensitiveValues, outputFs }) {
+  const writeJson = (...args) => writeJsonWithFs(outputFs, ...args);
   const startedAt = new Date().toISOString();
-  await fsp.mkdir(path.dirname(outputPath), { recursive: true });
+  await outputFs.mkdir(path.dirname(outputPath), { recursive: true });
   let cliPath;
   try {
     cliPath = await resolveLighthouseCliPath();
+    outputPath = await outputFs.assertFilePath(outputPath);
     await execFileAsync(process.execPath, [
       cliPath,
       url,
@@ -750,9 +757,9 @@ async function settlePendingCaptures(pendingCaptures) {
   await Promise.allSettled([...pendingCaptures]);
 }
 
-async function writeJson(outputPath, payload) {
-  await fsp.mkdir(path.dirname(outputPath), { recursive: true });
-  await fsp.writeFile(outputPath, JSON.stringify(payload, null, 2) + "\n", "utf-8");
+async function writeJsonWithFs(outputFs, outputPath, payload) {
+  await outputFs.mkdir(path.dirname(outputPath), { recursive: true });
+  await outputFs.writeFile(outputPath, JSON.stringify(payload, null, 2) + "\n", "utf-8");
 }
 
 function buildFinalResult({ artifacts, artifactRoot, consoleEvents, networkEvents }) {

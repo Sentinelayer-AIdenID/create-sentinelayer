@@ -96,14 +96,14 @@ async function loadRegistryInternal(filePath) {
   }
 }
 
-async function writeRegistryInternal(filePath, registry = {}) {
+async function writeRegistryInternal(filePath, registry = {}, outputFs = fsp) {
   const normalized = {
     schemaVersion: REGISTRY_SCHEMA_VERSION,
     generatedAt: new Date().toISOString(),
     identities: Array.isArray(registry.identities) ? registry.identities.map(normalizeIdentityRecord) : [],
   };
-  await fsp.mkdir(path.dirname(filePath), { recursive: true });
-  await fsp.writeFile(filePath, `${JSON.stringify(normalized, null, 2)}\n`, "utf-8");
+  await outputFs.mkdir(path.dirname(filePath), { recursive: true });
+  await outputFs.writeFile(filePath, `${JSON.stringify(normalized, null, 2)}\n`, "utf-8");
   return normalized;
 }
 
@@ -130,6 +130,7 @@ export async function getIdentityById({ outputRoot, identityId } = {}) {
 }
 
 export async function recordProvisionedIdentity({
+  outputFs = fsp,
   outputRoot,
   response = {},
   context = {},
@@ -180,7 +181,7 @@ export async function recordProvisionedIdentity({
     registry.identities.push(nextRecord);
   }
 
-  const saved = await writeRegistryInternal(registryPath, registry);
+  const saved = await writeRegistryInternal(registryPath, registry, outputFs);
   const identity = saved.identities.find((item) => item.identityId === identityId) || null;
   return {
     registryPath,
@@ -189,6 +190,7 @@ export async function recordProvisionedIdentity({
 }
 
 export async function updateIdentityStatus({
+  outputFs = fsp,
   outputRoot,
   identityId,
   status,
@@ -226,7 +228,7 @@ export async function updateIdentityStatus({
     },
   });
 
-  const saved = await writeRegistryInternal(registryPath, registry);
+  const saved = await writeRegistryInternal(registryPath, registry, outputFs);
   return {
     registryPath,
     identity: saved.identities[index],

@@ -1,3 +1,18 @@
+# 2026-10-26 - PR 854 configured artifact write boundary
+
+- [x] Integrate current main without rewriting the reviewed PR history.
+- [x] Inventory configured output consumers and propagate a private filesystem capability to every current artifact writer.
+- [x] Validate full destinations at mutation time; refuse final-file links and use native no-follow where available.
+- [x] Preserve trusted CLI/global paths, safe parent links, output JSON and write options.
+- [x] Reproduce original unsafe writers and validate real Linux links and Windows junctions.
+- [x] Run native Linux boundary tests, Windows browser capture, existing writer suites and required local gates; retain exact failures rather than claiming green.
+- [x] Refresh only the two changed evaluation source bindings and rerun its unchanged cases.
+- [ ] Complete baseline classification of unrelated full-suite failures, Warden first review, independent second review and required hosted checks.
+
+Coverage, compatibility, limitations and evidence are recorded in
+`tasks/evals/pr-854-output-boundary.md`. No push or merge is authorized by a local
+test pass alone.
+
 # 2026-09-28 - Bounded session start (`roadmap/pr-800-session-start-bounded`)
 
 ## Plan

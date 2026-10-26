@@ -128,9 +128,9 @@ export function renderLineageRows(lineage = {}) {
     });
 }
 
-export async function writeArtifact(filePath, payload) {
-  await fsp.mkdir(path.dirname(filePath), { recursive: true });
-  await fsp.writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
+export async function writeArtifact(filePath, payload, outputFs = fsp) {
+  await outputFs.mkdir(path.dirname(filePath), { recursive: true });
+  await outputFs.writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
 }
 
 export function buildCurlPreview({ apiUrl, idempotencyKey, requestPath }) {

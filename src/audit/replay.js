@@ -87,6 +87,7 @@ export function compareAuditReports(baseReport = {}, candidateReport = {}) {
 }
 
 export async function writeAuditComparisonArtifact({
+  outputFs = fsp,
   baseReport = {},
   candidateReport = {},
   outputDirectory = "",
@@ -95,7 +96,7 @@ export async function writeAuditComparisonArtifact({
   const comparison = compareAuditReports(baseReport, candidateReport);
   const fileName = `AUDIT_COMPARISON_${comparison.baseRunId}_vs_${comparison.candidateRunId}.json`;
   const outputPath = path.join(resolvedOutputDirectory, fileName);
-  await fsp.writeFile(outputPath, `${JSON.stringify(comparison, null, 2)}\n`, "utf-8");
+  await outputFs.writeFile(outputPath, `${JSON.stringify(comparison, null, 2)}\n`, "utf-8");
   return {
     comparison,
     outputPath,

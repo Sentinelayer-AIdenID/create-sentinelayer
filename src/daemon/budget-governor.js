@@ -1,6 +1,7 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
 
+import { bindOutputFileSystem } from "../config/output-filesystem.js";
 import { resolveAssignmentLedgerStorage } from "./assignment-ledger.js";
 import { resolveErrorDaemonStorage } from "./error-worker.js";
 
@@ -179,14 +180,14 @@ async function loadJsonFile(filePath, defaultFactory) {
   }
 }
 
-async function writeJsonFile(filePath, payload = {}) {
-  await fsp.mkdir(path.dirname(filePath), { recursive: true });
-  await fsp.writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
+async function writeJsonFile(filePath, payload = {}, outputFs = fsp) {
+  await outputFs.mkdir(path.dirname(filePath), { recursive: true });
+  await outputFs.writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
 }
 
-async function appendEvent(filePath, payload = {}) {
-  await fsp.mkdir(path.dirname(filePath), { recursive: true });
-  await fsp.appendFile(filePath, `${JSON.stringify(payload)}\n`, "utf-8");
+async function appendEvent(filePath, payload = {}, outputFs = fsp) {
+  await outputFs.mkdir(path.dirname(filePath), { recursive: true });
+  await outputFs.appendFile(filePath, `${JSON.stringify(payload)}\n`, "utf-8");
 }
 
 async function loadQueue(queuePath, nowIso = new Date().toISOString()) {
@@ -202,12 +203,12 @@ async function loadQueue(queuePath, nowIso = new Date().toISOString()) {
   };
 }
 
-async function writeQueue(queuePath, queue = {}, nowIso = new Date().toISOString()) {
+async function writeQueue(queuePath, queue = {}, nowIso = new Date().toISOString(), outputFs = fsp) {
   await writeJsonFile(queuePath, {
     schemaVersion: QUEUE_SCHEMA_VERSION,
     generatedAt: normalizeIsoTimestamp(nowIso, nowIso),
     items: Array.isArray(queue.items) ? queue.items : [],
-  });
+  }, outputFs);
 }
 
 async function loadAssignmentLedger(ledgerPath, nowIso = new Date().toISOString()) {
@@ -218,12 +219,12 @@ async function loadAssignmentLedger(ledgerPath, nowIso = new Date().toISOString(
   }));
 }
 
-async function writeAssignmentLedger(ledgerPath, ledger = {}, nowIso = new Date().toISOString()) {
+async function writeAssignmentLedger(ledgerPath, ledger = {}, nowIso = new Date().toISOString(), outputFs = fsp) {
   await writeJsonFile(ledgerPath, {
     ...ledger,
     generatedAt: normalizeIsoTimestamp(nowIso, nowIso),
     assignments: Array.isArray(ledger.assignments) ? ledger.assignments : [],
-  });
+  }, outputFs);
 }
 
 export function evaluateDaemonBudget({
@@ -371,12 +372,12 @@ export async function resolveBudgetGovernorStorage({
     env,
     homeDir,
   });
-  return {
+  return bindOutputFileSystem({
     ...daemonStorage,
     budgetStatePath: path.join(daemonStorage.baseDir, "budget-state.json"),
     budgetEventsPath: path.join(daemonStorage.baseDir, "budget-events.ndjson"),
     budgetRunsDir: path.join(daemonStorage.baseDir, "budget-runs"),
-  };
+  }, daemonStorage.outputFs);
 }
 
 async function loadBudgetState(filePath, nowIso = new Date().toISOString()) {
@@ -392,7 +393,7 @@ async function loadBudgetState(filePath, nowIso = new Date().toISOString()) {
   };
 }
 
-async function writeBudgetState(filePath, state = {}, nowIso = new Date().toISOString()) {
+async function writeBudgetState(filePath, state = {}, nowIso = new Date().toISOString(), outputFs = fsp) {
   const normalized = {
     schemaVersion: BUDGET_STATE_SCHEMA_VERSION,
     generatedAt: normalizeIsoTimestamp(nowIso, nowIso),
@@ -402,7 +403,7 @@ async function writeBudgetState(filePath, state = {}, nowIso = new Date().toISOS
           .filter((record) => record.workItemId)
       : [],
   };
-  await writeJsonFile(filePath, normalized);
+  await writeJsonFile(filePath, normalized, outputFs);
   return normalized;
 }
 
@@ -529,9 +530,9 @@ export async function applyDaemonBudgetCheck({
   }
 
   const [savedState] = await Promise.all([
-    writeBudgetState(storage.budgetStatePath, budgetState, normalizedNow),
-    writeQueue(storage.queuePath, queue, normalizedNow),
-    writeAssignmentLedger(assignmentStorage.ledgerPath, assignmentLedger, normalizedNow),
+    writeBudgetState(storage.budgetStatePath, budgetState, normalizedNow, storage.outputFs),
+    writeQueue(storage.queuePath, queue, normalizedNow, storage.outputFs),
+    writeAssignmentLedger(assignmentStorage.ledgerPath, assignmentLedger, normalizedNow, assignmentStorage.outputFs),
   ]);
 
   await appendEvent(storage.budgetEventsPath, {
@@ -543,9 +544,9 @@ export async function applyDaemonBudgetCheck({
     warningCodes: evaluation.warnings.map((item) => item.code),
     stopCodes: evaluation.stopReasons.map((item) => item.code),
     quarantineUntil: evaluation.quarantineUntil,
-  });
+  }, storage.outputFs);
 
-  await fsp.mkdir(storage.budgetRunsDir, { recursive: true });
+  await storage.outputFs.mkdir(storage.budgetRunsDir, { recursive: true });
   const runId = `budget-check-${normalizedNow.replace(/[:.]/g, "-")}-${String(
     budgetState.records.length
   ).padStart(4, "0")}`;
@@ -562,7 +563,7 @@ export async function applyDaemonBudgetCheck({
     usage: evaluation.usage,
     quarantineStartedAt: evaluation.quarantineStartedAt,
     quarantineUntil: evaluation.quarantineUntil,
-  });
+  }, storage.outputFs);
 
   return {
     ...storage,

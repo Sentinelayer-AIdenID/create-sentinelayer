@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import fsp from "node:fs/promises";
+import { bindOutputFileSystem } from "../../config/output-filesystem.js";
 import { evaluateBudget } from "../../cost/budget.js";
 import {
   normalizeRunEvent,
@@ -186,9 +188,9 @@ export function createToolDispatcher(toolMap, readOnlyTools) {
     const serialized = JSON.stringify(result);
     if (serialized.length > RESULT_PERSIST_THRESHOLD && ctx.artifactDir) {
       const refPath = `${ctx.artifactDir}/tool-results/${eventId}.json`;
-      const fsp = await import("node:fs/promises");
-      await fsp.mkdir(`${ctx.artifactDir}/tool-results`, { recursive: true });
-      await fsp.writeFile(refPath, serialized, "utf-8");
+      const outputFs = ctx.outputFs || fsp;
+      await outputFs.mkdir(`${ctx.artifactDir}/tool-results`, { recursive: true });
+      await outputFs.writeFile(refPath, serialized, "utf-8");
       return {
         _persisted: true,
         _refPath: refPath,
@@ -224,9 +226,10 @@ export function createAgentContext({
   sessionId,
   runId,
   artifactDir,
+  outputFs,
   onEvent,
 }) {
-  return {
+  return bindOutputFileSystem({
     agentIdentity,
     budget: {
       maxCostUsd: budget?.maxCostUsd ?? 5.0,
@@ -249,7 +252,7 @@ export function createAgentContext({
     lastToolCallAt: Date.now(),
     lastToolName: null,
     onEvent,
-  };
+  }, outputFs);
 }
 
 function snapshotUsage(ctx) {
@@ -295,7 +298,7 @@ async function safeAppendEvent(ctx, eventData) {
     });
     if (ctx.artifactDir) {
       await appendRunEvent(
-        { targetPath: ctx.artifactDir, outputDir: ctx.artifactDir },
+        { targetPath: ctx.artifactDir, outputDir: ctx.artifactDir, outputFs: ctx.outputFs },
         normalized,
       );
     }

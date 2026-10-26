@@ -116,7 +116,7 @@ export function buildDdPackageManifest(report = {}) {
   };
 }
 
-export async function writeDdPackage({ report = {}, runDirectory } = {}) {
+export async function writeDdPackage({ report = {}, runDirectory, outputFs = fsp } = {}) {
   const resolvedRunDirectory = normalizeRunDirectory(runDirectory || report.runDirectory);
   const manifest = buildDdPackageManifest({
     ...report,
@@ -138,9 +138,9 @@ export async function writeDdPackage({ report = {}, runDirectory } = {}) {
     findingsIndex,
   });
 
-  await fsp.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf-8");
-  await fsp.writeFile(findingsIndexPath, `${JSON.stringify(findingsIndex, null, 2)}\n`, "utf-8");
-  await fsp.writeFile(executiveSummaryPath, `${executiveSummary.trim()}\n`, "utf-8");
+  await outputFs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf-8");
+  await outputFs.writeFile(findingsIndexPath, `${JSON.stringify(findingsIndex, null, 2)}\n`, "utf-8");
+  await outputFs.writeFile(executiveSummaryPath, `${executiveSummary.trim()}\n`, "utf-8");
 
   return {
     manifest,

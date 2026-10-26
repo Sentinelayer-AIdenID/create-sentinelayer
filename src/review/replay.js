@@ -74,6 +74,7 @@ function normalizeInvocation(invocation = {}) {
 }
 
 export async function writeReviewRunContext({
+  outputFs = fsp,
   runDirectory,
   runId,
   targetPath,
@@ -96,8 +97,8 @@ export async function writeReviewRunContext({
     },
   };
   const contextPath = path.join(normalizedRunDirectory, REVIEW_RUN_CONTEXT_FILE);
-  await fsp.mkdir(normalizedRunDirectory, { recursive: true });
-  await fsp.writeFile(contextPath, `${JSON.stringify(context, null, 2)}\n`, "utf-8");
+  await outputFs.mkdir(normalizedRunDirectory, { recursive: true });
+  await outputFs.writeFile(contextPath, `${JSON.stringify(context, null, 2)}\n`, "utf-8");
   return {
     context,
     contextPath,
@@ -208,6 +209,7 @@ function sanitizeRunId(value) {
 }
 
 export async function writeReviewComparisonArtifact({
+  outputFs = fsp,
   runDirectory,
   baseRunId,
   candidateRunId,
@@ -225,8 +227,8 @@ export async function writeReviewComparisonArtifact({
     candidateRunId: normalizeString(candidateRunId),
     comparison,
   };
-  await fsp.mkdir(normalizedRunDirectory, { recursive: true });
-  await fsp.writeFile(artifactPath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
+  await outputFs.mkdir(normalizedRunDirectory, { recursive: true });
+  await outputFs.writeFile(artifactPath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
   return {
     artifactPath,
     payload,

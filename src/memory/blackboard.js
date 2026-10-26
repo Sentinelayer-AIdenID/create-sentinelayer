@@ -274,13 +274,13 @@ export function summarizeBlackboard(blackboard) {
   };
 }
 
-export async function writeBlackboardArtifact(blackboard, { outputRoot = "" } = {}) {
+export async function writeBlackboardArtifact(blackboard, { outputRoot = "", outputFs = fsp } = {}) {
   if (!blackboard || !Array.isArray(blackboard.entries)) {
     throw new Error("Invalid blackboard state.");
   }
   const resolvedOutputRoot = path.resolve(String(outputRoot || "."));
   const memoryDirectory = path.join(resolvedOutputRoot, "memory");
-  await fsp.mkdir(memoryDirectory, { recursive: true });
+  await outputFs.mkdir(memoryDirectory, { recursive: true });
   const runId = normalizeString(blackboard.runId) || "run";
   const artifactPath = path.join(memoryDirectory, `blackboard-${runId}.json`);
   const summary = summarizeBlackboard(blackboard);
@@ -293,7 +293,7 @@ export async function writeBlackboardArtifact(blackboard, { outputRoot = "" } = 
     entries: blackboard.entries,
     queryEvents: blackboard.queryEvents,
   };
-  await fsp.writeFile(artifactPath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
+  await outputFs.writeFile(artifactPath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
   return {
     artifactPath,
     summary,

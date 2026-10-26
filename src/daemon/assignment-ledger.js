@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import fsp from "node:fs/promises";
 import path from "node:path";
 
+import { bindOutputFileSystem } from "../config/output-filesystem.js";
 import { WORK_ITEM_STATUSES, resolveErrorDaemonStorage } from "./error-worker.js";
 
 const LEDGER_SCHEMA_VERSION = "1.0.0";
@@ -170,14 +171,14 @@ async function loadJsonFile(filePath, defaultFactory) {
   }
 }
 
-async function writeJsonFile(filePath, payload = {}) {
-  await fsp.mkdir(path.dirname(filePath), { recursive: true });
-  await fsp.writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
+async function writeJsonFile(filePath, payload = {}, outputFs = fsp) {
+  await outputFs.mkdir(path.dirname(filePath), { recursive: true });
+  await outputFs.writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
 }
 
-async function appendEvent(filePath, payload = {}) {
-  await fsp.mkdir(path.dirname(filePath), { recursive: true });
-  await fsp.appendFile(filePath, `${JSON.stringify(payload)}\n`, "utf-8");
+async function appendEvent(filePath, payload = {}, outputFs = fsp) {
+  await outputFs.mkdir(path.dirname(filePath), { recursive: true });
+  await outputFs.appendFile(filePath, `${JSON.stringify(payload)}\n`, "utf-8");
 }
 
 async function loadLedger(ledgerPath, nowIso = new Date().toISOString()) {
@@ -193,7 +194,7 @@ async function loadLedger(ledgerPath, nowIso = new Date().toISOString()) {
   };
 }
 
-async function writeLedger(ledgerPath, ledger = {}, nowIso = new Date().toISOString()) {
+async function writeLedger(ledgerPath, ledger = {}, nowIso = new Date().toISOString(), outputFs = fsp) {
   const normalized = {
     schemaVersion: LEDGER_SCHEMA_VERSION,
     generatedAt: normalizeIsoTimestamp(nowIso, nowIso),
@@ -203,7 +204,7 @@ async function writeLedger(ledgerPath, ledger = {}, nowIso = new Date().toISOStr
           .filter((record) => normalizeString(record.workItemId))
       : [],
   };
-  await writeJsonFile(ledgerPath, normalized);
+  await writeJsonFile(ledgerPath, normalized, outputFs);
   return normalized;
 }
 
@@ -218,7 +219,7 @@ async function loadQueue(queuePath, nowIso = new Date().toISOString()) {
   };
 }
 
-async function writeQueue(queuePath, queue = {}, nowIso = new Date().toISOString()) {
+async function writeQueue(queuePath, queue = {}, nowIso = new Date().toISOString(), outputFs = fsp) {
   const normalized = {
     schemaVersion: QUEUE_SCHEMA_VERSION,
     generatedAt: normalizeIsoTimestamp(nowIso, nowIso),
@@ -226,16 +227,16 @@ async function writeQueue(queuePath, queue = {}, nowIso = new Date().toISOString
       ? queue.items.map((item) => normalizeQueueItem(item, nowIso)).filter((item) => item.workItemId)
       : [],
   };
-  await writeJsonFile(queuePath, normalized);
+  await writeJsonFile(queuePath, normalized, outputFs);
   return normalized;
 }
 
 function getAssignmentStoragePaths(baseStorage = {}) {
-  return {
+  return bindOutputFileSystem({
     ...baseStorage,
     ledgerPath: path.join(baseStorage.baseDir, "assignment-ledger.json"),
     eventsPath: path.join(baseStorage.baseDir, "assignment-events.ndjson"),
-  };
+  }, baseStorage.outputFs);
 }
 
 async function loadLedgerAndQueue(storage, nowIso) {
@@ -436,8 +437,8 @@ export async function claimAssignment({
   });
 
   const [savedLedger, savedQueue] = await Promise.all([
-    writeLedger(storage.ledgerPath, ledger, normalizedNow),
-    writeQueue(storage.queuePath, queue, normalizedNow),
+    writeLedger(storage.ledgerPath, ledger, normalizedNow, storage.outputFs),
+    writeQueue(storage.queuePath, queue, normalizedNow, storage.outputFs),
   ]);
 
   await appendEvent(storage.eventsPath, {
@@ -451,7 +452,7 @@ export async function claimAssignment({
     stage: normalizeString(stage) || "triage",
     runId: normalizeString(runId) || null,
     jiraIssueKey: normalizeString(jiraIssueKey) || null,
-  });
+  }, storage.outputFs);
 
   return {
     ...storage,
@@ -537,8 +538,8 @@ export async function heartbeatAssignment({
   });
 
   const [savedLedger, savedQueue] = await Promise.all([
-    writeLedger(storage.ledgerPath, ledger, normalizedNow),
-    writeQueue(storage.queuePath, queue, normalizedNow),
+    writeLedger(storage.ledgerPath, ledger, normalizedNow, storage.outputFs),
+    writeQueue(storage.queuePath, queue, normalizedNow, storage.outputFs),
   ]);
 
   await appendEvent(storage.eventsPath, {
@@ -549,7 +550,7 @@ export async function heartbeatAssignment({
     agentIdentity: normalizedAgentIdentity,
     stage: next.stage,
     leaseExpiresAt,
-  });
+  }, storage.outputFs);
 
   return {
     ...storage,
@@ -638,8 +639,8 @@ export async function releaseAssignment({
   });
 
   const [savedLedger, savedQueue] = await Promise.all([
-    writeLedger(storage.ledgerPath, ledger, normalizedNow),
-    writeQueue(storage.queuePath, queue, normalizedNow),
+    writeLedger(storage.ledgerPath, ledger, normalizedNow, storage.outputFs),
+    writeQueue(storage.queuePath, queue, normalizedNow, storage.outputFs),
   ]);
 
   await appendEvent(storage.eventsPath, {
@@ -650,7 +651,7 @@ export async function releaseAssignment({
     agentIdentity: next.assignedAgentIdentity,
     status: normalizedStatus,
     reason: next.releaseReason,
-  });
+  }, storage.outputFs);
 
   return {
     ...storage,
@@ -746,8 +747,8 @@ export async function reassignAssignment({
   });
 
   const [savedLedger, savedQueue] = await Promise.all([
-    writeLedger(storage.ledgerPath, ledger, normalizedNow),
-    writeQueue(storage.queuePath, queue, normalizedNow),
+    writeLedger(storage.ledgerPath, ledger, normalizedNow, storage.outputFs),
+    writeQueue(storage.queuePath, queue, normalizedNow, storage.outputFs),
   ]);
 
   await appendEvent(storage.eventsPath, {
@@ -760,7 +761,7 @@ export async function reassignAssignment({
     leaseTtlSeconds: normalizedTtl,
     leaseExpiresAt,
     stage: next.stage,
-  });
+  }, storage.outputFs);
 
   return {
     ...storage,
@@ -1073,7 +1074,7 @@ export async function ensureWorkItemQueued({
     queue.items.push(normalizedItem);
   }
 
-  const savedQueue = await writeQueue(storage.queuePath, queue, normalizedNow);
+  const savedQueue = await writeQueue(storage.queuePath, queue, normalizedNow, storage.outputFs);
   const queueItem = savedQueue.items.find((item) => item.workItemId === normalizedWorkItemId) || normalizedItem;
   return {
     ...storage,

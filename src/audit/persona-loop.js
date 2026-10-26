@@ -376,6 +376,7 @@ export function createIsolatedPersonaContext({
   runId = "",
   rootPath = ".",
   artifactDir = "",
+  outputFs,
   provider = null,
   budget = {},
   onEvent = null,
@@ -399,6 +400,7 @@ export function createIsolatedPersonaContext({
     budget: loopBudget,
     runId: resolvedRunId,
     artifactDir,
+    outputFs,
     onEvent,
   });
   const emitter = (event, payload = {}) => {
@@ -701,6 +703,7 @@ async function runSinglePersonaAgenticLoop({
   sharedContext = null,
   hybridContext = null,
   artifactDir = "",
+  outputFs,
   provider = null,
   budget = {},
   maxTurns = null,
@@ -722,6 +725,7 @@ async function runSinglePersonaAgenticLoop({
     runId: requestedRunId,
     rootPath: resolvedRootPath,
     artifactDir,
+    outputFs,
     provider,
     budget,
     onEvent,

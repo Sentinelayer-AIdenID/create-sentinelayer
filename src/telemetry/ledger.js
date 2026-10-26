@@ -2,7 +2,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 
-import { resolveOutputRoot } from "../config/service.js";
+import { resolveOutputContext } from "../config/service.js";
 
 const OBSERVABILITY_DIR_NAME = "observability";
 const RUN_EVENTS_FILE_NAME = "run-events.jsonl";
@@ -248,26 +248,34 @@ export function summarizeRunEvents(events = []) {
   return summary;
 }
 
-export async function resolveRunEventsPath({
+async function resolveRunEventsOutput({
   targetPath = ".",
   outputDirOverride = "",
   env,
   homeDir,
+  outputFs: inheritedOutputFs,
 } = {}) {
-  const outputRoot = await resolveOutputRoot({
+  const { outputRoot, outputFs } = await resolveOutputContext({
     cwd: path.resolve(targetPath),
     outputDirOverride,
     env,
     homeDir,
   });
-  return path.join(outputRoot, OBSERVABILITY_DIR_NAME, RUN_EVENTS_FILE_NAME);
+  return {
+    filePath: path.join(outputRoot, OBSERVABILITY_DIR_NAME, RUN_EVENTS_FILE_NAME),
+    outputFs: inheritedOutputFs || outputFs,
+  };
+}
+
+export async function resolveRunEventsPath(options = {}) {
+  return (await resolveRunEventsOutput(options)).filePath;
 }
 
 export async function appendRunEvent(options = {}, event = {}) {
   const normalizedEvent = normalizeRunEvent(event);
-  const filePath = await resolveRunEventsPath(options);
-  await fsp.mkdir(path.dirname(filePath), { recursive: true });
-  await fsp.appendFile(filePath, `${JSON.stringify(normalizedEvent)}\n`, "utf-8");
+  const { filePath, outputFs } = await resolveRunEventsOutput(options);
+  await outputFs.mkdir(path.dirname(filePath), { recursive: true });
+  await outputFs.appendFile(filePath, `${JSON.stringify(normalizedEvent)}\n`, "utf-8");
   return {
     filePath,
     event: normalizedEvent,

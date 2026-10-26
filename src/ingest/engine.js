@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 
 import ignore from "ignore";
 
-import { resolveOutputRoot } from "../config/service.js";
+import { resolveOutputRoot, resolveOutputContext } from "../config/service.js";
 
 const DEFAULT_IGNORED_DIRS = new Set([
   ".git",
@@ -793,25 +793,22 @@ export function formatIngestSummary(ingest) {
   return lines.join("\n");
 }
 
-export async function writeCodebaseIngest({ ingest, rootPath, outputFile = "", outputDir = "" } = {}) {
+export async function writeCodebaseIngest({ ingest, rootPath, outputFile = "", outputDir = "", outputFs: inheritedOutputFs } = {}) {
   const resolvedRoot = path.resolve(rootPath || process.cwd());
   const resolvedOutputFile = String(outputFile || "").trim();
+  const output = resolvedOutputFile ? null : await resolveOutputContext({ cwd: resolvedRoot, outputDirOverride: outputDir });
+  const outputFs = inheritedOutputFs || output?.outputFs || fsp;
   const outputPath = resolvedOutputFile
     ? path.resolve(resolvedRoot, resolvedOutputFile)
-    : path.join(
-        await resolveOutputRoot({
-          cwd: resolvedRoot,
-          outputDirOverride: outputDir,
-        }),
-        "CODEBASE_INGEST.json"
-      );
+    : path.join(output.outputRoot, "CODEBASE_INGEST.json");
 
-  await fsp.mkdir(path.dirname(outputPath), { recursive: true });
-  await fsp.writeFile(outputPath, `${JSON.stringify(ingest, null, 2)}\n`, "utf-8");
+  await outputFs.mkdir(path.dirname(outputPath), { recursive: true });
+  await outputFs.writeFile(outputPath, `${JSON.stringify(ingest, null, 2)}\n`, "utf-8");
   return outputPath;
 }
 
 export async function resolveCodebaseIngest({
+  outputFs,
   rootPath = process.cwd(),
   outputFile = "",
   outputDir = "",
@@ -859,6 +856,7 @@ export async function resolveCodebaseIngest({
     ingest.cache.filesCount = fingerprint.filesCount;
     ingest.cache.latestFileMtimeMs = fingerprint.latestFileMtimeMs;
     await writeCodebaseIngest({
+      outputFs,
       ingest,
       rootPath: resolvedRoot,
       outputFile,
@@ -900,12 +898,14 @@ export async function resolveCodebaseIngest({
 }
 
 export async function generateCodebaseIngest({
+  outputFs,
   rootPath = process.cwd(),
   outputFile = "",
   outputDir = "",
 } = {}) {
   const ingest = await collectCodebaseIngest({ rootPath });
   const outputPath = await writeCodebaseIngest({
+    outputFs,
     ingest,
     rootPath,
     outputFile,

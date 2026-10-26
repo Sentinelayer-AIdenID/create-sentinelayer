@@ -2,7 +2,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 
-import { resolveOutputRoot } from "../config/service.js";
+import { resolveOutputContext } from "../config/service.js";
 import { rollupUsage } from "./tracker.js";
 
 const HISTORY_VERSION = 1;
@@ -60,19 +60,23 @@ function normalizeEntry(entry) {
   };
 }
 
-export async function resolveCostHistoryPath({
+async function resolveCostHistoryOutput({
   targetPath = ".",
   outputDirOverride = "",
   env,
   homeDir,
 } = {}) {
-  const outputRoot = await resolveOutputRoot({
+  const { outputRoot, outputFs } = await resolveOutputContext({
     cwd: path.resolve(targetPath),
     outputDirOverride,
     env,
     homeDir,
   });
-  return path.join(outputRoot, HISTORY_FILE_NAME);
+  return { filePath: path.join(outputRoot, HISTORY_FILE_NAME), outputFs };
+}
+
+export async function resolveCostHistoryPath(options = {}) {
+  return (await resolveCostHistoryOutput(options)).filePath;
 }
 
 export async function loadCostHistory(options = {}) {
@@ -106,25 +110,25 @@ async function readCostHistoryFile(filePath) {
   }
 }
 
-export async function saveCostHistory({ filePath, history }) {
+export async function saveCostHistory({ filePath, history, outputFs = fsp }) {
   const payload = {
     version: HISTORY_VERSION,
     entries: Array.isArray(history?.entries) ? history.entries : [],
   };
-  await fsp.mkdir(path.dirname(filePath), { recursive: true });
-  await fsp.writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
+  await outputFs.mkdir(path.dirname(filePath), { recursive: true });
+  await outputFs.writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
 }
 
 export async function appendCostEntry(options = {}, entry = {}) {
   const normalizedEntry = normalizeEntry(entry);
-  const filePath = await resolveCostHistoryPath(options);
+  const { filePath, outputFs } = await resolveCostHistoryOutput(options);
   return withCostHistoryWriteQueue(filePath, async () => {
     const history = await readCostHistoryFile(filePath);
     const nextHistory = {
       version: HISTORY_VERSION,
       entries: [...history.entries, normalizedEntry],
     };
-    await saveCostHistory({ filePath, history: nextHistory });
+    await saveCostHistory({ filePath, history: nextHistory, outputFs });
     return {
       filePath,
       entry: normalizedEntry,

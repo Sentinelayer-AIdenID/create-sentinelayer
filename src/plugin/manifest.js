@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { ZodError, z } from "zod";
 
-import { resolveOutputRoot } from "../config/service.js";
+import { resolveOutputContext } from "../config/service.js";
 
 export const PLUGIN_MANIFEST_SCHEMA_VERSION = "1.0.0";
 export const PLUGIN_MANIFEST_KIND = "sentinelayer.cli.plugin";
@@ -284,11 +284,12 @@ export function stringifyJson(value) {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
 
-export async function writeJsonFile(filePath, value, { force = false } = {}) {
+export async function writeJsonFile(filePath, value, { force = false, outputFs = fsp } = {}) {
   const resolvedPath = path.resolve(filePath);
+  await outputFs.assertPath?.(resolvedPath);
   if (!force) {
     try {
-      await fsp.access(resolvedPath);
+      await outputFs.access(resolvedPath);
       throw new Error(`File already exists: ${resolvedPath}. Use --force to overwrite.`);
     } catch (error) {
       if (error && typeof error === "object" && error.code === "ENOENT") {
@@ -301,8 +302,8 @@ export async function writeJsonFile(filePath, value, { force = false } = {}) {
     }
   }
 
-  await fsp.mkdir(path.dirname(resolvedPath), { recursive: true });
-  await fsp.writeFile(resolvedPath, stringifyJson(value), "utf-8");
+  await outputFs.mkdir(path.dirname(resolvedPath), { recursive: true });
+  await outputFs.writeFile(resolvedPath, stringifyJson(value), "utf-8");
   return resolvedPath;
 }
 
@@ -315,8 +316,8 @@ export async function readJsonFile(filePath) {
   };
 }
 
-export async function resolvePluginsDirectoryPath({ cwd, outputDir, env } = {}) {
-  const outputRoot = await resolveOutputRoot({
+export async function resolvePluginsDirectoryPath({ cwd, outputDir, env, outputContext } = {}) {
+  const { outputRoot } = outputContext || await resolveOutputContext({
     cwd,
     outputDirOverride: outputDir,
     env,
@@ -324,11 +325,12 @@ export async function resolvePluginsDirectoryPath({ cwd, outputDir, env } = {}) 
   return path.join(outputRoot, "plugins");
 }
 
-export async function resolveDefaultPluginManifestPath({ cwd, outputDir, env, pluginId } = {}) {
+export async function resolveDefaultPluginManifestPath({ cwd, outputDir, env, pluginId, outputContext } = {}) {
   const pluginsRoot = await resolvePluginsDirectoryPath({
     cwd,
     outputDir,
     env,
+    outputContext,
   });
   const normalizedId = normalizePluginId(pluginId);
   return path.join(pluginsRoot, normalizedId, "plugin.json");

@@ -1,6 +1,7 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
 
+import { bindOutputFileSystem } from "../config/output-filesystem.js";
 import { createAgentEvent } from "../events/schema.js";
 import { appendToStream } from "../session/stream.js";
 import { resolveAssignmentLedgerStorage } from "./assignment-ledger.js";
@@ -165,14 +166,14 @@ async function loadJsonFile(filePath, defaultFactory) {
   }
 }
 
-async function writeJsonFile(filePath, payload = {}) {
-  await fsp.mkdir(path.dirname(filePath), { recursive: true });
-  await fsp.writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
+async function writeJsonFile(filePath, payload = {}, outputFs = fsp) {
+  await outputFs.mkdir(path.dirname(filePath), { recursive: true });
+  await outputFs.writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
 }
 
-async function appendEvent(filePath, payload = {}) {
-  await fsp.mkdir(path.dirname(filePath), { recursive: true });
-  await fsp.appendFile(filePath, `${JSON.stringify(payload)}\n`, "utf-8");
+async function appendEvent(filePath, payload = {}, outputFs = fsp) {
+  await outputFs.mkdir(path.dirname(filePath), { recursive: true });
+  await outputFs.appendFile(filePath, `${JSON.stringify(payload)}\n`, "utf-8");
 }
 
 async function loadQueue(queuePath, nowIso = new Date().toISOString()) {
@@ -200,7 +201,7 @@ async function loadLifecycle(lifecyclePath, nowIso = new Date().toISOString()) {
   };
 }
 
-async function writeLifecycle(lifecyclePath, lifecycle = {}, nowIso = new Date().toISOString()) {
+async function writeLifecycle(lifecyclePath, lifecycle = {}, nowIso = new Date().toISOString(), outputFs = fsp) {
   const normalized = {
     schemaVersion: LIFECYCLE_SCHEMA_VERSION,
     generatedAt: normalizeIsoTimestamp(nowIso, nowIso),
@@ -211,7 +212,7 @@ async function writeLifecycle(lifecyclePath, lifecycle = {}, nowIso = new Date()
           .filter((issue) => issue.workItemId && issue.issueKey)
       : [],
   };
-  await writeJsonFile(lifecyclePath, normalized);
+  await writeJsonFile(lifecyclePath, normalized, outputFs);
   return normalized;
 }
 
@@ -284,7 +285,7 @@ async function syncIssueKeyToAssignment({
     ...rawLedger,
     generatedAt: nowIso,
     assignments,
-  });
+  }, assignmentStorage.outputFs);
 }
 
 export async function resolveJiraLifecycleStorage({
@@ -299,11 +300,11 @@ export async function resolveJiraLifecycleStorage({
     env,
     homeDir,
   });
-  return {
+  return bindOutputFileSystem({
     ...daemonStorage,
     lifecyclePath: path.join(daemonStorage.baseDir, "jira-lifecycle.json"),
     eventsPath: path.join(daemonStorage.baseDir, "jira-events.ndjson"),
-  };
+  }, daemonStorage.outputFs);
 }
 
 export async function emitJiraLifecycleEvent(
@@ -453,7 +454,7 @@ export async function openJiraIssue({
     normalizedNow
   );
   lifecycle.issues.push(issue);
-  const savedLifecycle = await writeLifecycle(storage.lifecyclePath, lifecycle, normalizedNow);
+  const savedLifecycle = await writeLifecycle(storage.lifecyclePath, lifecycle, normalizedNow, storage.outputFs);
   await appendEvent(storage.eventsPath, {
     timestamp: normalizedNow,
     eventType: "create_issue",
@@ -461,7 +462,7 @@ export async function openJiraIssue({
     workItemId: normalizedWorkItemId,
     issueKey: normalizedIssueKey,
     status: "OPEN",
-  });
+  }, storage.outputFs);
   await syncIssueKeyToAssignment({
     targetPath,
     outputDir,
@@ -536,7 +537,7 @@ export async function commentJiraIssue({
   existing.latestCommentAt = normalizedNow;
   existing.updatedAt = normalizedNow;
   lifecycle.issues[issueIndex] = normalizeIssue(existing, normalizedNow);
-  const savedLifecycle = await writeLifecycle(storage.lifecyclePath, lifecycle, normalizedNow);
+  const savedLifecycle = await writeLifecycle(storage.lifecyclePath, lifecycle, normalizedNow, storage.outputFs);
   await appendEvent(storage.eventsPath, {
     timestamp: normalizedNow,
     eventType: "comment",
@@ -545,7 +546,7 @@ export async function commentJiraIssue({
     issueKey: existing.issueKey,
     type: comment.type,
     message: comment.message,
-  });
+  }, storage.outputFs);
   if (normalizedSessionId) {
     await emitJiraLifecycleEvent(normalizedSessionId, {
       phase: comment.type === "plan" ? "plan_comment" : "checkpoint",
@@ -613,7 +614,7 @@ export async function transitionJiraIssue({
   existing.transitions = [...existing.transitions, transition];
   existing.updatedAt = normalizedNow;
   lifecycle.issues[issueIndex] = normalizeIssue(existing, normalizedNow);
-  const savedLifecycle = await writeLifecycle(storage.lifecyclePath, lifecycle, normalizedNow);
+  const savedLifecycle = await writeLifecycle(storage.lifecyclePath, lifecycle, normalizedNow, storage.outputFs);
   await appendEvent(storage.eventsPath, {
     timestamp: normalizedNow,
     eventType: "transition",
@@ -623,7 +624,7 @@ export async function transitionJiraIssue({
     from: transition.from,
     to: transition.to,
     reason: transition.reason,
-  });
+  }, storage.outputFs);
   if (normalizedSessionId) {
     await emitJiraLifecycleEvent(normalizedSessionId, {
       phase: resolveTransitionPhase(nextStatus),
