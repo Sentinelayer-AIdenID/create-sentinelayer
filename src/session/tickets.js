@@ -207,6 +207,47 @@ export async function ticketEvents(
   });
 }
 
+/** Create with an explicit acting agent claim; the API authorizes it, never a createdBy body. */
+export async function createTicket(sessionId, {
+  title, body = "", agentId = "", assignee = "", sourceSequenceId = null,
+  idempotencyKey = `ticket-create-${randomUUID()}`, targetPath = process.cwd(),
+  resolveAuthSession = resolveActiveAuthSession, requestMutation = requestJsonMutation,
+} = {}) {
+  const cleanTitle = normalizeString(title), cleanAgent = normalizeString(agentId);
+  if (!cleanTitle || [...cleanTitle].length > 200 || typeof body !== "string" || [...body].length > 8000) throw new Error("Ticket title/body exceeds its limits.");
+  if (cleanAgent && !/^[a-zA-Z0-9._:-]{1,64}$/.test(cleanAgent)) throw new Error("Invalid agent identity.");
+  if (sourceSequenceId !== null && (!Number.isSafeInteger(sourceSequenceId) || sourceSequenceId < 1)) throw new Error("Invalid source sequence.");
+  if (typeof idempotencyKey !== "string" || !idempotencyKey.trim() || idempotencyKey.length > 128) throw new Error("Invalid idempotency key.");
+  const { credential, apiUrl } = await auth(targetPath, resolveAuthSession);
+  try {
+    const ticket = await mutate(ticketsUrl(apiUrl, sessionId), { credential, key: idempotencyKey, operation: "create", requestMutation,
+      body: { title: cleanTitle, body, ...(cleanAgent ? { agentId: cleanAgent } : {}),
+        ...(normalizeString(assignee) ? { assignee: normalizeString(assignee) } : {}),
+        ...(sourceSequenceId !== null ? { sourceSequenceId } : {}) },
+    });
+    if (typeof ticket?.id !== "string" || !ticket.id.trim()) {
+      throw new Error("The API returned no usable ticket identity; creation may have committed.");
+    }
+    // The public API projects server-authored creator/sourceMessage. Legacy
+    // createdBy and a top-level sourceSequenceId do not establish that provenance.
+    // Keep the returned ticket and retry key even when confirmation is incomplete.
+    const creator = ticket?.creator;
+    const source = ticket?.sourceMessage;
+    const provenance = {
+      agentRequested: cleanAgent || null,
+      agentRecorded: Boolean(cleanAgent) && creator?.kind === "agent" && creator.id === cleanAgent,
+      sourceRequested: sourceSequenceId,
+      sourceRecorded: sourceSequenceId !== null && source?.sequenceId === sourceSequenceId
+        && typeof source.id === "string" && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(source.id)
+        && Number.isSafeInteger(source.revision) && source.revision >= 1,
+    };
+    return { ticket, idempotencyKey, provenance };
+  } catch (error) {
+    // Retain the logical write's retry key even if the server committed but the response was lost.
+    throw new Error(`${error.message || "Ticket creation failed"} (retry with --idempotency-key ${idempotencyKey})`, { cause: error });
+  }
+}
+
 async function mutate(url, { credential, key, operation, body, requestMutation }) {
   return checkedTransport(requestMutation)(url, {
     method: "POST",
