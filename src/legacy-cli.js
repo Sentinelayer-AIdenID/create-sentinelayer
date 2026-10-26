@@ -23,7 +23,7 @@ import {
   resolveTrustContext,
   userCredential,
 } from "./auth/credential-destinations.js";
-import { resolveOutputRoot } from "./config/service.js";
+import { resolveOutputContext } from "./config/service.js";
 import { normalizeAgentEvent } from "./events/schema.js";
 import { collectCodebaseIngest, formatIngestSummary } from "./ingest/engine.js";
 import { getExpressTemplate, getPackageJsonTemplate, buildReadmeContent } from "./scaffold/templates.js";
@@ -1064,14 +1064,14 @@ async function runCredentialScan(targetPath) {
 }
 
 async function writeLocalCommandReport(targetPath, prefix, body, { outputDir = "" } = {}) {
-  const outputRoot = await resolveOutputRoot({
+  const { outputRoot, outputFs } = await resolveOutputContext({
     cwd: targetPath,
     outputDirOverride: outputDir,
   });
   const reportDir = path.join(outputRoot, "reports");
-  await ensureDirectory(reportDir);
+  await outputFs.mkdir(reportDir, { recursive: true });
   const reportPath = path.join(reportDir, `${prefix}-${formatTimestampForFile()}.md`);
-  await writeTextFile(reportPath, `${body}\n`);
+  await outputFs.writeFile(reportPath, `${body}\n`, "utf-8");
   return reportPath;
 }
 

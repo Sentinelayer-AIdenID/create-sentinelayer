@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { createOutputFileSystem } from "../src/config/output-filesystem.js";
 
 import {
   astDiff,
@@ -281,7 +282,7 @@ test("detectAstDrift: returns driftDetected:false when nothing changed between w
       "utf-8"
     );
     const first = await buildAstSnapshot({ rootPath: root });
-    await writeAstSnapshot({ rootPath: root, snapshot: first });
+    await writeAstSnapshot({ rootPath: root, snapshot: first, outputFs: createOutputFileSystem({ workspaceRoot: root }) });
     const verdict = await detectAstDrift({ rootPath: root });
     assert.equal(verdict.driftDetected, false);
   } finally {
@@ -298,7 +299,7 @@ test("detectAstDrift: triggers when a new export appears", async () => {
       "utf-8"
     );
     const first = await buildAstSnapshot({ rootPath: root });
-    await writeAstSnapshot({ rootPath: root, snapshot: first });
+    await writeAstSnapshot({ rootPath: root, snapshot: first, outputFs: createOutputFileSystem({ workspaceRoot: root }) });
 
     await fsp.writeFile(
       path.join(root, "a.ts"),
@@ -317,7 +318,7 @@ test("writeAstSnapshot: persists JSON at default path", async () => {
   const root = await makeTempRoot();
   try {
     const snapshot = await buildAstSnapshot({ rootPath: root });
-    const writtenPath = await writeAstSnapshot({ rootPath: root, snapshot });
+    const writtenPath = await writeAstSnapshot({ rootPath: root, snapshot, outputFs: createOutputFileSystem({ workspaceRoot: root }) });
     const expected = path.join(root, DEFAULT_AST_SNAPSHOT_RELATIVE_PATH);
     assert.equal(path.resolve(writtenPath), path.resolve(expected));
     const contents = await fsp.readFile(expected, "utf-8");

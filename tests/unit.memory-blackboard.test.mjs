@@ -1,4 +1,5 @@
 import "./setup-env.mjs";
+import { createOutputFileSystem } from "../src/config/output-filesystem.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import os from "node:os";
@@ -51,6 +52,7 @@ test("Unit memory blackboard: append/query/persist stays deterministic", async (
     assert.equal(lookup.entries[0].file, "src/auth/service.js");
 
     const artifact = await writeBlackboardArtifact(blackboard, {
+      outputFs: createOutputFileSystem({ workspaceRoot: tempRoot }),
       outputRoot: tempRoot,
     });
     assert.match(String(artifact.artifactPath || ""), /[\\/]memory[\\/]blackboard-audit-test-run\.json$/);

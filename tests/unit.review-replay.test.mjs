@@ -1,4 +1,5 @@
 import "./setup-env.mjs";
+import { createOutputFileSystem } from "../src/config/output-filesystem.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import os from "node:os";
@@ -74,6 +75,7 @@ test("Unit review replay: run context write/load round-trip is deterministic", a
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-replay-unit-"));
   try {
     const writeResult = await writeReviewRunContext({
+      outputFs: createOutputFileSystem({ workspaceRoot: tempRoot }),
       runDirectory: tempRoot,
       runId: "review-abc",
       targetPath: tempRoot,

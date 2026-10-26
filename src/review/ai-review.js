@@ -10,7 +10,7 @@ import {
 import { computeProviderCost } from "../billing/price-book.js";
 import { buildBillingRunId, buildCallIdempotencyKey, sanitizeBillingMetadata } from "../billing/ledger-entry.js";
 import { recordSessionUsage } from "../billing/session-usage.js";
-import { loadConfig, userConfigValues } from "../config/service.js";
+import { loadConfig, resolveOutputContext, userConfigValues } from "../config/service.js";
 import { evaluateBudget } from "../cost/budget.js";
 import { appendCostEntry, summarizeCostHistory, loadCostHistory } from "../cost/history.js";
 import { estimateTokens } from "../cost/tokenizer.js";
@@ -505,6 +505,7 @@ export async function runAiReviewLayer({
   if (severityClassifier === "typesafe") maxCostUsd = parseSeverityEvaluationMaxCost(maxCostUsd, 1);
   const normalizedTargetPath = path.resolve(String(targetPath || "."));
   const normalizedRunDirectory = path.resolve(String(runDirectory || "."));
+  const { outputFs } = await resolveOutputContext({ cwd: normalizedTargetPath, outputDirOverride: outputDir, env });
   const normalizedMode = normalizeString(mode) || "full";
   const normalizedMaxFindings = Math.max(
     1,
@@ -807,7 +808,7 @@ export async function runAiReviewLayer({
     );
   }
 
-  await fsp.mkdir(normalizedRunDirectory, { recursive: true });
+  await outputFs.mkdir(normalizedRunDirectory, { recursive: true });
   const promptPath = path.join(normalizedRunDirectory, "REVIEW_AI_PROMPT.txt");
   const reportMarkdownPath = path.join(normalizedRunDirectory, "REVIEW_AI.md");
   const reportJsonPath = path.join(normalizedRunDirectory, "REVIEW_AI.json");
@@ -856,9 +857,9 @@ export async function runAiReviewLayer({
     combinedSummary,
   });
 
-  await fsp.writeFile(promptPath, `${prompt}\n`, "utf-8");
-  await fsp.writeFile(reportMarkdownPath, `${reportMarkdown.trim()}\n`, "utf-8");
-  await fsp.writeFile(reportJsonPath, `${JSON.stringify(reportPayload, null, 2)}\n`, "utf-8");
+  await outputFs.writeFile(promptPath, `${prompt}\n`, "utf-8");
+  await outputFs.writeFile(reportMarkdownPath, `${reportMarkdown.trim()}\n`, "utf-8");
+  await outputFs.writeFile(reportJsonPath, `${JSON.stringify(reportPayload, null, 2)}\n`, "utf-8");
 
   return {
     parser: parsed.parser,

@@ -6,12 +6,14 @@ import path from "node:path";
 import { mkdtemp, rm } from "node:fs/promises";
 
 import { listSites, recordTemporarySite } from "../src/ai/site-store.js";
+import { createOutputFileSystem } from "../src/config/output-filesystem.js";
 
 test("Unit site store: records and lists temporary callback sites", async () => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-ai-site-store-"));
   try {
     const outputRoot = path.join(tempRoot, ".sentinelayer");
     await recordTemporarySite({
+      outputFs: createOutputFileSystem({ workspaceRoot: tempRoot }),
       outputRoot,
       site: {
         id: "site_1",

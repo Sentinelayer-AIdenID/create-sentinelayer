@@ -7801,38 +7801,46 @@ test("CLI session observe: relays durable observation through canonical events A
 
 test("CLI session commands: start/list/join/say/read/status/kill/leave flow with lease revocation", async () => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-session-e2e-"));
+  const token = "session-lifecycle-fixture-owner";
+  const requests = [];
+  const presences = [];
+  let activeRoom = "";
   const grants = [
-    { id: "7bfa6247-7133-4d93-8c29-1d2c8d341001", agentId: "agent-alpha", role: "coder", exists: true, revoked: false, revokedAt: null },
-    { id: "7bfa6247-7133-4d93-8c29-1d2c8d341002", agentId: "agent-beta", role: "reviewer", exists: true, revoked: false, revokedAt: null },
+    { id: "fixture-alpha", agentId: "agent-alpha", role: "coder", exists: true, revoked: false, revokedAt: null },
+    { id: "fixture-beta", agentId: "agent-beta", role: "reviewer", exists: true, revoked: false, revokedAt: null },
   ];
-  const verifiedPresence = [];
-  let grantReads = 0;
-  let sessionId = "";
-  // Named legacy joins must prove both an account grant and room presence.
-  // Keep the production auth and egress guards active, using only this loopback API.
-  const grantServer = createServer(async (req, res) => {
+  const server = createServer(async (req, res) => {
     try {
-      const url = new URL(req.url || "/", "http://127.0.0.1");
-      if (req.method === "GET" && url.pathname === "/api/v1/sessions/agent-grants") {
-        assert.equal(req.headers.authorization, "Bearer api_token_e2e_test_session");
-        grantReads += 1;
+      const url = new URL(req.url, "http://127.0.0.1");
+      requests.push({ method: req.method, pathname: url.pathname });
+      if (req.headers.authorization !== `Bearer ${token}`) return jsonResponse(res, 401, { error: "unauthenticated" });
+      if (req.method === "GET" && url.pathname === "/api/v1/sessions/agent-grants" && url.search === "?limit=100") {
         return jsonResponse(res, 200, { grants, nextAfter: null });
       }
-      if (req.method === "PUT" && url.pathname === `/api/v1/sessions/${sessionId}/presence`) {
-        assert.equal(req.headers.authorization, "Bearer api_token_e2e_test_session");
+      if (req.method === "PUT" && activeRoom && url.pathname === `/api/v1/sessions/${activeRoom}/presence`) {
         const body = await readJsonBody(req);
-        assert.ok(grants.some((grant) => grant.agentId === body.agentId));
-        verifiedPresence.push(body.agentId);
-        return jsonResponse(res, 200, { status: "ok", recorded: true, agentId: body.agentId, ttlSeconds: 120 });
+        if (!grants.some((grant) => grant.agentId === body.agentId) || body.state !== "idle" || body.clientKind !== "cli") {
+          return jsonResponse(res, 403, { error: "presence_denied" });
+        }
+        presences.push({ sessionId: activeRoom, agentId: body.agentId });
+        return jsonResponse(res, 200, { status: "ok", recorded: true, agentId: body.agentId, ttlSeconds: 90 });
       }
-      return jsonResponse(res, 404, { error: { code: "NOT_FOUND" } });
-    } catch (error) {
-      return jsonResponse(res, 500, { error: { code: "FIXTURE_ASSERTION", message: String(error.message) } });
+      return jsonResponse(res, 404, { error: "fixture_route_not_found" });
+    } catch {
+      return jsonResponse(res, 500, { error: "fixture_request_invalid" });
     }
   });
-  grantServer.listen(0, "127.0.0.1");
-  await once(grantServer, "listening");
-  const fixtureEnv = { ...process.env, SENTINELAYER_API_URL: `http://127.0.0.1:${grantServer.address().port}` };
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  // Transcript/daemon operations remain local, while mandatory legacy grant verification uses
+  // an authenticated loopback server. No account grant is created and no auth bypass is enabled.
+  const fixtureEnv = {
+    ...process.env,
+    SENTINELAYER_API_URL: `http://127.0.0.1:${server.address().port}`,
+    SENTINELAYER_TOKEN: token,
+    SENTINELAYER_CLI_TEST_MODE: "0",
+    SENTINELAYER_CLI_TEST_BYPASS_NONCE: "",
+    SENTINELAYER_CLI_SKIP_AUTH: "0",
+  };
   try {
     await writeFile(path.join(tempRoot, "package.json"), '{"name":"session-e2e","version":"1.0.0"}\n', "utf-8");
 
@@ -7843,8 +7851,9 @@ test("CLI session commands: start/list/join/say/read/status/kill/leave flow with
     });
     assert.equal(startResult.code, 0, startResult.stderr || startResult.stdout);
     const startPayload = JSON.parse(String(startResult.stdout || "").trim());
-    sessionId = String(startPayload.sessionId || "").trim();
+    const sessionId = String(startPayload.sessionId || "").trim();
     assert.ok(sessionId);
+    activeRoom = sessionId;
 
     const listResult = await runCli({
       cwd: tempRoot,
@@ -7856,17 +7865,22 @@ test("CLI session commands: start/list/join/say/read/status/kill/leave flow with
     assert.equal(listPayload.command, "session list");
     assert.equal(listPayload.sessions.some((entry) => entry.sessionId === sessionId), true);
 
-    const deniedJoin = await runCli({
-      cwd: tempRoot,
-      env: fixtureEnv,
-      args: ["session", "join", sessionId, "--name", "agent-ungranted", "--role", "coder", "--path", tempRoot, "--json"],
-    });
-    assert.equal(deniedJoin.code, 4, deniedJoin.stderr || deniedJoin.stdout);
-    const deniedPayload = JSON.parse(String(deniedJoin.stdout || "").trim());
-    assert.equal(deniedPayload.joined, false);
-    assert.equal(deniedPayload.remoteAgentVerification.code, "LEGACY_GRANT_NOT_ACTIVE");
-    await assert.rejects(readFile(path.join(tempRoot, ".sentinelayer", "sessions", sessionId, "agents", "agent-ungranted.json")), { code: "ENOENT" });
-    assert.deepEqual(verifiedPresence, []);
+    for (const [agentId, role, code] of [
+      ["agent-missing", "coder", "LEGACY_GRANT_NOT_ACTIVE"],
+      ["agent-alpha", "reviewer", "LEGACY_GRANT_ROLE_MISMATCH"],
+    ]) {
+      const denied = await runCli({
+        cwd: tempRoot,
+        env: fixtureEnv,
+        args: ["session", "join", sessionId, "--name", agentId, "--role", role, "--path", tempRoot, "--json"],
+      });
+      assert.equal(denied.code, 4, denied.stderr || denied.stdout);
+      const payload = JSON.parse(denied.stdout);
+      assert.equal(payload.joined, false);
+      assert.equal(payload.remoteAgentVerification.code, code);
+      await assert.rejects(readFile(path.join(tempRoot, ".sentinelayer", "sessions", sessionId, "agents", `${agentId}.json`)), { code: "ENOENT" });
+    }
+    assert.deepEqual(presences, [], "denied identities and roles never obtain room presence");
 
     const joinResult = await runCli({
       cwd: tempRoot,
@@ -7878,8 +7892,7 @@ test("CLI session commands: start/list/join/say/read/status/kill/leave flow with
     assert.equal(joinPayload.command, "session join");
     assert.equal(joinPayload.agentId, "agent-alpha");
     assert.equal(joinPayload.remoteAgentVerification.ok, true);
-    assert.equal(joinPayload.remoteAgentVerification.source, "legacy_grant_presence");
-    assert.deepEqual(verifiedPresence, ["agent-alpha"]);
+    assert.deepEqual(joinPayload.remoteAgentVerification.grant, { id: "fixture-alpha", agentId: "agent-alpha", role: "coder" });
 
     const staleAgentIso = "2026-01-01T00:00:00.000Z";
     await writeFile(
@@ -8073,6 +8086,14 @@ test("CLI session commands: start/list/join/say/read/status/kill/leave flow with
       args: ["session", "join", sessionId, "--name", "agent-beta", "--role", "reviewer", "--path", tempRoot, "--json"],
     });
     assert.equal(joinBetaResult.code, 0, joinBetaResult.stderr || joinBetaResult.stdout);
+    const betaPayload = JSON.parse(joinBetaResult.stdout);
+    assert.deepEqual(betaPayload.remoteAgentVerification.grant, { id: "fixture-beta", agentId: "agent-beta", role: "reviewer" });
+    assert.deepEqual(presences, [
+      { sessionId, agentId: "agent-alpha" },
+      { sessionId, agentId: "agent-beta" },
+    ]);
+    assert.equal(requests.some((request) => request.method === "POST" && request.pathname === "/api/v1/sessions/agent-grants"), false);
+    assert.equal(requests.filter((request) => request.method === "GET" && request.pathname === "/api/v1/sessions/agent-grants").length, 4);
 
     const leaveResult = await runCli({
       cwd: tempRoot,
@@ -8083,11 +8104,8 @@ test("CLI session commands: start/list/join/say/read/status/kill/leave flow with
     const leavePayload = JSON.parse(String(leaveResult.stdout || "").trim());
     assert.equal(leavePayload.command, "session leave");
     assert.equal(leavePayload.agentId, "agent-beta");
-    assert.deepEqual(verifiedPresence, ["agent-alpha", "agent-beta"]);
-    assert.equal(grantReads, 3);
   } finally {
-    grantServer.close();
-    await once(grantServer, "close");
+    await new Promise((resolve) => server.close(resolve));
     await rm(tempRoot, { recursive: true, force: true });
   }
 });

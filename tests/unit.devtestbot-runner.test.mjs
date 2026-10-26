@@ -1,4 +1,5 @@
 import "./setup-env.mjs";
+import { createOutputFileSystem } from "../src/config/output-filesystem.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -54,6 +55,7 @@ test("devTestBot runner records browser capture lanes against a local fixture", 
 
   try {
     const runner = await launch({
+      outputFs: createOutputFileSystem({ workspaceRoot: outputDir }),
       baseUrl,
       outputDir,
       identityCreds: {

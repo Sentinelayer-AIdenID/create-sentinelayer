@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import fsp from "node:fs/promises";
 import path from "node:path";
 
+import { bindOutputFileSystem, requireOutputFileSystem } from "../config/output-filesystem.js";
 import { listAssignments, resolveAssignmentLedgerStorage } from "./assignment-ledger.js";
 import { getBudgetHealthColor, resolveOperatorControlStorage } from "./operator-control.js";
 import { listBudgetStates, resolveBudgetGovernorStorage } from "./budget-governor.js";
@@ -215,7 +216,7 @@ export async function writeCloseoutArtifact({
   });
   const dateKey = normalizeDateKey(date, normalizedNow);
   const artifactDir = resolveWorkItemArtifactDir(storage, normalizedWorkItemId, dateKey);
-  await fsp.mkdir(artifactDir, { recursive: true });
+  await storage.outputFs.mkdir(artifactDir, { recursive: true });
   const closeoutPath = path.join(artifactDir, "closeout.json");
 
   const entries = await fsp.readdir(artifactDir, { withFileTypes: true }).catch((error) => {
@@ -273,7 +274,7 @@ export async function writeCloseoutArtifact({
     ),
     anchorSha256,
   };
-  await writeJsonFile(closeoutPath, payload);
+  await writeJsonFile(closeoutPath, payload, storage.outputFs);
   return {
     closeoutPath,
     payload,
@@ -390,14 +391,16 @@ export async function verifyArtifactChain({
   };
 }
 
-async function writeJsonFile(filePath, payload = {}) {
-  await fsp.mkdir(path.dirname(filePath), { recursive: true });
-  await fsp.writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
+async function writeJsonFile(filePath, payload = {}, outputFs) {
+  requireOutputFileSystem(outputFs);
+  await outputFs.mkdir(path.dirname(filePath), { recursive: true });
+  await outputFs.writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
 }
 
-async function appendJsonLine(filePath, payload = {}) {
-  await fsp.mkdir(path.dirname(filePath), { recursive: true });
-  await fsp.appendFile(filePath, `${JSON.stringify(payload)}\n`, "utf-8");
+async function appendJsonLine(filePath, payload = {}, outputFs) {
+  requireOutputFileSystem(outputFs);
+  await outputFs.mkdir(path.dirname(filePath), { recursive: true });
+  await outputFs.appendFile(filePath, `${JSON.stringify(payload)}\n`, "utf-8");
 }
 
 async function readJsonFile(filePath, fallbackValue) {
@@ -518,12 +521,12 @@ export async function resolveArtifactLineageStorage({
     homeDir,
   });
   const lineageDir = path.join(daemonStorage.baseDir, "lineage");
-  return {
+  return bindOutputFileSystem({
     ...daemonStorage,
     lineageDir,
     lineageIndexPath: path.join(lineageDir, "lineage-index.json"),
     lineageEventsPath: path.join(lineageDir, "lineage-events.ndjson"),
-  };
+  }, daemonStorage.outputFs);
 }
 
 export async function buildArtifactLineageIndex({
@@ -799,7 +802,7 @@ export async function buildArtifactLineageIndex({
   };
 
   await Promise.all([
-    writeJsonFile(storage.lineageIndexPath, index),
+    writeJsonFile(storage.lineageIndexPath, index, storage.outputFs),
     appendJsonLine(storage.lineageEventsPath, {
       timestamp: normalizedNow,
       eventType: "lineage_build",
@@ -809,7 +812,7 @@ export async function buildArtifactLineageIndex({
       jiraLinkedCount,
       budgetGuardedCount,
       operatorCoveredCount,
-    }),
+    }, storage.outputFs),
   ]);
 
   return {

@@ -1,7 +1,7 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
 
-import { resolveOutputRoot } from "../config/service.js";
+import { resolveOutputContext } from "../config/service.js";
 import { loadSwarmDashboardSnapshot, resolveSwarmRuntimeFiles } from "./dashboard.js";
 
 function normalizeString(value) {
@@ -109,7 +109,7 @@ export async function buildSwarmExecutionReport({
     homeDir,
   });
 
-  const outputRoot = await resolveOutputRoot({
+  const { outputRoot, outputFs } = await resolveOutputContext({
     cwd: path.resolve(String(targetPath || ".")),
     outputDirOverride: outputDir,
     env,
@@ -152,7 +152,7 @@ export async function buildSwarmExecutionReport({
     reportMarkdownPath,
   };
 
-  await fsp.writeFile(reportJsonPath, `${JSON.stringify(report, null, 2)}\n`, "utf-8");
-  await fsp.writeFile(reportMarkdownPath, `${buildReportMarkdown(report).trim()}\n`, "utf-8");
+  await outputFs.writeFile(reportJsonPath, `${JSON.stringify(report, null, 2)}\n`, "utf-8");
+  await outputFs.writeFile(reportMarkdownPath, `${buildReportMarkdown(report).trim()}\n`, "utf-8");
   return report;
 }

@@ -1,3 +1,4 @@
+import { requireOutputFileSystem } from "../config/output-filesystem.js";
 import { spawnSync } from "node:child_process";
 import fsp from "node:fs/promises";
 import path from "node:path";
@@ -74,6 +75,7 @@ function normalizeInvocation(invocation = {}) {
 }
 
 export async function writeReviewRunContext({
+  outputFs,
   runDirectory,
   runId,
   targetPath,
@@ -81,6 +83,7 @@ export async function writeReviewRunContext({
   invocation = {},
   replay = {},
 } = {}) {
+  requireOutputFileSystem(outputFs);
   const normalizedRunDirectory = path.resolve(String(runDirectory || "."));
   const context = {
     schemaVersion: "1.0.0",
@@ -96,8 +99,8 @@ export async function writeReviewRunContext({
     },
   };
   const contextPath = path.join(normalizedRunDirectory, REVIEW_RUN_CONTEXT_FILE);
-  await fsp.mkdir(normalizedRunDirectory, { recursive: true });
-  await fsp.writeFile(contextPath, `${JSON.stringify(context, null, 2)}\n`, "utf-8");
+  await outputFs.mkdir(normalizedRunDirectory, { recursive: true });
+  await outputFs.writeFile(contextPath, `${JSON.stringify(context, null, 2)}\n`, "utf-8");
   return {
     context,
     contextPath,
@@ -208,11 +211,13 @@ function sanitizeRunId(value) {
 }
 
 export async function writeReviewComparisonArtifact({
+  outputFs,
   runDirectory,
   baseRunId,
   candidateRunId,
   comparison,
 } = {}) {
+  requireOutputFileSystem(outputFs);
   const normalizedRunDirectory = path.resolve(String(runDirectory || "."));
   const fileName = `REVIEW_COMPARISON_${sanitizeRunId(baseRunId)}_vs_${sanitizeRunId(
     candidateRunId
@@ -225,8 +230,8 @@ export async function writeReviewComparisonArtifact({
     candidateRunId: normalizeString(candidateRunId),
     comparison,
   };
-  await fsp.mkdir(normalizedRunDirectory, { recursive: true });
-  await fsp.writeFile(artifactPath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
+  await outputFs.mkdir(normalizedRunDirectory, { recursive: true });
+  await outputFs.writeFile(artifactPath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
   return {
     artifactPath,
     payload,

@@ -1,7 +1,7 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
 
-import { resolveOutputRoot } from "../config/service.js";
+import { resolveOutputRoot, resolveOutputContext } from "../config/service.js";
 
 const CACHE_SCHEMA_VERSION = "1.0.0";
 const CACHE_KIND = "omargate-deterministic-cache";
@@ -178,7 +178,7 @@ export async function writeOmarGateDeterministicCache({
   reportPath = "",
 } = {}) {
   const normalizedTargetPath = normalizeTargetPath(targetPath);
-  const outputRoot = await resolveOutputRoot({
+  const { outputRoot, outputFs } = await resolveOutputContext({
     cwd: normalizedTargetPath,
     outputDirOverride: outputDir,
     env: process.env,
@@ -191,7 +191,7 @@ export async function writeOmarGateDeterministicCache({
   const runDirectory = path.join(outputRoot, "runs", normalizedRunId);
   const artifactPath = path.join(runDirectory, "deterministic.json");
   const latestPath = path.join(outputRoot, "runs", LATEST_INDEX_NAME);
-  await fsp.mkdir(runDirectory, { recursive: true });
+  await outputFs.mkdir(runDirectory, { recursive: true });
 
   const cache = {
     schemaVersion: CACHE_SCHEMA_VERSION,
@@ -212,8 +212,8 @@ export async function writeOmarGateDeterministicCache({
       reportPath: normalizeString(reportPath),
     },
   };
-  await fsp.writeFile(artifactPath, `${JSON.stringify(cache, null, 2)}\n`, "utf-8");
-  await fsp.writeFile(
+  await outputFs.writeFile(artifactPath, `${JSON.stringify(cache, null, 2)}\n`, "utf-8");
+  await outputFs.writeFile(
     latestPath,
     `${JSON.stringify(
       {

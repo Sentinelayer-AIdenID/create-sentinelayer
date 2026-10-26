@@ -12,6 +12,7 @@
 // ast-parser-layer.js so we don't spawn Python for the JS/TS majority.
 
 import fsp from "node:fs/promises";
+import { requireOutputFileSystem } from "../config/output-filesystem.js";
 import path from "node:path";
 import process from "node:process";
 
@@ -452,24 +453,27 @@ export async function detectAstDrift({
 }
 
 export async function writeAstSnapshot({
+  outputFs,
   rootPath = process.cwd(),
   snapshotPath = "",
   snapshot,
 } = {}) {
+  requireOutputFileSystem(outputFs);
   if (!snapshot || typeof snapshot !== "object") {
     throw new Error("snapshot is required.");
   }
   const resolvedSnapshotPath = snapshotPath
     ? path.resolve(rootPath, snapshotPath)
     : path.join(rootPath, DEFAULT_AST_SNAPSHOT_RELATIVE_PATH);
-  await fsp.mkdir(path.dirname(resolvedSnapshotPath), { recursive: true });
+  await outputFs.assertFilePath(resolvedSnapshotPath);
+  await outputFs.mkdir(path.dirname(resolvedSnapshotPath), { recursive: true });
   const tmpPath = `${resolvedSnapshotPath}.${process.pid}.${Date.now()}.tmp`;
-  await fsp.writeFile(
+  await outputFs.writeFile(
     tmpPath,
     `${JSON.stringify(snapshot, null, 2)}\n`,
     "utf-8"
   );
-  await fsp.rename(tmpPath, resolvedSnapshotPath);
+  await outputFs.rename(tmpPath, resolvedSnapshotPath);
   return resolvedSnapshotPath;
 }
 

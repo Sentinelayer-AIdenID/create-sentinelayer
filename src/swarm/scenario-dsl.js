@@ -1,5 +1,6 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
+import { resolveOutputContext } from "../config/service.js";
 
 const SUPPORTED_ACTIONS = new Set(["goto", "click", "fill", "wait", "screenshot"]);
 
@@ -256,15 +257,16 @@ export async function writeScenarioTemplate({
   startUrl = "https://example.com",
 } = {}) {
   const normalizedTargetPath = path.resolve(String(targetPath || "."));
-  const resolvedOutputFile = normalizeString(outputFile)
-    ? path.resolve(normalizedTargetPath, outputFile)
-    : path.join(normalizedTargetPath, ".sentinelayer", "scenarios", `${scenarioId}.sls`);
+  const { outputRoot: resolvedOutputFile, outputFs } = await resolveOutputContext({
+    cwd: normalizedTargetPath,
+    outputDirOverride: normalizeString(outputFile) || path.join(".sentinelayer", "scenarios", `${scenarioId}.sls`),
+  });
   const content = renderScenarioTemplate({
     scenarioId,
     startUrl,
   });
-  await fsp.mkdir(path.dirname(resolvedOutputFile), { recursive: true });
-  await fsp.writeFile(resolvedOutputFile, `${content.trim()}\n`, "utf-8");
+  await outputFs.mkdir(path.dirname(resolvedOutputFile), { recursive: true });
+  await outputFs.writeFile(resolvedOutputFile, `${content.trim()}\n`, "utf-8");
   return {
     filePath: resolvedOutputFile,
     content,

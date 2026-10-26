@@ -1,4 +1,4 @@
-import fsp from "node:fs/promises";
+import { requireOutputFileSystem } from "../config/output-filesystem.js";
 import path from "node:path";
 import process from "node:process";
 
@@ -10,7 +10,7 @@ import {
   resolveProvider,
 } from "../ai/client.js";
 import { recordCliLlmSessionUsage, usageNumber } from "../billing/llm-session-usage.js";
-import { resolveOutputRoot } from "../config/service.js";
+import { resolveOutputContext } from "../config/service.js";
 import { estimateModelCost } from "../cost/tracker.js";
 import { estimateTokens } from "../cost/tokenizer.js";
 import { normalizeSessionId } from "../session/paths.js";
@@ -43,10 +43,11 @@ async function readPromptFromStdin() {
   });
 }
 
-async function appendTranscriptEntries({ transcriptPath, entries } = {}) {
-  await fsp.mkdir(path.dirname(transcriptPath), { recursive: true });
+async function appendTranscriptEntries({ transcriptPath, entries, outputFs } = {}) {
+  requireOutputFileSystem(outputFs);
+  await outputFs.mkdir(path.dirname(transcriptPath), { recursive: true });
   const rows = entries.map((entry) => JSON.stringify(entry)).join("\n");
-  await fsp.appendFile(transcriptPath, `${rows}\n`, "utf-8");
+  await outputFs.appendFile(transcriptPath, `${rows}\n`, "utf-8");
 }
 
 export function registerChatCommand(program) {
@@ -77,7 +78,7 @@ export function registerChatCommand(program) {
       }
 
       const targetPath = path.resolve(process.cwd(), String(options.path || "."));
-      const outputRoot = await resolveOutputRoot({
+      const { outputRoot, outputFs } = await resolveOutputContext({
         cwd: targetPath,
         outputDirOverride: options.outputDir,
         env: process.env,
@@ -159,6 +160,7 @@ export function registerChatCommand(program) {
           });
 
       await appendTranscriptEntries({
+        outputFs,
         transcriptPath,
         entries: [
           {

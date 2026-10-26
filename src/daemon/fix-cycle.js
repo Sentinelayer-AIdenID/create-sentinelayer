@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import path from "node:path";
-import fsp from "node:fs/promises";
+import { requireOutputFileSystem } from "../config/output-filesystem.js";
 import { startJiraLifecycle, commentJiraIssue, transitionJiraIssue } from "./jira-lifecycle.js";
 import { claimAssignment, heartbeatAssignment, releaseAssignment } from "./assignment-ledger.js";
 import { createAgentEvent } from "../events/schema.js";
@@ -23,7 +23,8 @@ const HEARTBEAT_INTERVAL_MS = 300000;
 const OMAR_POLL_INTERVAL_MS = 15000;
 const OMAR_POLL_MAX_ATTEMPTS = 40; // 10 minutes max wait
 
-export async function runFixCycle({ workItemId, workItem, rootPath, scopeMap, findings, onEvent, agentIdentity }) {
+export async function runFixCycle({ workItemId, workItem, rootPath, scopeMap, findings, onEvent, agentIdentity, outputFs }) {
+  requireOutputFileSystem(outputFs);
   const agentDef = agentIdentity || { id: "unknown", persona: "Unknown Agent", color: "white", avatar: "", signature: "" };
   const emit = (ev, pl) => {
     if (onEvent) onEvent(createAgentEvent({
@@ -40,7 +41,7 @@ export async function runFixCycle({ workItemId, workItem, rootPath, scopeMap, fi
   };
 
   const artDir = path.join(rootPath, ".sentinelayer", "observability", "fixes", workItemId);
-  await fsp.mkdir(artDir, { recursive: true });
+  await outputFs.mkdir(artDir, { recursive: true });
 
   let jiraKey = null;
   let prNumber = null;
@@ -202,7 +203,7 @@ export async function runFixCycle({ workItemId, workItem, rootPath, scopeMap, fi
       findingsAddressed: findings?.length || 0,
       signature: agentDef.signature,
     };
-    await fsp.writeFile(
+    await outputFs.writeFile(
       path.join(artDir, "fix-result.json"),
       JSON.stringify(result, null, 2),
     );

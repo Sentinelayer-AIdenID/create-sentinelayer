@@ -4,7 +4,8 @@ import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { resolveOutputRoot } from "../config/service.js";
+import { resolveOutputRoot, resolveOutputContext } from "../config/service.js";
+import { bindOutputFileSystem, requireOutputFileSystem } from "../config/output-filesystem.js";
 
 const REVIEW_REPORT_JSON = "REVIEW_REPORT.json";
 const REVIEW_REPORT_MD = "REVIEW_REPORT.md";
@@ -523,16 +524,18 @@ export async function buildUnifiedReviewReport({
 }
 
 export async function writeUnifiedReviewArtifacts({
+  outputFs,
   runDirectory,
   report,
   markdown,
 } = {}) {
+  requireOutputFileSystem(outputFs);
   const normalizedRunDirectory = path.resolve(String(runDirectory || "."));
-  await fsp.mkdir(normalizedRunDirectory, { recursive: true });
+  await outputFs.mkdir(normalizedRunDirectory, { recursive: true });
   const reportJsonPath = path.join(normalizedRunDirectory, REVIEW_REPORT_JSON);
   const reportMarkdownPath = path.join(normalizedRunDirectory, REVIEW_REPORT_MD);
-  await fsp.writeFile(reportJsonPath, `${JSON.stringify(report, null, 2)}\n`, "utf-8");
-  await fsp.writeFile(reportMarkdownPath, `${String(markdown || "").trim()}\n`, "utf-8");
+  await outputFs.writeFile(reportJsonPath, `${JSON.stringify(report, null, 2)}\n`, "utf-8");
+  await outputFs.writeFile(reportMarkdownPath, `${String(markdown || "").trim()}\n`, "utf-8");
   return {
     reportJsonPath,
     reportMarkdownPath,
@@ -617,6 +620,7 @@ export async function loadUnifiedReviewReport({
   outputDir = "",
   env,
 } = {}) {
+  const { outputFs } = await resolveOutputContext({ cwd: path.resolve(String(targetPath || ".")), outputDirOverride: outputDir, env });
   const runDirectory = await resolveRunDirectory({ targetPath, runId, outputDir, env });
   const reportJsonPath = path.join(runDirectory, REVIEW_REPORT_JSON);
   const reportMarkdownPath = path.join(runDirectory, REVIEW_REPORT_MD);
@@ -624,14 +628,14 @@ export async function loadUnifiedReviewReport({
   const decisionsPath = path.join(runDirectory, REVIEW_DECISIONS_JSON);
   const decisions = await loadDecisions(decisionsPath);
   const resolvedReport = applyDecisionsToReport(report, decisions.decisions);
-  return {
+  return bindOutputFileSystem({
     runDirectory,
     reportJsonPath,
     reportMarkdownPath,
     decisionsPath,
     decisions,
     report: resolvedReport,
-  };
+  }, outputFs);
 }
 
 export async function recordReviewDecision({
@@ -659,6 +663,7 @@ export async function recordReviewDecision({
     outputDir,
     env,
   });
+  const { outputFs } = loaded;
   const finding = (loaded.report.findings || []).find((item) => item.findingId === normalizedFindingId);
   if (!finding) {
     throw new Error(`Finding '${normalizedFindingId}' not found in run ${loaded.report.runId}.`);
@@ -678,12 +683,12 @@ export async function recordReviewDecision({
       [normalizedFindingId]: decision,
     },
   };
-  await fsp.writeFile(loaded.decisionsPath, `${JSON.stringify(nextDecisions, null, 2)}\n`, "utf-8");
+  await outputFs.writeFile(loaded.decisionsPath, `${JSON.stringify(nextDecisions, null, 2)}\n`, "utf-8");
 
   const nextReport = applyDecisionsToReport(loaded.report, nextDecisions.decisions);
   const nextMarkdown = composeReportMarkdown(nextReport);
-  await fsp.writeFile(loaded.reportJsonPath, `${JSON.stringify(nextReport, null, 2)}\n`, "utf-8");
-  await fsp.writeFile(loaded.reportMarkdownPath, `${nextMarkdown.trim()}\n`, "utf-8");
+  await outputFs.writeFile(loaded.reportJsonPath, `${JSON.stringify(nextReport, null, 2)}\n`, "utf-8");
+  await outputFs.writeFile(loaded.reportMarkdownPath, `${nextMarkdown.trim()}\n`, "utf-8");
 
   return {
     runId: nextReport.runId,
@@ -821,10 +826,14 @@ export async function exportUnifiedReviewReport({
     outputDir,
     env,
   });
-  const resolvedOutputPath = normalizeString(outputFile)
-    ? path.resolve(path.resolve(String(targetPath || ".")), outputFile)
+  const explicitOutput = normalizeString(outputFile)
+    ? await resolveOutputContext({ cwd: path.resolve(String(targetPath || ".")), outputDirOverride: outputFile, env })
+    : null;
+  const resolvedOutputPath = explicitOutput
+    ? explicitOutput.outputRoot
     : resolveDefaultExportPath(loaded.runDirectory, normalizedFormat);
 
+  const outputFs = requireOutputFileSystem(explicitOutput ? explicitOutput.outputFs : loaded.outputFs);
   let serialized = "";
   if (normalizedFormat === "json") {
     serialized = `${JSON.stringify(loaded.report, null, 2)}\n`;
@@ -836,8 +845,8 @@ export async function exportUnifiedReviewReport({
     serialized = `${buildGithubAnnotations(loaded.report)}\n`;
   }
 
-  await fsp.mkdir(path.dirname(resolvedOutputPath), { recursive: true });
-  await fsp.writeFile(resolvedOutputPath, serialized, "utf-8");
+  await outputFs.mkdir(path.dirname(resolvedOutputPath), { recursive: true });
+  await outputFs.writeFile(resolvedOutputPath, serialized, "utf-8");
 
   return {
     runId: loaded.report.runId,

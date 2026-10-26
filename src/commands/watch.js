@@ -11,7 +11,8 @@ import {
   listRuntimeRunEvents,
   resolveActiveAuthSession,
 } from "../auth/service.js";
-import { resolveOutputRoot } from "../config/service.js";
+import { resolveOutputRoot, resolveOutputContext } from "../config/service.js";
+import { bindOutputFileSystem, requireOutputFileSystem } from "../config/output-filesystem.js";
 import { authLoginHint } from "../ui/command-hints.js";
 import { isAuthenticated } from "../auth/credential-destinations.js";
 
@@ -254,11 +255,12 @@ async function resolveWatchArtifacts({
   if (!enabled) {
     return null;
   }
-  const outputRoot = await resolveOutputRoot({
+  const { outputRoot, outputFs } = await resolveOutputContext({
     cwd: targetPath,
     outputDirOverride: outputDir,
     env: process.env,
   });
+  requireOutputFileSystem(outputFs);
   const watchStamp = stableTimestampForFile();
   const watchDir = path.join(
     outputRoot,
@@ -266,12 +268,12 @@ async function resolveWatchArtifacts({
     "runtime-watch",
     sanitizePathSegment(runId)
   );
-  await fsp.mkdir(watchDir, { recursive: true });
-  return {
+  await outputFs.mkdir(watchDir, { recursive: true });
+  return bindOutputFileSystem({
     watchDir,
     eventsPath: path.join(watchDir, `events-${watchStamp}.ndjson`),
     summaryPath: path.join(watchDir, `summary-${watchStamp}.json`),
-  };
+  }, outputFs);
 }
 
 export function registerWatchCommand(program) {
@@ -411,7 +413,7 @@ export function registerWatchCommand(program) {
             eventCount += 1;
 
             if (artifactPaths?.eventsPath) {
-              await fsp.appendFile(artifactPaths.eventsPath, `${JSON.stringify(event)}\n`, "utf-8");
+              await artifactPaths.outputFs.appendFile(artifactPaths.eventsPath, `${JSON.stringify(event)}\n`, "utf-8");
             }
 
             if (emitJson) {
@@ -478,7 +480,7 @@ export function registerWatchCommand(program) {
       };
 
       if (artifactPaths?.summaryPath) {
-        await fsp.writeFile(artifactPaths.summaryPath, `${JSON.stringify(summary, null, 2)}\n`, "utf-8");
+        await artifactPaths.outputFs.writeFile(artifactPaths.summaryPath, `${JSON.stringify(summary, null, 2)}\n`, "utf-8");
       }
 
       if (emitJson) {
