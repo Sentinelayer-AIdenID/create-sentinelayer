@@ -1,4 +1,5 @@
 import "./setup-env.mjs";
+import { createOutputFileSystem } from "../src/config/output-filesystem.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import os from "node:os";
@@ -46,6 +47,7 @@ test("Unit audit replay: compare reports detects drift and writes artifact", asy
     ]);
 
     const result = await writeAuditComparisonArtifact({
+      outputFs: createOutputFileSystem({ workspaceRoot: tempRoot }),
       baseReport: base,
       candidateReport: candidate,
       outputDirectory: tempRoot,

@@ -4,7 +4,8 @@ import path from "node:path";
 
 import { resolveAgentIdPath } from "../agents/agent-id-path.js";
 import { userCredential } from "../auth/credential-destinations.js";
-import { resolveOutputRoot } from "../config/service.js";
+import { resolveOutputContext } from "../config/service.js";
+import { bindOutputFileSystem, requireOutputFileSystem } from "../config/output-filesystem.js";
 import { createAgentEvent } from "../events/schema.js";
 import { resolveCodebaseIngest } from "../ingest/engine.js";
 import { runDeterministicReviewPipeline } from "../review/local-review.js";
@@ -271,7 +272,9 @@ async function buildSpecialistSeed({
   deterministicBaseline,
   ingest,
   agentsDirectory,
+  outputFs,
 }) {
+  requireOutputFileSystem(outputFs);
   let findings = [];
   let summary = severitySummary(findings);
   let confidence = computeConfidenceFloor(agent.confidenceFloor, findings.length);
@@ -285,7 +288,7 @@ async function buildSpecialistSeed({
     summary = securitySpecialist.summary;
     confidence = securitySpecialist.confidence;
     specialistReportPath = path.join(agentsDirectory, "SECURITY_AGENT_REPORT.md");
-    await fsp.writeFile(
+    await outputFs.writeFile(
       specialistReportPath,
       `${renderSecuritySpecialistMarkdown(securitySpecialist).trim()}\n`,
       "utf-8"
@@ -299,7 +302,7 @@ async function buildSpecialistSeed({
     summary = architectureSpecialist.summary;
     confidence = architectureSpecialist.confidence;
     specialistReportPath = path.join(agentsDirectory, "ARCHITECTURE_AGENT_REPORT.md");
-    await fsp.writeFile(
+    await outputFs.writeFile(
       specialistReportPath,
       `${renderArchitectureSpecialistMarkdown(architectureSpecialist).trim()}\n`,
       "utf-8"
@@ -313,7 +316,7 @@ async function buildSpecialistSeed({
     summary = testingSpecialist.summary;
     confidence = testingSpecialist.confidence;
     specialistReportPath = path.join(agentsDirectory, "TESTING_AGENT_REPORT.md");
-    await fsp.writeFile(
+    await outputFs.writeFile(
       specialistReportPath,
       `${renderTestingSpecialistMarkdown(testingSpecialist).trim()}\n`,
       "utf-8"
@@ -327,7 +330,7 @@ async function buildSpecialistSeed({
     summary = performanceSpecialist.summary;
     confidence = performanceSpecialist.confidence;
     specialistReportPath = path.join(agentsDirectory, "PERFORMANCE_AGENT_REPORT.md");
-    await fsp.writeFile(
+    await outputFs.writeFile(
       specialistReportPath,
       `${renderPerformanceSpecialistMarkdown(performanceSpecialist).trim()}\n`,
       "utf-8"
@@ -341,7 +344,7 @@ async function buildSpecialistSeed({
     summary = complianceSpecialist.summary;
     confidence = complianceSpecialist.confidence;
     specialistReportPath = path.join(agentsDirectory, "COMPLIANCE_AGENT_REPORT.md");
-    await fsp.writeFile(
+    await outputFs.writeFile(
       specialistReportPath,
       `${renderComplianceSpecialistMarkdown(complianceSpecialist).trim()}\n`,
       "utf-8"
@@ -355,7 +358,7 @@ async function buildSpecialistSeed({
     summary = documentationSpecialist.summary;
     confidence = documentationSpecialist.confidence;
     specialistReportPath = path.join(agentsDirectory, "DOCUMENTATION_AGENT_REPORT.md");
-    await fsp.writeFile(
+    await outputFs.writeFile(
       specialistReportPath,
       `${renderDocumentationSpecialistMarkdown(documentationSpecialist).trim()}\n`,
       "utf-8"
@@ -388,7 +391,7 @@ export async function runAuditOrchestrator({
   const isolationMode = normalizeIsolationMode(isolation);
   const useDeterministicSeed = seedFromDeterministic !== false;
   const requestedOmarGateReuse = normalizeString(reuseOmarGate);
-  const outputRoot = await resolveOutputRoot({
+  const { outputRoot, outputFs } = await resolveOutputContext({
     cwd: normalizedTargetPath,
     outputDirOverride: outputDir,
     env: process.env,
@@ -402,7 +405,7 @@ export async function runAuditOrchestrator({
   const agentPaths = new Map(
     agents.map((agent) => [agent, resolveAgentIdPath(agentsDirectory, agent.id, ".json")])
   );
-  await fsp.mkdir(agentsDirectory, { recursive: true });
+  await outputFs.mkdir(agentsDirectory, { recursive: true });
   const blackboard = createBlackboard({
     runId,
     scope: "audit-orchestrator",
@@ -655,6 +658,7 @@ export async function runAuditOrchestrator({
           deterministicBaseline,
           ingest,
           agentsDirectory,
+          outputFs,
         })
       : {
           findings: [],
@@ -682,6 +686,7 @@ export async function runAuditOrchestrator({
         sharedContext,
         hybridContext,
         artifactDir: agentsDirectory,
+        outputFs,
         provider,
         onEvent,
         clientFactory,
@@ -761,7 +766,7 @@ export async function runAuditOrchestrator({
       confidence,
     });
     const agentPath = agentPaths.get(agent);
-    await fsp.writeFile(agentPath, `${JSON.stringify(result, null, 2)}\n`, "utf-8");
+    await outputFs.writeFile(agentPath, `${JSON.stringify(result, null, 2)}\n`, "utf-8");
     emitAuditLifecycleEvent(
       onEvent,
       runId,
@@ -844,6 +849,7 @@ export async function runAuditOrchestrator({
     `Reconcile complete: ${uniqueFindings.length} unique finding(s).`
   );
   const sharedMemoryArtifact = await writeBlackboardArtifact(blackboard, {
+    outputFs,
     outputRoot,
   });
   const sharedMemorySummary = summarizeBlackboard(blackboard);
@@ -907,9 +913,10 @@ export async function runAuditOrchestrator({
 
   const reportJsonPath = path.join(runDirectory, "AUDIT_REPORT.json");
   const reportMarkdownPath = path.join(runDirectory, "AUDIT_REPORT.md");
-  await fsp.writeFile(reportJsonPath, `${JSON.stringify(report, null, 2)}\n`, "utf-8");
-  await fsp.writeFile(reportMarkdownPath, `${buildAuditMarkdown(report).trim()}\n`, "utf-8");
+  await outputFs.writeFile(reportJsonPath, `${JSON.stringify(report, null, 2)}\n`, "utf-8");
+  await outputFs.writeFile(reportMarkdownPath, `${buildAuditMarkdown(report).trim()}\n`, "utf-8");
   const ddPackage = await writeDdPackage({
+    outputFs,
     report,
     runDirectory,
   });
@@ -930,11 +937,11 @@ export async function runAuditOrchestrator({
     `Audit orchestrator complete: P0=${summary.P0} P1=${summary.P1} P2=${summary.P2} P3=${summary.P3}.`
   );
 
-  return {
+  return bindOutputFileSystem({
     ...report,
     reportJsonPath,
     reportMarkdownPath,
     ddPackage,
-  };
+  }, outputFs);
 }
 

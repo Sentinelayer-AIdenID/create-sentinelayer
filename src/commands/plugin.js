@@ -2,6 +2,7 @@ import path from "node:path";
 import process from "node:process";
 
 import pc from "picocolors";
+import { resolveOutputContext } from "../config/service.js";
 
 import {
   buildPluginManifestTemplate,
@@ -61,11 +62,15 @@ export function registerPluginCommand(program) {
       const pluginId = normalizePluginId(options.id);
       const packType = normalizePluginPackType(options.packType);
       const stage = normalizePluginLoadStage(options.stage);
-      const defaultPath = await resolveDefaultPluginManifestPath({
+      const explicitPath = String(options.path || "").trim();
+      const outputContext = await resolveOutputContext({
         cwd: process.cwd(),
-        outputDir: options.outputDir,
+        outputDirOverride: explicitPath || options.outputDir,
         env: process.env,
+      });
+      const defaultPath = explicitPath ? undefined : await resolveDefaultPluginManifestPath({
         pluginId,
+        outputContext,
       });
       const outputPath = normalizeOutputPath(options.path, defaultPath);
       const template = buildPluginManifestTemplate({
@@ -74,7 +79,10 @@ export function registerPluginCommand(program) {
         stage,
       });
       const manifest = validatePluginManifest(template);
-      const writtenPath = await writeJsonFile(outputPath, manifest, { force: Boolean(options.force) });
+      const writtenPath = await writeJsonFile(outputPath, manifest, {
+        force: Boolean(options.force),
+        outputFs: outputContext.outputFs,
+      });
 
       const payload = {
         command: "plugin init",

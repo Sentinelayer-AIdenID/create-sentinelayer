@@ -158,6 +158,7 @@ async function fixture(fn) {
   try { await fn(dir); } finally { globalThis.fetch = saved; assert.equal(path.dirname(dir), path.resolve(os.tmpdir())); await fsp.rm(dir, { recursive: true, force: true }); }
 }
 async function actualCaller(dir, { classifier = "typesafe", cap = 0, malformed = false, withKey = true, limits = {}, callLog = [], sourceFindings, mockOutcome = "valid" } = {}) {
+  await fsp.mkdir(dir, { recursive: true });
   const original = sourceFindings || [finding(), finding({ severity: "P2", message: "Second finding" })]; const calls = callLog;
   globalThis.fetch = async (url, init) => {
     calls.push(url);

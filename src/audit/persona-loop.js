@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
+import { requireOutputFileSystem } from "../config/output-filesystem.js";
 
 import { createMultiProviderApiClient } from "../ai/client.js";
 import { serializeProxyError } from "../ai/proxy.js";
@@ -376,6 +377,7 @@ export function createIsolatedPersonaContext({
   runId = "",
   rootPath = ".",
   artifactDir = "",
+  outputFs,
   provider = null,
   budget = {},
   onEvent = null,
@@ -384,6 +386,7 @@ export function createIsolatedPersonaContext({
   isolation = DEFAULT_ISOLATION_MODE,
   eventContext = null,
 } = {}) {
+  if (artifactDir) requireOutputFileSystem(outputFs);
   const normalizedAgent = normalizeAuditPersona(agent || {});
   const resolvedRootPath = path.resolve(String(rootPath || "."));
   const resolvedRunId =
@@ -399,6 +402,7 @@ export function createIsolatedPersonaContext({
     budget: loopBudget,
     runId: resolvedRunId,
     artifactDir,
+    outputFs,
     onEvent,
   });
   const emitter = (event, payload = {}) => {
@@ -701,6 +705,7 @@ async function runSinglePersonaAgenticLoop({
   sharedContext = null,
   hybridContext = null,
   artifactDir = "",
+  outputFs,
   provider = null,
   budget = {},
   maxTurns = null,
@@ -722,6 +727,7 @@ async function runSinglePersonaAgenticLoop({
     runId: requestedRunId,
     rootPath: resolvedRootPath,
     artifactDir,
+    outputFs,
     provider,
     budget,
     onEvent,
@@ -1053,6 +1059,7 @@ function summarizeSwarmStatus(results = []) {
 }
 
 export async function runPersonaAgenticLoop(options = {}) {
+  if (options.artifactDir) requireOutputFileSystem(options.outputFs);
   const {
     agent,
     rootPath,

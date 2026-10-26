@@ -34,7 +34,8 @@ import { runMcpStdioServer } from "../mcp/session-stdio-server.js";
 import { runMcpDoctorProbes } from "../mcp/doctor.js";
 import { runHostedMcpSmoke } from "../mcp/smoke.js";
 import { resolveActiveAuthSession } from "../auth/service.js";
-import { resolveOutputRoot } from "../config/service.js";
+import { resolveOutputContext, resolveOutputRoot } from "../config/service.js";
+import { createOutputFileSystem } from "../config/output-filesystem.js";
 
 function shouldEmitJson(options, command) {
   const local = Boolean(options && options.json);
@@ -49,6 +50,27 @@ function normalizeOutputPath(rawValue, fallbackPath) {
     return fallbackPath;
   }
   return path.resolve(process.cwd(), candidate);
+}
+
+async function resolveWriteDestination(options, resolveDefaultPath, { suffix, ...pathOptions } = {}) {
+  if (String(options.path || "").trim()) {
+    const { outputRoot: outputPath, outputFs } = await resolveOutputContext({
+      cwd: process.cwd(),
+      outputDirOverride: options.path,
+      env: process.env,
+    });
+    return { outputPath, outputFs };
+  }
+  const outputContext = await resolveOutputContext({
+    cwd: process.cwd(),
+    outputDirOverride: options.outputDir,
+    env: process.env,
+  });
+  const defaultPath = await resolveDefaultPath({ ...pathOptions, outputContext });
+  return {
+    outputPath: suffix ? defaultPath.replace(".schema", suffix) : defaultPath,
+    outputFs: outputContext.outputFs,
+  };
 }
 
 function zodIssueSummary(error) {
@@ -390,14 +412,9 @@ Docs: https://github.com/mrrCarter/create-sentinelayer/blob/main/docs/mcp.md`,
     .option("--force", "Overwrite destination file if it already exists")
     .option("--json", "Emit machine-readable output")
     .action(async (options, command) => {
-      const defaultPath = await resolveDefaultMcpOutputPath({
-        cwd: process.cwd(),
-        outputDir: options.outputDir,
-        env: process.env,
-      });
-      const outputPath = normalizeOutputPath(options.path, defaultPath);
+      const { outputPath, outputFs } = await resolveWriteDestination(options, resolveDefaultMcpOutputPath);
       const schemaPayload = buildMcpToolRegistrySchema();
-      const writtenPath = await writeJsonFile(outputPath, schemaPayload, { force: Boolean(options.force) });
+      const writtenPath = await writeJsonFile(outputPath, schemaPayload, { force: Boolean(options.force), outputFs });
 
       const payload = {
         command: "mcp schema write",
@@ -420,15 +437,10 @@ Docs: https://github.com/mrrCarter/create-sentinelayer/blob/main/docs/mcp.md`,
     .option("--force", "Overwrite destination file if it already exists")
     .option("--json", "Emit machine-readable output")
     .action(async (options, command) => {
-      const defaultPath = await resolveDefaultMcpOutputPath({
-        cwd: process.cwd(),
-        outputDir: options.outputDir,
-        env: process.env,
-      });
-      const outputPath = normalizeOutputPath(options.path, defaultPath.replace(".schema", ".aidenid-template"));
+      const { outputPath, outputFs } = await resolveWriteDestination(options, resolveDefaultMcpOutputPath, { suffix: ".aidenid-template" });
       const template = buildAidenIdRegistryTemplate();
       validateMcpToolRegistry(template);
-      const writtenPath = await writeJsonFile(outputPath, template, { force: Boolean(options.force) });
+      const writtenPath = await writeJsonFile(outputPath, template, { force: Boolean(options.force), outputFs });
       const payload = {
         command: "mcp registry init-aidenid",
         outputPath: writtenPath,
@@ -456,17 +468,12 @@ Docs: https://github.com/mrrCarter/create-sentinelayer/blob/main/docs/mcp.md`,
     .option("--force", "Overwrite destination file if it already exists")
     .option("--json", "Emit machine-readable output")
     .action(async (options, command) => {
-      const defaultPath = await resolveDefaultAidenIdAdapterContractPath({
-        cwd: process.cwd(),
-        outputDir: options.outputDir,
-        env: process.env,
-      });
-      const outputPath = normalizeOutputPath(options.path, defaultPath);
+      const { outputPath, outputFs } = await resolveWriteDestination(options, resolveDefaultAidenIdAdapterContractPath);
       const template = buildAidenIdProvisioningAdapterTemplate({
         registryFile: options.registryFile,
       });
       validateAidenIdAdapterContract(template);
-      const writtenPath = await writeJsonFile(outputPath, template, { force: Boolean(options.force) });
+      const writtenPath = await writeJsonFile(outputPath, template, { force: Boolean(options.force), outputFs });
       const payload = {
         command: "mcp registry init-aidenid-adapter",
         outputPath: writtenPath,
@@ -497,15 +504,10 @@ Docs: https://github.com/mrrCarter/create-sentinelayer/blob/main/docs/mcp.md`,
       .option("--force", "Overwrite destination file if it already exists")
       .option("--json", "Emit machine-readable output")
       .action(async (options, command) => {
-        const defaultPath = await resolveDefaultMcpOutputPath({
-          cwd: process.cwd(),
-          outputDir: options.outputDir,
-          env: process.env,
-        });
-        const outputPath = normalizeOutputPath(options.path, defaultPath.replace(".schema", outputSuffix));
+        const { outputPath, outputFs } = await resolveWriteDestination(options, resolveDefaultMcpOutputPath, { suffix: outputSuffix });
         const template = buildSentinelayerSessionRegistryTemplate();
         validateMcpToolRegistry(template);
-        const writtenPath = await writeJsonFile(outputPath, template, { force: Boolean(options.force) });
+        const writtenPath = await writeJsonFile(outputPath, template, { force: Boolean(options.force), outputFs });
         const payload = {
           command: payloadCommand,
           outputPath: writtenPath,
@@ -553,17 +555,12 @@ Docs: https://github.com/mrrCarter/create-sentinelayer/blob/main/docs/mcp.md`,
     .option("--force", "Overwrite destination file if it already exists")
     .option("--json", "Emit machine-readable output")
     .action(async (options, command) => {
-      const defaultPath = await resolveDefaultHostedSentiSessionConnectorContractPath({
-        cwd: process.cwd(),
-        outputDir: options.outputDir,
-        env: process.env,
-      });
-      const outputPath = normalizeOutputPath(options.path, defaultPath);
+      const { outputPath, outputFs } = await resolveWriteDestination(options, resolveDefaultHostedSentiSessionConnectorContractPath);
       const template = buildHostedSentiSessionConnectorContract({
         localRegistryFile: options.registryFile,
       });
       validateHostedSentiSessionConnectorContract(template);
-      const writtenPath = await writeJsonFile(outputPath, template, { force: Boolean(options.force) });
+      const writtenPath = await writeJsonFile(outputPath, template, { force: Boolean(options.force), outputFs });
       const payload = {
         command: "mcp registry init-hosted-session-connector",
         outputPath: writtenPath,
@@ -588,15 +585,10 @@ Docs: https://github.com/mrrCarter/create-sentinelayer/blob/main/docs/mcp.md`,
     .option("--force", "Overwrite destination file if it already exists")
     .option("--json", "Emit machine-readable output")
     .action(async (options, command) => {
-      const defaultPath = await resolveDefaultMcpOutputPath({
-        cwd: process.cwd(),
-        outputDir: options.outputDir,
-        env: process.env,
-      });
-      const outputPath = normalizeOutputPath(options.path, defaultPath.replace(".schema", ".cli-tools"));
+      const { outputPath, outputFs } = await resolveWriteDestination(options, resolveDefaultMcpOutputPath, { suffix: ".cli-tools" });
       const template = await buildSentinelayerCliRegistryTemplate();
       validateMcpToolRegistry(template);
-      const writtenPath = await writeJsonFile(outputPath, template, { force: Boolean(options.force) });
+      const writtenPath = await writeJsonFile(outputPath, template, { force: Boolean(options.force), outputFs });
       const payload = {
         command: "mcp registry init-cli",
         outputPath: writtenPath,
@@ -805,19 +797,13 @@ Docs: https://github.com/mrrCarter/create-sentinelayer/blob/main/docs/mcp.md`,
       const serverId = String(options.id || "")
         .trim()
         .toLowerCase();
-      const defaultPath = await resolveDefaultMcpServerConfigPath({
-        cwd: process.cwd(),
-        outputDir: options.outputDir,
-        env: process.env,
-        serverId,
-      });
-      const outputPath = normalizeOutputPath(options.path, defaultPath);
+      const { outputPath, outputFs } = await resolveWriteDestination(options, resolveDefaultMcpServerConfigPath, { serverId });
       const template = buildMcpServerConfigTemplate({
         serverId,
         registryFile: options.registryFile,
       });
       const config = validateMcpServerConfig(template);
-      const writtenPath = await writeJsonFile(outputPath, config, { force: Boolean(options.force) });
+      const writtenPath = await writeJsonFile(outputPath, config, { force: Boolean(options.force), outputFs });
 
       const payload = {
         command: "mcp server init",
@@ -924,7 +910,14 @@ Docs: https://github.com/mrrCarter/create-sentinelayer/blob/main/docs/mcp.md`,
         serverId,
         serverConfigFile: String(options.serverConfig || "").trim(),
       });
-      const writtenPath = await writeJsonFile(outputPath, bridgePayload, { force: Boolean(options.force) });
+      const outputFs = String(options.path || "").trim()
+        ? (await resolveOutputContext({
+          cwd: process.cwd(),
+          outputDirOverride: options.path,
+          env: process.env,
+        })).outputFs
+        : createOutputFileSystem({ workspaceRoot: process.cwd() });
+      const writtenPath = await writeJsonFile(outputPath, bridgePayload, { force: Boolean(options.force), outputFs });
 
       const payload = {
         command: "mcp bridge init-vscode",

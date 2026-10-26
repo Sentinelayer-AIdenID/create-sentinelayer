@@ -13,6 +13,7 @@ import {
   recordProvisionedIdentity,
   updateIdentityStatus,
 } from "../src/ai/identity-store.js";
+import { createOutputFileSystem } from "../src/config/output-filesystem.js";
 
 test("Unit identity store: record/list/show identity lifecycle", async () => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-ai-store-"));
@@ -22,6 +23,7 @@ test("Unit identity store: record/list/show identity lifecycle", async () => {
     assert.equal(empty.identities.length, 0);
 
     const recorded = await recordProvisionedIdentity({
+      outputFs: createOutputFileSystem({ workspaceRoot: tempRoot }),
       outputRoot,
       response: {
         id: "id_123",
@@ -58,6 +60,7 @@ test("Unit identity store: update status transitions identity to revoked", async
   try {
     const outputRoot = path.join(tempRoot, ".sentinelayer");
     await recordProvisionedIdentity({
+      outputFs: createOutputFileSystem({ workspaceRoot: tempRoot }),
       outputRoot,
       response: {
         id: "id_123",
@@ -74,6 +77,7 @@ test("Unit identity store: update status transitions identity to revoked", async
     });
 
     const updated = await updateIdentityStatus({
+      outputFs: createOutputFileSystem({ workspaceRoot: tempRoot }),
       outputRoot,
       identityId: "id_123",
       status: "REVOKED",
@@ -94,6 +98,7 @@ test("Unit identity store: child identity records preserve parent linkage and so
   try {
     const outputRoot = path.join(tempRoot, ".sentinelayer");
     const recorded = await recordProvisionedIdentity({
+      outputFs: createOutputFileSystem({ workspaceRoot: tempRoot }),
       outputRoot,
       response: {
         id: "id_child_1",
@@ -127,6 +132,7 @@ test("Unit identity store: stale detection excludes squashed identities", async 
   try {
     const outputRoot = path.join(tempRoot, ".sentinelayer");
     await recordProvisionedIdentity({
+      outputFs: createOutputFileSystem({ workspaceRoot: tempRoot }),
       outputRoot,
       response: {
         id: "id_stale",
@@ -143,6 +149,7 @@ test("Unit identity store: stale detection excludes squashed identities", async 
       },
     });
     await recordProvisionedIdentity({
+      outputFs: createOutputFileSystem({ workspaceRoot: tempRoot }),
       outputRoot,
       response: {
         id: "id_squashed",

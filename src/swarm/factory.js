@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import fsp from "node:fs/promises";
 import path from "node:path";
 
-import { resolveOutputRoot } from "../config/service.js";
+import { resolveOutputContext } from "../config/service.js";
 
 const SCHEMA_VERSION = 1;
 const DEFAULT_GLOBAL_BUDGET = Object.freeze({
@@ -341,7 +341,7 @@ export async function writeSwarmPlanArtifacts({
     throw new Error("plan is required.");
   }
 
-  const outputRoot = await resolveOutputRoot({
+  const { outputRoot, outputFs } = await resolveOutputContext({
     cwd: path.resolve(String(plan.targetPath || ".")),
     outputDirOverride: outputDir,
     env,
@@ -350,9 +350,9 @@ export async function writeSwarmPlanArtifacts({
   const runDirectory = path.join(outputRoot, "swarms", plan.runId);
   const planJsonPath = path.join(runDirectory, "SWARM_PLAN.json");
   const planMarkdownPath = path.join(runDirectory, "SWARM_PLAN.md");
-  await fsp.mkdir(runDirectory, { recursive: true });
-  await fsp.writeFile(planJsonPath, `${JSON.stringify(plan, null, 2)}\n`, "utf-8");
-  await fsp.writeFile(planMarkdownPath, `${renderSwarmPlanMarkdown(plan).trim()}\n`, "utf-8");
+  await outputFs.mkdir(runDirectory, { recursive: true });
+  await outputFs.writeFile(planJsonPath, `${JSON.stringify(plan, null, 2)}\n`, "utf-8");
+  await outputFs.writeFile(planMarkdownPath, `${renderSwarmPlanMarkdown(plan).trim()}\n`, "utf-8");
 
   return {
     outputRoot,

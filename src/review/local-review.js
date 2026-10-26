@@ -4,7 +4,8 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 
 import { buildScrubbedEnv } from "../agents/shared-tools/shell.js";
-import { resolveOutputRoot } from "../config/service.js";
+import { resolveOutputContext } from "../config/service.js";
+import { bindOutputFileSystem, requireOutputFileSystem } from "../config/output-filesystem.js";
 import { resolveCodebaseIngest } from "../ingest/engine.js";
 import { runSpecBindingChecks } from "./spec-binding.js";
 
@@ -852,9 +853,10 @@ export function staticCheckEnv(env = process.env) {
   return { ...buildScrubbedEnv(env), CI: "1", FORCE_COLOR: "0" };
 }
 
-async function executeStaticCheck({ check, targetPath, runDir } = {}) {
+async function executeStaticCheck({ check, targetPath, runDir, outputFs } = {}) {
+  requireOutputFileSystem(outputFs);
   const checksDir = path.join(runDir, "checks");
-  await fsp.mkdir(checksDir, { recursive: true });
+  await outputFs.mkdir(checksDir, { recursive: true });
 
   const startedAt = Date.now();
   const result = spawnSync(check.command, check.args, {
@@ -869,8 +871,8 @@ async function executeStaticCheck({ check, targetPath, runDir } = {}) {
   const stderr = String(result.stderr || "");
   const stdoutPath = path.join(checksDir, `${check.id}.stdout.log`);
   const stderrPath = path.join(checksDir, `${check.id}.stderr.log`);
-  await fsp.writeFile(stdoutPath, stdout, "utf-8");
-  await fsp.writeFile(stderrPath, stderr, "utf-8");
+  await outputFs.writeFile(stdoutPath, stdout, "utf-8");
+  await outputFs.writeFile(stderrPath, stderr, "utf-8");
 
   if (result.error && result.error.code === "ENOENT") {
     return {
@@ -933,7 +935,8 @@ async function executeStaticCheck({ check, targetPath, runDir } = {}) {
 
 export const __localReviewForTests = Object.freeze({ executeStaticCheck });
 
-async function runStaticAnalysisLayer({ targetPath, ingest, runDir, maxFindings = MAX_FINDINGS } = {}) {
+async function runStaticAnalysisLayer({ targetPath, ingest, runDir, outputFs, maxFindings = MAX_FINDINGS } = {}) {
+  requireOutputFileSystem(outputFs);
   const checks = buildStaticChecks(ingest);
   const results = [];
   const findings = [];
@@ -943,6 +946,7 @@ async function runStaticAnalysisLayer({ targetPath, ingest, runDir, maxFindings 
       check,
       targetPath,
       runDir,
+      outputFs,
     });
     results.push(result);
 
@@ -1145,12 +1149,13 @@ ${formatDeterministicFindingsMarkdown(result.findings)}
 `;
 }
 
-async function writeDeterministicReviewArtifacts({ result, runDir } = {}) {
+async function writeDeterministicReviewArtifacts({ result, runDir, outputFs } = {}) {
+  requireOutputFileSystem(outputFs);
   const markdownPath = path.join(runDir, "REVIEW_DETERMINISTIC.md");
   const jsonPath = path.join(runDir, "REVIEW_DETERMINISTIC.json");
 
-  await fsp.writeFile(markdownPath, `${buildDeterministicReviewMarkdown(result).trim()}\n`, "utf-8");
-  await fsp.writeFile(jsonPath, `${JSON.stringify(result, null, 2)}\n`, "utf-8");
+  await outputFs.writeFile(markdownPath, `${buildDeterministicReviewMarkdown(result).trim()}\n`, "utf-8");
+  await outputFs.writeFile(jsonPath, `${JSON.stringify(result, null, 2)}\n`, "utf-8");
 
   return {
     markdownPath,
@@ -1159,6 +1164,7 @@ async function writeDeterministicReviewArtifacts({ result, runDir } = {}) {
 }
 
 export async function runDeterministicReviewPipeline({
+  outputFs: inheritedOutputFs,
   targetPath,
   mode = "full",
   outputDir = "",
@@ -1170,17 +1176,19 @@ export async function runDeterministicReviewPipeline({
     allowedModes: ["full", "diff", "staged"],
   });
 
-  const outputRoot = await resolveOutputRoot({
+  const { outputRoot, outputFs: resolvedOutputFs } = await resolveOutputContext({
     cwd: normalizedTargetPath,
     outputDirOverride: outputDir,
   });
+  const outputFs = inheritedOutputFs === undefined ? resolvedOutputFs : requireOutputFileSystem(inheritedOutputFs);
   const runId = `review-${formatTimestampForFile()}-${randomUUID().slice(0, 8)}`;
   const runDir = path.join(outputRoot, "reviews", runId);
-  await fsp.mkdir(runDir, { recursive: true });
+  await outputFs.mkdir(runDir, { recursive: true });
 
   const ingestResolution = await resolveCodebaseIngest({
     rootPath: normalizedTargetPath,
     outputDir,
+    outputFs,
     refresh: Boolean(refreshIngest),
   });
   const ingest = ingestResolution.ingest;
@@ -1221,6 +1229,7 @@ export async function runDeterministicReviewPipeline({
     targetPath: normalizedTargetPath,
     ingest,
     runDir,
+    outputFs,
     maxFindings: remainingBudget,
   });
 
@@ -1302,14 +1311,15 @@ export async function runDeterministicReviewPipeline({
   const artifacts = await writeDeterministicReviewArtifacts({
     result,
     runDir,
+    outputFs,
   });
 
   return {
     ...result,
-    artifacts: {
+    artifacts: bindOutputFileSystem({
       runDirectory: runDir,
       ...artifacts,
-    },
+    }, outputFs),
   };
 }
 
@@ -1363,13 +1373,13 @@ export async function writeReviewReport({
   outputDir = "",
   reportMarkdown,
 } = {}) {
-  const outputRoot = await resolveOutputRoot({
+  const { outputRoot, outputFs } = await resolveOutputContext({
     cwd: targetPath,
     outputDirOverride: outputDir,
   });
   const reportDir = path.join(outputRoot, "reports");
-  await fsp.mkdir(reportDir, { recursive: true });
+  await outputFs.mkdir(reportDir, { recursive: true });
   const reportPath = path.join(reportDir, `review-scan-${mode}-${formatTimestampForFile()}.md`);
-  await fsp.writeFile(reportPath, `${String(reportMarkdown || "").trim()}\n`, "utf-8");
+  await outputFs.writeFile(reportPath, `${String(reportMarkdown || "").trim()}\n`, "utf-8");
   return reportPath;
 }

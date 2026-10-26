@@ -1,4 +1,5 @@
 import "./setup-env.mjs";
+import { createOutputFileSystem } from "../src/config/output-filesystem.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import os from "node:os";
@@ -30,6 +31,8 @@ test("devTestBot run_session dry-run writes a redacted artifact bundle", async (
       outputRoot: path.join(tempRoot, ".sentinelayer"),
       outputDir: path.join(tempRoot, "devtestbot"),
       baseUrl: "about:blank?token=fixture-secret-token",
+    }, {
+      outputFs: createOutputFileSystem({ workspaceRoot: tempRoot }),
     });
 
     assert.equal(result.completed, true);
@@ -55,6 +58,7 @@ test("devTestBot run_session executes a launcher, normalizes findings, and suppr
   const token = "fixture-token-secret-value";
   try {
     await recordProvisionedIdentity({
+      outputFs: createOutputFileSystem({ workspaceRoot: tempRoot }),
       outputRoot,
       response: {
         id: "id_123",
@@ -98,6 +102,7 @@ test("devTestBot run_session executes a launcher, normalizes findings, and suppr
       execute: true,
       recordVideo: true,
     }, {
+      outputFs: createOutputFileSystem({ workspaceRoot: tempRoot }),
       launchImpl: fakeLaunch,
       identityCreds: {
         password,

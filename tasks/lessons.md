@@ -1,5 +1,11 @@
 # Lessons
 
+## 2026-10-26
+
+- An output-root check does not protect descendant writers. Carry the configuration trust policy through derived storage and check the complete destination immediately before each mutation; keep executable policy out of serialized JSON.
+- Validation and IO must use the same normalized path. POSIX resolves a symlink before a following `..`; validating a normalized string then writing the raw string can escape despite a correct containment predicate.
+- Refuse final-file symlinks and use native no-follow flags where supported, while distinguishing that protection from concurrent parent-directory replacement. Exercise actual links on Linux when Windows privilege limits would otherwise skip the witness.
+
 ## 2026-10-24
 
 - A route allow-list proves only that a command name is admitted. For self-provisioning commands that accept an agent target, bind the parsed target to a trusted bridge caller before dispatch, and test the real action with different caller and target identities. A label-only test cannot prove a leave is self-only or a pending cancellation cannot cross agents.
@@ -418,3 +424,19 @@
   for regression tests. Increasing retry counts or inserting arbitrary sleeps
   does not prove ordering. Keep cross-process guarantees separate from a
   module-local queue, and ensure a rejected operation cannot poison that queue.
+
+# 2026-10-26 - Artifact policy follows the destination and the capability
+
+- A trusted configuration source does not make a path beneath the workspace safe:
+  default and explicit local paths can encounter the same descendant links.
+  Preserve unrestricted behavior only for deliberate absolute external output.
+- A guarded command is insufficient when an exported writer silently falls back
+  to native filesystem access. Require an unforgeable per-operation capability
+  and exercise missing/native/copied capabilities with zero-effect assertions.
+- Extend the concrete artifact call graph through fixed workspace roots as well
+  as configured roots. Real native symlink tests catch stale compatibility
+  assumptions that privilege-skipped Windows tests cannot execute.
+- ENOENT followed by an existing ordinary ancestor can be legitimate concurrent
+  mkdir, not a dangling link. Resolve that entry once and apply the same boundary;
+  verify both the actual concurrent workflow and an adversarial replacement.
+  Do not dismiss intermittent missing-artifact failures until their cause is traced.

@@ -12,12 +12,14 @@ import {
   recordDomainProofResponse,
   recordTargetProofResponse,
 } from "../src/ai/domain-target-store.js";
+import { createOutputFileSystem } from "../src/config/output-filesystem.js";
 
 test("Unit domain/target store: records and reads domain proof metadata", async () => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-ai-domain-store-"));
   try {
     const outputRoot = path.join(tempRoot, ".sentinelayer");
     await recordDomainProofResponse({
+      outputFs: createOutputFileSystem({ workspaceRoot: tempRoot }),
       outputRoot,
       domain: {
         id: "dom_1",
@@ -55,6 +57,7 @@ test("Unit domain/target store: records and reads target proof metadata", async 
   try {
     const outputRoot = path.join(tempRoot, ".sentinelayer");
     await recordTargetProofResponse({
+      outputFs: createOutputFileSystem({ workspaceRoot: tempRoot }),
       outputRoot,
       target: {
         id: "tgt_1",

@@ -1,6 +1,7 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
 
+import { bindOutputFileSystem, requireOutputFileSystem } from "../config/output-filesystem.js";
 import { loadConfig } from "../config/service.js";
 import { listAssignments, resolveAssignmentLedgerStorage } from "./assignment-ledger.js";
 import { listBudgetStates } from "./budget-governor.js";
@@ -302,14 +303,16 @@ async function readJsonFile(filePath, defaultFactory) {
   }
 }
 
-async function writeJsonFile(filePath, payload) {
-  await fsp.mkdir(path.dirname(filePath), { recursive: true });
-  await fsp.writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
+async function writeJsonFile(filePath, payload, outputFs) {
+  requireOutputFileSystem(outputFs);
+  await outputFs.mkdir(path.dirname(filePath), { recursive: true });
+  await outputFs.writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
 }
 
-async function appendEvent(filePath, payload) {
-  await fsp.mkdir(path.dirname(filePath), { recursive: true });
-  await fsp.appendFile(filePath, `${JSON.stringify(payload)}\n`, "utf-8");
+async function appendEvent(filePath, payload, outputFs) {
+  requireOutputFileSystem(outputFs);
+  await outputFs.mkdir(path.dirname(filePath), { recursive: true });
+  await outputFs.appendFile(filePath, `${JSON.stringify(payload)}\n`, "utf-8");
 }
 
 function buildRunId(nowIso, count) {
@@ -756,12 +759,12 @@ export async function resolveWatchdogStorage({
     env,
     homeDir,
   });
-  return {
+  return bindOutputFileSystem({
     ...daemonStorage,
     watchdogStatePath: path.join(daemonStorage.baseDir, "watchdog-state.json"),
     watchdogEventsPath: path.join(daemonStorage.baseDir, "watchdog-events.ndjson"),
     watchdogRunsDir: path.join(daemonStorage.baseDir, "watchdog-runs"),
-  };
+  }, daemonStorage.outputFs);
 }
 
 export async function runWatchdogTick({
@@ -879,7 +882,7 @@ export async function runWatchdogTick({
     normalizedNow
   );
 
-  await fsp.mkdir(storage.watchdogRunsDir, { recursive: true });
+  await storage.outputFs.mkdir(storage.watchdogRunsDir, { recursive: true });
   const runId = nextState.lastRunId;
   const runPath = path.join(storage.watchdogRunsDir, `${runId}.json`);
   const runPayload = {
@@ -913,8 +916,8 @@ export async function runWatchdogTick({
   };
 
   await Promise.all([
-    writeJsonFile(runPath, runPayload),
-    writeJsonFile(storage.watchdogStatePath, nextState),
+    writeJsonFile(runPath, runPayload, storage.outputFs),
+    writeJsonFile(storage.watchdogStatePath, nextState, storage.outputFs),
     appendEvent(storage.watchdogEventsPath, {
       timestamp: normalizedNow,
       eventType: "watchdog_tick",
@@ -925,7 +928,7 @@ export async function runWatchdogTick({
       notificationCount: notifications.length,
       sentNotificationCount: notifications.filter((item) => item.sent).length,
       failedNotificationCount: notifications.filter((item) => !item.sent && !item.dryRun).length,
-    }),
+    }, storage.outputFs),
   ]);
 
   return {

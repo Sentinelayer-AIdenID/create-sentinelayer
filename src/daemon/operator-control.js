@@ -1,6 +1,7 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
 
+import { bindOutputFileSystem, requireOutputFileSystem } from "../config/output-filesystem.js";
 import { ASSIGNMENT_STATUSES, resolveAssignmentLedgerStorage, listAssignments } from "./assignment-ledger.js";
 import { DAEMON_BUDGET_LIFECYCLE_STATES, listBudgetStates } from "./budget-governor.js";
 import { WORK_ITEM_STATUSES, listErrorQueue, resolveErrorDaemonStorage } from "./error-worker.js";
@@ -82,14 +83,16 @@ function loadJsonFile(filePath, defaultFactory) {
     });
 }
 
-async function writeJsonFile(filePath, payload = {}) {
-  await fsp.mkdir(path.dirname(filePath), { recursive: true });
-  await fsp.writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
+async function writeJsonFile(filePath, payload = {}, outputFs) {
+  requireOutputFileSystem(outputFs);
+  await outputFs.mkdir(path.dirname(filePath), { recursive: true });
+  await outputFs.writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
 }
 
-async function appendJsonLine(filePath, payload = {}) {
-  await fsp.mkdir(path.dirname(filePath), { recursive: true });
-  await fsp.appendFile(filePath, `${JSON.stringify(payload)}\n`, "utf-8");
+async function appendJsonLine(filePath, payload = {}, outputFs) {
+  requireOutputFileSystem(outputFs);
+  await outputFs.mkdir(path.dirname(filePath), { recursive: true });
+  await outputFs.appendFile(filePath, `${JSON.stringify(payload)}\n`, "utf-8");
 }
 
 function resolveBudgetHealthColor(budgetLifecycleState = "") {
@@ -271,12 +274,12 @@ export async function resolveOperatorControlStorage({
     env,
     homeDir,
   });
-  return {
+  return bindOutputFileSystem({
     ...daemonStorage,
     operatorStatePath: path.join(daemonStorage.baseDir, "operator-control-state.json"),
     operatorEventsPath: path.join(daemonStorage.baseDir, "operator-events.ndjson"),
     operatorSnapshotsDir: path.join(daemonStorage.baseDir, "operator-snapshots"),
-  };
+  }, daemonStorage.outputFs);
 }
 
 export async function buildOperatorControlSnapshot({
@@ -427,8 +430,8 @@ export async function buildOperatorControlSnapshot({
     workItems: rows,
     agentRoster,
   };
-  await fsp.mkdir(storage.operatorSnapshotsDir, { recursive: true });
-  await writeJsonFile(runPath, snapshot);
+  await storage.outputFs.mkdir(storage.operatorSnapshotsDir, { recursive: true });
+  await writeJsonFile(runPath, snapshot, storage.outputFs);
 
   const nextControlState = normalizeControlState(
     {
@@ -442,7 +445,7 @@ export async function buildOperatorControlSnapshot({
     normalizedNow
   );
   await Promise.all([
-    writeJsonFile(storage.operatorStatePath, nextControlState),
+    writeJsonFile(storage.operatorStatePath, nextControlState, storage.outputFs),
     appendJsonLine(storage.operatorEventsPath, {
       timestamp: normalizedNow,
       eventType: "operator_snapshot",
@@ -452,7 +455,7 @@ export async function buildOperatorControlSnapshot({
       activeAgents: snapshot.summary.activeAgents,
       statusCounts: statusSummary.statusCounts,
       healthCounts: statusSummary.healthCounts,
-    }),
+    }, storage.outputFs),
   ]);
 
   return {
@@ -606,8 +609,8 @@ export async function applyOperatorStopControl({
   }
 
   await Promise.all([
-    writeJsonFile(storage.queuePath, queue),
-    writeJsonFile(assignmentStorage.ledgerPath, ledger),
+    writeJsonFile(storage.queuePath, queue, storage.outputFs),
+    writeJsonFile(assignmentStorage.ledgerPath, ledger, assignmentStorage.outputFs),
     appendJsonLine(storage.operatorEventsPath, {
       timestamp: normalizedNow,
       eventType: "operator_stop",
@@ -618,7 +621,7 @@ export async function applyOperatorStopControl({
       reason: normalizedReason,
       jiraIssueKey,
       jiraCommented,
-    }),
+    }, storage.outputFs),
   ]);
 
   return {

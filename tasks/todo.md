@@ -1,3 +1,18 @@
+# 2026-10-26 - PR 854 configured artifact write boundary
+
+- [x] Integrate current main without rewriting the reviewed PR history.
+- [x] Inventory configured output consumers and propagate a private filesystem capability to every current artifact writer.
+- [x] Validate full destinations at mutation time; refuse final-file links and use native no-follow where available.
+- [x] Preserve trusted CLI/global paths, safe parent links, output JSON and write options.
+- [x] Reproduce original unsafe writers and validate real Linux links and Windows junctions.
+- [x] Run native Linux boundary tests, Windows browser capture, existing writer suites and required local gates; retain exact failures rather than claiming green.
+- [x] Refresh only the two changed evaluation source bindings and rerun its unchanged cases.
+- [ ] Complete baseline classification of unrelated full-suite failures, Warden first review, independent second review and required hosted checks.
+
+Coverage, compatibility, limitations and evidence are recorded in
+`tasks/evals/pr-854-output-boundary.md`. No push or merge is authorized by a local
+test pass alone.
+
 # 2026-09-28 - Bounded session start (`roadmap/pr-800-session-start-bounded`)
 
 ## Plan
@@ -4282,3 +4297,16 @@ Review: The fail-first call with `agent: "attacker", name: "victim"` reached the
 - [ ] Obtain independent exact-head review and fresh direct Sol 6.1 hosted gates before any branch update or merge.
 
 Review: The original PR demonstrated 1,024 decryptable concurrent writes, five ordering regressions, and recovery after an operation failure. This replay changes no credential-store source beyond that reviewed PR. On current main, the focused auth/session suite passed 21/21, static check passed 418 files, and docs validation passed. E2E passed 140/141; the legacy session-join fixture returned `LEGACY_AGENT_ACCESS_UNAVAILABLE` 503. The same named test fails identically on untouched current main `aa68b9f`, so this is not evidence of a PR855 regression. Fresh hosted direct Sol 6.1 gates remain before any merge.
+
+## PR854 first-review follow-up: every local artifact root and mandatory capabilities
+
+- [x] Confine default output and every workspace-local CLI/global selection; reject relative escapes before writes and retain only explicit absolute external overrides.
+- [x] Require factory-branded capabilities at exported artifact writer boundaries and remove native fs fallbacks; propagate through daemon, AI, MCP/plugin, ingest, browser and reports.
+- [x] Cover fixed AST/fix-cycle, scenario and investor-DD artifact roots and preserve their established safe layouts.
+- [x] Refuse pre-existing multiply-linked regular files, preserve final-file no-follow guards, and retain explicit parent-replacement/concurrent-alias limits.
+- [x] Prove actual old-source negative controls and focused native regressions: central 115/115, daemon 69/69, MCP/plugin 88/88, investor DD 37/37. Syntax and docs pass.
+- [ ] Complete full verification on the exact frozen successor, obtain renewed first/second review and required hosted checks, then publish/merge under the existing authorization.
+
+The old candidate b85394d was rejected in first review and is superseded by this follow-up. No old-candidate approval or focused test result is used to claim the successor fully verified. Exact source bindings and local evidence are recorded in the session review854 packet.
+
+Full verification of 88a6a24 passed 141 E2E and 3,107 unit tests but found four failures. Three fixture setup omissions are corrected without changing their assertions. The fourth was traced to a concurrent ordinary-directory creation between realpath and lstat; a single re-resolution now checks the resulting real path, with a real-filesystem external-link replacement negative control. Focused follow-up passes 209 tests plus five Windows privilege skips. Full successor verification remains required before renewed review.

@@ -3,7 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, mkdir, symlink, writeFile } from "node:fs/promises";
 
 import {
   parseScenarioDsl,
@@ -58,4 +58,19 @@ test("Unit swarm scenario DSL: template writer persists deterministic .sls outpu
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
   }
+});
+
+test("scenario template refuses a linked default artifact directory and relative output escape", async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sl-scenario-boundary-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const targetPath = path.join(root, "workspace"), outside = path.join(root, "outside");
+  await mkdir(path.join(targetPath, ".sentinelayer"), { recursive: true });
+  await mkdir(outside);
+  await writeFile(path.join(outside, "example.sls"), "sentinel");
+  await symlink(outside, path.join(targetPath, ".sentinelayer/scenarios"), "junction");
+  await assert.rejects(writeScenarioTemplate({ scenarioId: "example", targetPath }), /Workspace outputDir/);
+  await assert.rejects(writeScenarioTemplate({ scenarioId: "example", targetPath, outputFile: "../outside/example.sls" }), /Workspace outputDir/);
+  assert.equal(await readFile(path.join(outside, "example.sls"), "utf8"), "sentinel");
+  await writeScenarioTemplate({ scenarioId: "example", targetPath, outputFile: path.join(outside, "allowed.sls") });
+  assert.match(await readFile(path.join(outside, "allowed.sls"), "utf8"), /scenario "example"/);
 });

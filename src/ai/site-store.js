@@ -1,5 +1,6 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
+import { requireOutputFileSystem } from "../config/output-filesystem.js";
 
 const REGISTRY_SCHEMA_VERSION = "1.0.0";
 
@@ -60,14 +61,15 @@ async function loadRegistryInternal(filePath) {
   }
 }
 
-async function writeRegistryInternal(filePath, registry = {}) {
+async function writeRegistryInternal(filePath, registry = {}, outputFs) {
+  requireOutputFileSystem(outputFs);
   const normalized = {
     schemaVersion: REGISTRY_SCHEMA_VERSION,
     generatedAt: new Date().toISOString(),
     sites: Array.isArray(registry.sites) ? registry.sites.map(normalizeSiteRecord) : [],
   };
-  await fsp.mkdir(path.dirname(filePath), { recursive: true });
-  await fsp.writeFile(filePath, `${JSON.stringify(normalized, null, 2)}\n`, "utf-8");
+  await outputFs.mkdir(path.dirname(filePath), { recursive: true });
+  await outputFs.writeFile(filePath, `${JSON.stringify(normalized, null, 2)}\n`, "utf-8");
   return normalized;
 }
 
@@ -85,10 +87,12 @@ export async function listSites({ outputRoot, identityId = "" } = {}) {
 }
 
 export async function recordTemporarySite({
+  outputFs,
   outputRoot,
   site = {},
   context = {},
 } = {}) {
+  requireOutputFileSystem(outputFs);
   const siteId = normalizeString(site.id || context.siteId);
   if (!siteId) {
     throw new Error("Cannot record temporary site without site.id.");
@@ -136,7 +140,7 @@ export async function recordTemporarySite({
     registry.sites.push(nextRecord);
   }
 
-  const saved = await writeRegistryInternal(registryPath, registry);
+  const saved = await writeRegistryInternal(registryPath, registry, outputFs);
   const savedSite = saved.sites.find((item) => item.siteId === siteId) || null;
   return {
     registryPath,

@@ -4,6 +4,7 @@ import path from "node:path";
 import { getConfigPaths } from "./paths.js";
 import { ensureConfigFile, readConfigFile, writeConfigFile } from "./io.js";
 import { CONFIG_KEYS, configSchema } from "./schema.js";
+import { assertWorkspaceOutputPath, createOutputFileSystem } from "./output-filesystem.js";
 
 const ENV_MAPPING = Object.freeze({
   SENTINELAYER_API_URL: "apiUrl",
@@ -200,7 +201,38 @@ export function listConfigKeys() {
   return [...CONFIG_KEYS];
 }
 
-export async function resolveOutputRoot({
+function isInsideRoot(root, candidate) {
+  const relative = path.relative(root, candidate);
+  return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+}
+
+// Every workspace-local output is confined, regardless of where its setting came
+// from. Only an explicit absolute trusted-layer path outside the workspace opts out.
+async function resolveOutputSelection(value, cwd, { project = false } = {}) {
+  try {
+    const root = path.resolve(cwd);
+    const absolute = path.isAbsolute(value);
+    const foreignAbsolute = path.win32.isAbsolute(value) || /^[A-Za-z]:/.test(value);
+    if ((project && (absolute || foreignAbsolute)) || (!absolute && foreignAbsolute)) throw new Error();
+    const candidate = path.resolve(root, value);
+    if (absolute && !isInsideRoot(root, candidate)) {
+      return { outputRoot: candidate, outputFs: createOutputFileSystem() };
+    }
+    // Backslash escapes remain rejected on POSIX as well, so config is portable.
+    if (!isInsideRoot(root, candidate) || !isInsideRoot(root, path.resolve(root, value.replace(/\\/g, "/")))) {
+      throw new Error();
+    }
+    return {
+      outputRoot: await assertWorkspaceOutputPath(candidate, root),
+      outputFs: createOutputFileSystem({ workspaceRoot: root }),
+    };
+  } catch {
+    // Do not echo private configuration values or filesystem errors containing their paths.
+    throw new Error("Workspace outputDir must resolve to a relative path inside the workspace.");
+  }
+}
+
+export async function resolveOutputContext({
   cwd = process.cwd(),
   outputDirOverride = "",
   env = process.env,
@@ -208,14 +240,18 @@ export async function resolveOutputRoot({
 } = {}) {
   const overrideValue = String(outputDirOverride || "").trim();
   if (overrideValue) {
-    return path.resolve(cwd, overrideValue);
+    return resolveOutputSelection(overrideValue, cwd);
   }
 
   const config = await loadConfig({ cwd, env, homeDir });
   const configuredOutputDir = String(config.resolved.outputDir || "").trim();
   if (configuredOutputDir) {
-    return path.resolve(cwd, configuredOutputDir);
+    return resolveOutputSelection(configuredOutputDir, cwd, { project: findConfigSource(config, "outputDir") === "project" });
   }
 
-  return path.resolve(cwd, ".sentinelayer");
+  return resolveOutputSelection(".sentinelayer", cwd);
+}
+
+export async function resolveOutputRoot(options = {}) {
+  return (await resolveOutputContext(options)).outputRoot;
 }
