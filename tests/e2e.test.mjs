@@ -7801,22 +7801,54 @@ test("CLI session observe: relays durable observation through canonical events A
 
 test("CLI session commands: start/list/join/say/read/status/kill/leave flow with lease revocation", async () => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-session-e2e-"));
+  const grants = [
+    { id: "7bfa6247-7133-4d93-8c29-1d2c8d341001", agentId: "agent-alpha", role: "coder", exists: true, revoked: false, revokedAt: null },
+    { id: "7bfa6247-7133-4d93-8c29-1d2c8d341002", agentId: "agent-beta", role: "reviewer", exists: true, revoked: false, revokedAt: null },
+  ];
+  const verifiedPresence = [];
+  let grantReads = 0;
+  let sessionId = "";
+  // Named legacy joins must prove both an account grant and room presence.
+  // Keep the production auth and egress guards active, using only this loopback API.
+  const grantServer = createServer(async (req, res) => {
+    try {
+      const url = new URL(req.url || "/", "http://127.0.0.1");
+      if (req.method === "GET" && url.pathname === "/api/v1/sessions/agent-grants") {
+        assert.equal(req.headers.authorization, "Bearer api_token_e2e_test_session");
+        grantReads += 1;
+        return jsonResponse(res, 200, { grants, nextAfter: null });
+      }
+      if (req.method === "PUT" && url.pathname === `/api/v1/sessions/${sessionId}/presence`) {
+        assert.equal(req.headers.authorization, "Bearer api_token_e2e_test_session");
+        const body = await readJsonBody(req);
+        assert.ok(grants.some((grant) => grant.agentId === body.agentId));
+        verifiedPresence.push(body.agentId);
+        return jsonResponse(res, 200, { status: "ok", recorded: true, agentId: body.agentId, ttlSeconds: 120 });
+      }
+      return jsonResponse(res, 404, { error: { code: "NOT_FOUND" } });
+    } catch (error) {
+      return jsonResponse(res, 500, { error: { code: "FIXTURE_ASSERTION", message: String(error.message) } });
+    }
+  });
+  grantServer.listen(0, "127.0.0.1");
+  await once(grantServer, "listening");
+  const fixtureEnv = { ...process.env, SENTINELAYER_API_URL: `http://127.0.0.1:${grantServer.address().port}` };
   try {
     await writeFile(path.join(tempRoot, "package.json"), '{"name":"session-e2e","version":"1.0.0"}\n', "utf-8");
 
     const startResult = await runCli({
       cwd: tempRoot,
-      env: { ...process.env },
+      env: fixtureEnv,
       args: ["session", "start", "--path", tempRoot, "--json"],
     });
     assert.equal(startResult.code, 0, startResult.stderr || startResult.stdout);
     const startPayload = JSON.parse(String(startResult.stdout || "").trim());
-    const sessionId = String(startPayload.sessionId || "").trim();
+    sessionId = String(startPayload.sessionId || "").trim();
     assert.ok(sessionId);
 
     const listResult = await runCli({
       cwd: tempRoot,
-      env: { ...process.env },
+      env: fixtureEnv,
       args: ["session", "list", "--path", tempRoot, "--json"],
     });
     assert.equal(listResult.code, 0, listResult.stderr || listResult.stdout);
@@ -7824,15 +7856,30 @@ test("CLI session commands: start/list/join/say/read/status/kill/leave flow with
     assert.equal(listPayload.command, "session list");
     assert.equal(listPayload.sessions.some((entry) => entry.sessionId === sessionId), true);
 
+    const deniedJoin = await runCli({
+      cwd: tempRoot,
+      env: fixtureEnv,
+      args: ["session", "join", sessionId, "--name", "agent-ungranted", "--role", "coder", "--path", tempRoot, "--json"],
+    });
+    assert.equal(deniedJoin.code, 4, deniedJoin.stderr || deniedJoin.stdout);
+    const deniedPayload = JSON.parse(String(deniedJoin.stdout || "").trim());
+    assert.equal(deniedPayload.joined, false);
+    assert.equal(deniedPayload.remoteAgentVerification.code, "LEGACY_GRANT_NOT_ACTIVE");
+    await assert.rejects(readFile(path.join(tempRoot, ".sentinelayer", "sessions", sessionId, "agents", "agent-ungranted.json")), { code: "ENOENT" });
+    assert.deepEqual(verifiedPresence, []);
+
     const joinResult = await runCli({
       cwd: tempRoot,
-      env: { ...process.env },
+      env: fixtureEnv,
       args: ["session", "join", sessionId, "--name", "agent-alpha", "--role", "coder", "--path", tempRoot, "--json"],
     });
     assert.equal(joinResult.code, 0, joinResult.stderr || joinResult.stdout);
     const joinPayload = JSON.parse(String(joinResult.stdout || "").trim());
     assert.equal(joinPayload.command, "session join");
     assert.equal(joinPayload.agentId, "agent-alpha");
+    assert.equal(joinPayload.remoteAgentVerification.ok, true);
+    assert.equal(joinPayload.remoteAgentVerification.source, "legacy_grant_presence");
+    assert.deepEqual(verifiedPresence, ["agent-alpha"]);
 
     const staleAgentIso = "2026-01-01T00:00:00.000Z";
     await writeFile(
@@ -7865,7 +7912,7 @@ test("CLI session commands: start/list/join/say/read/status/kill/leave flow with
 
     const sayResult = await runCli({
       cwd: tempRoot,
-      env: { ...process.env },
+      env: fixtureEnv,
       args: ["session", "say", sessionId, "test message", "--agent", "agent-alpha", "--to", "agent-beta", "--path", tempRoot, "--json"],
     });
     assert.equal(sayResult.code, 0, sayResult.stderr || sayResult.stdout);
@@ -7923,7 +7970,7 @@ test("CLI session commands: start/list/join/say/read/status/kill/leave flow with
 
     const readResult = await runCli({
       cwd: tempRoot,
-      env: { ...process.env },
+      env: fixtureEnv,
       args: ["session", "read", sessionId, "--tail", "5", "--path", tempRoot, "--json"],
     });
     assert.equal(readResult.code, 0, readResult.stderr || readResult.stdout);
@@ -7937,7 +7984,7 @@ test("CLI session commands: start/list/join/say/read/status/kill/leave flow with
 
     const statusResult = await runCli({
       cwd: tempRoot,
-      env: { ...process.env },
+      env: fixtureEnv,
       args: ["session", "status", sessionId, "--path", tempRoot, "--json"],
     });
     assert.equal(statusResult.code, 0, statusResult.stderr || statusResult.stdout);
@@ -7976,7 +8023,7 @@ test("CLI session commands: start/list/join/say/read/status/kill/leave flow with
 
     const killResult = await runCli({
       cwd: tempRoot,
-      env: { ...process.env },
+      env: fixtureEnv,
       args: [
         "session",
         "kill",
@@ -8008,7 +8055,7 @@ test("CLI session commands: start/list/join/say/read/status/kill/leave flow with
 
     const postKillReadResult = await runCli({
       cwd: tempRoot,
-      env: { ...process.env },
+      env: fixtureEnv,
       args: ["session", "read", sessionId, "--tail", "30", "--path", tempRoot, "--json"],
     });
     assert.equal(postKillReadResult.code, 0, postKillReadResult.stderr || postKillReadResult.stdout);
@@ -8022,21 +8069,25 @@ test("CLI session commands: start/list/join/say/read/status/kill/leave flow with
 
     const joinBetaResult = await runCli({
       cwd: tempRoot,
-      env: { ...process.env },
-      args: ["session", "join", sessionId, "--name", "agent-beta", "--role", "tester", "--path", tempRoot, "--json"],
+      env: fixtureEnv,
+      args: ["session", "join", sessionId, "--name", "agent-beta", "--role", "reviewer", "--path", tempRoot, "--json"],
     });
     assert.equal(joinBetaResult.code, 0, joinBetaResult.stderr || joinBetaResult.stdout);
 
     const leaveResult = await runCli({
       cwd: tempRoot,
-      env: { ...process.env },
+      env: fixtureEnv,
       args: ["session", "leave", sessionId, "--agent", "agent-beta", "--path", tempRoot, "--json"],
     });
     assert.equal(leaveResult.code, 0, leaveResult.stderr || leaveResult.stdout);
     const leavePayload = JSON.parse(String(leaveResult.stdout || "").trim());
     assert.equal(leavePayload.command, "session leave");
     assert.equal(leavePayload.agentId, "agent-beta");
+    assert.deepEqual(verifiedPresence, ["agent-alpha", "agent-beta"]);
+    assert.equal(grantReads, 3);
   } finally {
+    grantServer.close();
+    await once(grantServer, "close");
     await rm(tempRoot, { recursive: true, force: true });
   }
 });
