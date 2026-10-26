@@ -369,6 +369,21 @@
   receipt. Owner controls must remain on the human credential; admitted agent
   work must remain on the scoped credential and never fall back to the human.
 
+## 2026-10-21 - Full-review coverage cannot be inferred from successful lanes
+
+- A full-review gate must account for every requested persona and partition. One
+  successful partition or a low error percentage cannot hide failed, unverified,
+  budget-stopped or skipped work; preserve partial findings and block completion.
+- A provider-call estimate computed after dispatch is not a hard spending cap.
+  Keep cost-bound claims separate from coverage evidence, and require a proved
+  shared reservation plus complete request/attempt bound before advertising one.
+- Validate the requested roster before deriving completion from the effective
+  roster. Dropping unknown IDs or accepting an empty roster can turn a typo into
+  a zero-call "complete" review.
+- Token-bearing output proves a call occurred, not that a review completed.
+  Preserve permissive diagnostic parsing separately from strict structured-review
+  validity; error envelopes and fabricated field defaults cannot prove coverage.
+
 # 2026-10-24 - Field names do not determine whether typed metadata is money
 
 - Pattern: treating every typed quantity under a monetary prefix as an amount

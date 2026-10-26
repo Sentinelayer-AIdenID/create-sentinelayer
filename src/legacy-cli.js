@@ -1556,17 +1556,26 @@ async function runLocalOmarGateCommand(args) {
   // via reconcileReviewFindings. Use its output directly to avoid double-counting.
   // Fallback path (legacy single ai-review): union of det + AI findings.
   const aiFindings = aiResult?.findings || [];
+  const aiCoverageFailed = aiEnabled && aiResult?.skipped === true;
+  const coverage = orchestratorResult?.coverage || (aiCoverageFailed ? { status: "incomplete" } : null);
+  const coverageFailureFindings = aiCoverageFailed ? [{
+    severity: "P1", file: "<omargate>", line: 1,
+    message: "Omar AI coverage incomplete: the requested AI review did not complete.",
+    category: "Omar AI Coverage", source: "orchestrator", sources: ["orchestrator"],
+    confidence: 1,
+    remediation: "Resolve the reported AI review failure and rerun the requested review. Partial coverage cannot satisfy a full AI review gate.",
+  }] : [];
   const reconciledFromOrchestrator = orchestratorResult?.findings;
   const allFindings = reconciledFromOrchestrator && reconciledFromOrchestrator.length >= 0
     ? reconciledFromOrchestrator
-    : [...detFindings, ...aiFindings];
+    : [...detFindings, ...aiFindings, ...coverageFailureFindings];
   const combinedSummary = orchestratorResult?.summary || {
     P0: detSummary.P0 + (aiResult?.summary?.P0 || 0),
-    P1: detSummary.P1 + (aiResult?.summary?.P1 || 0),
+    P1: detSummary.P1 + (aiResult?.summary?.P1 || 0) + coverageFailureFindings.length,
     P2: detSummary.P2 + (aiResult?.summary?.P2 || 0),
     P3: (detSummary.P3 || 0) + (aiResult?.summary?.P3 || 0),
     blocking: (detSummary.P0 + (aiResult?.summary?.P0 || 0)) > 0 ||
-              (detSummary.P1 + (aiResult?.summary?.P1 || 0)) > 0,
+              (detSummary.P1 + (aiResult?.summary?.P1 || 0) + coverageFailureFindings.length) > 0,
   };
   const combinedP0 = combinedSummary.P0 || 0;
   const combinedP1 = combinedSummary.P1 || 0;
@@ -1595,6 +1604,7 @@ async function runLocalOmarGateCommand(args) {
       roster: orchestratorResult.roster,
       basePersonas: orchestratorResult.basePersonas || [],
       personaRouting: orchestratorResult.personaRouting || null,
+      coverage,
       findings: (orchestratorResult.personas || []).flatMap((p) => []),
       aiFindings: aiFindings,
       personaCount: (orchestratorResult.personas || []).length,
@@ -1604,6 +1614,7 @@ async function runLocalOmarGateCommand(args) {
     artifactPaths.personas = await writeJsonArtifact("REVIEW_PERSONAS.json", {
       runId: orchestratorResult.runId,
       personas: orchestratorResult.personas || [],
+      coverage,
     });
     artifactPaths.reconciled = await writeJsonArtifact("REVIEW_RECONCILED.json", {
       runId: orchestratorResult.runId,
@@ -1612,6 +1623,7 @@ async function runLocalOmarGateCommand(args) {
       reconciliation: orchestratorResult.reconciliation,
       personaRouting: orchestratorResult.personaRouting || null,
       findingsBySource: orchestratorResult.findingsBySource,
+      coverage,
     });
   }
 
@@ -1629,6 +1641,7 @@ Summary:
 - Files scanned: ${scannedFiles}
 - Scope mode: ${scopeMode}
 - Persona routing: ${orchestratorResult?.personaRouting?.enabled ? `${orchestratorResult.personaRouting.effectivePersonas.length}/${orchestratorResult.personaRouting.basePersonas.length} personas for ${orchestratorResult.personaRouting.changedFileCount} changed files` : "full roster"}
+- AI coverage: ${coverage?.status || (aiEnabled ? "unknown" : "not requested")}
 - Deterministic findings: P0=${detSummary.P0} P1=${detSummary.P1} P2=${detSummary.P2} P3=${detSummary.P3 || 0}
 - AI findings (raw, pre-reconciliation): ${aiResult ? `P0=${aiResult.summary?.P0 || 0} P1=${aiResult.summary?.P1 || 0} P2=${aiResult.summary?.P2 || 0} P3=${aiResult.summary?.P3 || 0}` : "skipped"}
 - Reconciled (deduped + confidence-boosted): P0=${combinedP0} P1=${combinedP1} P2=${combinedP2} P3=${combinedP3}
@@ -1670,6 +1683,7 @@ ${formatFindingsMarkdown(allFindings)}
           p2: combinedP2,
           p3: combinedP3,
           blocking: combinedP0 > 0 || combinedP1 > 0,
+          coverage,
           elapsedMs: totalElapsedMs,
           artifacts: artifactPaths,
           deterministic: {

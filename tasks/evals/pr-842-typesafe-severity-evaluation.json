@@ -9,11 +9,11 @@
     "canonicalization": "UTF-8; CRLF converted to LF only for Git-canonical source comparison",
     "sourceSha256": {
       "src/review/typesafe-severity.js": "82a628b1c7b06756ba71c98df8e7b9b0e96f62c774ca713a1658fca754aebc5a",
-      "src/review/ai-review.js": "03610770b40997a40bdf87954fc06550daa48489400324fb365f0ca9a0672b4b",
-      "src/review/omargate-orchestrator.js": "90d6d8f61e6e3056e937f79f584725f6cbd9e47128d22e61d1bd600227f75725",
-      "src/commands/omargate.js": "c59eee4a1bd833065e4cd6e136917adc42052c1e35e0089ef010115b6f1d83e4",
+      "src/review/ai-review.js": "6b55625bf0a3c1f10bc2b962a7b7622f5756dc40c1ce02ef3d5b86855476d407",
+      "src/review/omargate-orchestrator.js": "80bb2c8e57f8784cd0ccb52191be548df269c030a8eb854b5f8958dd7c3152e0",
+      "src/commands/omargate.js": "5ccbf2f1bb3f2f1e9ed5e35a8a8197bfc2b1cb699365987a2a979caf834c3567",
       "src/commands/legacy-args.js": "83772b6ccd5765d1a0bd1f3ee3eefcf5c1fdaf4e9fb1a301c0312b286dbc0d29",
-      "src/legacy-cli.js": "095ddd1ea897811cfce02507389a566048c0a1574e88a22fa31e82f052913a59",
+      "src/legacy-cli.js": "3cc8716baed5022b355dcd418188ded310dfafa63e4a4d2e3e65cecf5805bcdb",
       "src/session/redact.js": "a92cd2e70b165e4e015edcbeff1d3119c3b1f091ef72654e776c0139ace663a2"
     },
     "testPath": "tests/unit.typesafe-severity.test.mjs",
@@ -48,6 +48,19 @@
       "scope": "Only the GitHub API path-hardening import, fixed /user/repos endpoint binding, and repository endpoint builder call changed in src/legacy-cli.js. All seven synthetic cases, shared input, mock responses, expected outcomes, invariants, other six implementation hashes and the unchanged test hash are retained.",
       "provenance": "Original implementation, privacy-correction, help-maintenance revisions, and prior mock observations remain historical anchors. This refresh binds the current path-hardening overlay after CRLF-to-LF normalization only; it is not model accuracy, live-provider, billing, default-gate, or new security-acceptance evidence."
     },
+    "coverageGateMaintenance": {
+      "kind": "complete_requested_coverage_source_binding_refresh",
+      "baseRevision": "628f96c191640b03b4f6a167f0a5dc5299a8f338",
+      "priorSha256": {
+        "src/review/omargate-orchestrator.js": "90d6d8f61e6e3056e937f79f584725f6cbd9e47128d22e61d1bd600227f75725",
+        "src/legacy-cli.js": "2068189e38e67d71b195b2716ae873aa303b296b76cf4f046b99169a4f0b6490",
+        "src/commands/omargate.js": "c59eee4a1bd833065e4cd6e136917adc42052c1e35e0089ef010115b6f1d83e4",
+        "src/review/ai-review.js": "d6dfc3bda0988e8bd7d62c871859cbbeac54bf39ad36830bcbebd7ea22faed01"
+      },
+      "scope": "Primary structured-response validity, complete requested-roster/partition aggregation, CLI incomplete-result reporting and cost-threshold help changed. Legacy finding normalization and the TypeSafe transport/classifier, all seven synthetic scenarios, input, responses, expectations, invariants and test bytes remain unchanged. The full TypeSafe contract suite is rerun against these current bindings.",
+      "evaluation": "tests/evals/omargate-coverage-cases.json",
+      "limitation": "Synthetic contract evidence only; no model accuracy, live provider, hard dollar ceiling or completed release-gate claim."
+    },
     "credentialHelperMaintenance": {
       "kind": "test_export_rename_source_binding_refresh",
       "revision": "fcb0912835a3c81d9e346f5c175ac73be87cfe60",
@@ -55,6 +68,12 @@
       "currentLegacySha256": "284fb9798504f3b3bd13d12208e805b3d091f50456d8918ec92eaf25d57d1601",
       "scope": "Only the test-only credential helper export name changed in src/legacy-cli.js, with its two credential test imports updated. The seven synthetic cases, shared input, mock responses, expected outcomes, TypeSafe implementation files and unchanged evaluation test hash are retained.",
       "provenance": "Earlier source bindings and mock observations remain historical anchors. This refresh binds the current CLI source after CRLF-to-LF normalization only; it is not a new model-accuracy, live-provider, billing, or security-acceptance result."
+    },
+    "currentMainIntegration": {
+      "kind": "coverage_gate_and_credential_helper_integration",
+      "prHead": "0c42c4c590f63608afe248124b8bc743bfa37138",
+      "mainRevision": "c45ab6615cfbfc45b001108297e5cd81f7d78700",
+      "scope": "Preserve both historical maintenance records and every synthetic case/expectation/test byte. Refresh current canonical source bindings after clean product-source merge. Verification results are separately recorded; no live model or hard-dollar claim."
     },
     "outputBoundaryMaintenance": {
       "kind": "artifact_write_boundary_source_binding_refresh",
@@ -83,6 +102,32 @@
       "currentTestSha256": "a1bbdb78a7e271d8bd183da13abe007473e0bc33968230680caefc94a6f4e86d",
       "scope": "Creates each existing synthetic target workspace before the actual caller runs. All seven cases, mock responses, expected classifications, privacy checks, monetary-cap and usage assertions, production implementation bindings and prior evidence are unchanged.",
       "provenance": "Required fixture setup for a realpath-constrained existing workspace. This refresh is not live-provider, model-accuracy, billing or new security acceptance evidence."
+    },
+    "coverageOutputIntegration": {
+      "kind": "reviewed_coverage_and_output_boundary_integration",
+      "coverageParent": "0c9a0b158beba3e96003e0df65602b37db812efd",
+      "outputParent": "94052346acb6f4f7c0004878707775ba93afcb4e",
+      "priorSourceBindings": {
+        "coverage": {
+          "src/review/typesafe-severity.js": "82a628b1c7b06756ba71c98df8e7b9b0e96f62c774ca713a1658fca754aebc5a",
+          "src/review/ai-review.js": "95a9c7b9a7ed90039affd7023a204a650b2e43e08ddd5a2a6ecb8740cc850afd",
+          "src/review/omargate-orchestrator.js": "80bb2c8e57f8784cd0ccb52191be548df269c030a8eb854b5f8958dd7c3152e0",
+          "src/commands/omargate.js": "5ccbf2f1bb3f2f1e9ed5e35a8a8197bfc2b1cb699365987a2a979caf834c3567",
+          "src/commands/legacy-args.js": "83772b6ccd5765d1a0bd1f3ee3eefcf5c1fdaf4e9fb1a301c0312b286dbc0d29",
+          "src/legacy-cli.js": "38441388708e72f5e0e08261af273e65ed8b18bce53e4174ea8adc207d440c05",
+          "src/session/redact.js": "a92cd2e70b165e4e015edcbeff1d3119c3b1f091ef72654e776c0139ace663a2"
+        },
+        "containment": {
+          "src/review/typesafe-severity.js": "82a628b1c7b06756ba71c98df8e7b9b0e96f62c774ca713a1658fca754aebc5a",
+          "src/review/ai-review.js": "03610770b40997a40bdf87954fc06550daa48489400324fb365f0ca9a0672b4b",
+          "src/review/omargate-orchestrator.js": "90d6d8f61e6e3056e937f79f584725f6cbd9e47128d22e61d1bd600227f75725",
+          "src/commands/omargate.js": "c59eee4a1bd833065e4cd6e136917adc42052c1e35e0089ef010115b6f1d83e4",
+          "src/commands/legacy-args.js": "83772b6ccd5765d1a0bd1f3ee3eefcf5c1fdaf4e9fb1a301c0312b286dbc0d29",
+          "src/legacy-cli.js": "095ddd1ea897811cfce02507389a566048c0a1574e88a22fa31e82f052913a59",
+          "src/session/redact.js": "a92cd2e70b165e4e015edcbeff1d3119c3b1f091ef72654e776c0139ace663a2"
+        }
+      },
+      "scope": "Preserves every historical maintenance record and all synthetic case inputs, mock responses and expected results. Carries the reviewed output-boundary workspace fixture unchanged and refreshes only current canonical source/test bindings after the product-source merge. No live-model accuracy, billing or gate completion claim."
     }
   },
   "baselineMeaning": "Published base generation-only contract, with candidate off mode exercised on identical synthetic inputs; no independent baseline model/provider run.",

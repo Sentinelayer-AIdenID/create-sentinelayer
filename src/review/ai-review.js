@@ -200,13 +200,51 @@ function summarizeFindings(findings = []) {
   };
 }
 
+// Normalization remains permissive for legacy reports. Completion requires a
+// structured review, so error envelopes and invented defaults cannot prove it.
+function validateReviewResponse(text) {
+  const raw = String(text || "").trim();
+  const fenced = raw.match(/^```(?:json)?\s*([\s\S]*?)```\s*$/i);
+  let parsed;
+  try {
+    parsed = JSON.parse(fenced ? fenced[1] : raw);
+  } catch {
+    return { valid: false, reason: "unstructured_response" };
+  }
+  if (Array.isArray(parsed)) parsed = { findings: parsed };
+  if (!parsed || typeof parsed !== "object") return { valid: false, reason: "invalid_review_envelope" };
+  const hasError = (value) => value !== undefined && value !== null && value !== false && value !== "" &&
+    !(Array.isArray(value) && value.length === 0);
+  const invalidStatus = Object.hasOwn(parsed, "status") &&
+    (typeof parsed.status !== "string" || !["ok", "success", "complete", "completed", "passed"].includes(parsed.status.trim().toLowerCase()));
+  if (hasError(parsed.error) || hasError(parsed.errors) || hasError(parsed.refusal) || invalidStatus ||
+      parsed.ok === false || parsed.success === false || parsed.complete === false) {
+    return { valid: false, reason: "error_response" };
+  }
+  if (!Array.isArray(parsed.findings)) return { valid: false, reason: "missing_or_invalid_findings" };
+  const malformed = parsed.findings.some((finding) => {
+    if (!finding || typeof finding !== "object" || Array.isArray(finding)) return true;
+    const message = finding.title || finding.message;
+    const line = typeof finding.line === "string" && /^\d+$/.test(finding.line) ? Number(finding.line) : finding.line;
+    return typeof message !== "string" || !message.trim() ||
+      typeof finding.file !== "string" || !finding.file.trim() ||
+      typeof finding.severity !== "string" || !AI_SEVERITIES.has(finding.severity.trim().toUpperCase()) ||
+      !Number.isSafeInteger(line) || line < 1 ||
+      (finding.confidence !== undefined && finding.confidence !== null &&
+        (typeof finding.confidence !== "number" || !Number.isFinite(finding.confidence) || finding.confidence < 0 || finding.confidence > 1));
+  });
+  return { valid: !malformed, reason: malformed ? "malformed_findings" : "structured_review" };
+}
+
 export function parseAiReviewResponse({ text, maxFindings = DEFAULT_AI_MAX_FINDINGS } = {}) {
   const parsed = extractJsonPayload(text);
+  const reviewValidity = validateReviewResponse(text);
   const normalizedMaxFindings = Math.max(1, Math.floor(Number(maxFindings || DEFAULT_AI_MAX_FINDINGS)));
 
   if (!parsed) {
     return {
       parser: "fallback_text",
+      reviewValidity,
       summary:
         sanitizeExcerpt(text) || "AI response could not be parsed as JSON; no structured findings extracted.",
       findings: [],
@@ -230,6 +268,7 @@ export function parseAiReviewResponse({ text, maxFindings = DEFAULT_AI_MAX_FINDI
 
   return {
     parser: "json",
+    reviewValidity,
     summary: summary || "Structured AI response parsed successfully.",
     findings,
   };
@@ -356,6 +395,7 @@ function composeAiReviewMarkdown({
   runId,
   mode,
   parser,
+  reviewValidity,
   summary,
   provider,
   model,
@@ -392,6 +432,7 @@ function composeAiReviewMarkdown({
     `Model: ${model}`,
     `Dry run: ${dryRun ? "yes" : "no"}`,
     `Parser: ${parser}`,
+    `Structured review: ${reviewValidity?.valid ? "valid" : "incomplete"} (${reviewValidity?.reason || "unknown"})`,
     "",
     ...(severityClassification ? [`TypeSafe classification evaluation: ${severityClassification.status} / ${severityClassification.reason}; schema validation only, original gate severities unchanged.`, `Classifier usage: ${severityClassification.usage ? JSON.stringify(severityClassification.usage) : "unknown/not submitted (not zero cost)"}; attempted=${severityClassification.attempted}`, ""] : []),
     "Summary:",
@@ -826,6 +867,7 @@ export async function runAiReviewLayer({
     runId: normalizedRunId,
     mode: normalizedMode,
     parser: parsed.parser,
+    reviewValidity: parsed.reviewValidity,
     summary: parsed.summary,
     provider: resolvedProvider,
     model: resolvedModel,
@@ -847,6 +889,7 @@ export async function runAiReviewLayer({
     runId: normalizedRunId,
     mode: normalizedMode,
     parser: parsed.parser,
+    reviewValidity: parsed.reviewValidity,
     summary: parsed.summary,
     provider: resolvedProvider,
     model: resolvedModel,
@@ -863,6 +906,7 @@ export async function runAiReviewLayer({
 
   return {
     parser: parsed.parser,
+    reviewValidity: parsed.reviewValidity,
     summary: parsed.summary,
     ...(severityClassification ? { severityClassification } : {}),
     findings: aiFindings,
