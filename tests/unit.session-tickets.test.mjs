@@ -46,7 +46,7 @@ async function storeAdmission({ expired = false } = {}) {
   );
 }
 
-function fakeApi({ loseClaimResponses = 0, decoyCursor = false, brokenContinuation = false } = {}) {
+function fakeApi({ loseClaimResponses = 0, decoyCursor = false, brokenContinuation = false, createResponse } = {}) {
   const state = { requests: [], tickets: new Map(), idem: new Map(), leases: 0, lose: loseClaimResponses, decoyCursor, brokenContinuation };
   const put = (t) => state.tickets.set(t.id, t);
   put({ id: "t-open", title: "open work", status: "open", version: 1, lease: null });
@@ -62,6 +62,15 @@ function fakeApi({ loseClaimResponses = 0, decoyCursor = false, brokenContinuati
     if (u.origin !== API) throw new Error(`left the fixture API: ${u.origin}`);
     if (bearer !== ADMISSION_TOKEN) return json({ error: { code: "INVALID_TOKEN" } }, 401);
     const p = u.pathname;
+    if (method === "POST" && p.endsWith("/tickets")) {
+      state.createBody = JSON.parse(init.body || "{}");
+      return json(createResponse ?? { id: "created-ticket", createdBy: AGENT,
+        creator: { kind: "agent", id: AGENT, identitySource: "session_admission", credentialBound: true },
+        sourceMessage: state.createBody.sourceSequenceId == null ? null : {
+          id: "10000000-0000-4000-8000-000000000007", sequenceId: state.createBody.sourceSequenceId, revision: 1,
+        },
+      });
+    }
     if (method === "GET" && p.endsWith("/tickets")) {
       // The bounded board page: NOT a baseline, and it would miss work. The list must not use it.
       return json({ items: [{ id: "board-decoy", title: "board page only", status: "open", version: 1, lease: null }] });
@@ -323,6 +332,117 @@ test("ticket work as an agent with NO admission is refused before any request", 
   assert.match(String(ran.error?.message), /"not-admitted" has no live admission.*would act as you/s);
   assert.deepEqual(api.requests, []);
 });
+
+test("ticket create carries explicit agent and source while the request uses its admission credential", async () => {
+  await reset();
+  await storeAdmission();
+  const api = fakeApi();
+  const ran = await sl(["session", "ticket", "create", SID, "--title", "file once", "--body", "details",
+    "--agent", AGENT, "--source-sequence", "52041", "--idempotency-key", "create-10000000-0000-4000-8000-000000000001", "--json"]);
+  assert.equal(ran.error, null, String(ran.error?.stack || ran.error));
+  assert.deepEqual(api.createBody, { title: "file once", body: "details", agentId: AGENT, sourceSequenceId: 52041 });
+  assert.equal(ran.json.ticket.createdBy, AGENT);
+  assert.equal(ran.json.idempotencyKey, "create-10000000-0000-4000-8000-000000000001");
+  const request = api.requests.find(r => r.method === "POST" && r.path.endsWith("/tickets"));
+  assert.equal(request.bearer, ADMISSION_TOKEN);
+  assert.equal(request.key, "create-10000000-0000-4000-8000-000000000001");
+  assert.deepEqual(ran.json.provenance, { agentRequested: AGENT, agentRecorded: true, sourceRequested: 52041, sourceRecorded: true });
+});
+
+test("ticket create reports attribution the server did NOT record instead of claiming it", async () => {
+  const { createTicket } = await import("../src/session/tickets.js");
+  const created = await createTicket(SID, {
+    title: "file once", agentId: "probe-a", sourceSequenceId: 7, idempotencyKey: "create-key-unrecorded",
+    resolveAuthSession: async () => ({ token: "synthetic", apiUrl: API }),
+    // A server without the creator-provenance change: it ignores agentId/sourceSequenceId.
+    requestMutation: async () => ({ id: "t-new", title: "file once", createdBy: "user-1", version: 1 }),
+  });
+  assert.deepEqual(created.provenance, { agentRequested: "probe-a", agentRecorded: false, sourceRequested: 7, sourceRecorded: false });
+});
+
+// These public fields match API #999/#1010's ticket_creation_provenance.py and
+// test_ticket_creator_provenance_http_pg.py, including the canonical source UUID/revision.
+const canonicalCreator = { kind: "agent", id: "probe-a", identitySource: "session_admission", credentialBound: true };
+const canonicalSource = { id: "10000000-0000-4000-8000-000000000007", sequenceId: 7, revision: 1 };
+for (const [label, fields, agentRecorded, sourceRecorded] of [
+  ["credential-bound agent and canonical source", { creator: canonicalCreator, sourceMessage: canonicalSource }, true, true],
+  ["authorized account grant retains weaker assurance", { creator: { ...canonicalCreator, identitySource: "authorized_agent_grant", credentialBound: false }, sourceMessage: canonicalSource }, true, true],
+  ["account with the same label is not the requested agent", { creator: { kind: "account", id: "probe-a", identitySource: "account", credentialBound: false }, sourceMessage: canonicalSource }, false, true],
+  ["different canonical agent overrides legacy createdBy", { creator: { ...canonicalCreator, id: "other-agent" }, sourceMessage: canonicalSource }, false, true],
+  ["legacy top-level fields do not prove canonical provenance", { sourceSequenceId: 7 }, false, false],
+  ["missing source", { creator: canonicalCreator, sourceMessage: null }, true, false],
+  ["different source sequence", { creator: canonicalCreator, sourceMessage: { ...canonicalSource, sequenceId: 8 } }, true, false],
+  ["string sequence is not a canonical integer", { creator: canonicalCreator, sourceMessage: { ...canonicalSource, sequenceId: "7" } }, true, false],
+  ["source without its canonical UUID", { creator: canonicalCreator, sourceMessage: { sequenceId: 7, revision: 1 } }, true, false],
+  ["source without its captured revision", { creator: canonicalCreator, sourceMessage: { ...canonicalSource, revision: null } }, true, false],
+]) test(`ticket create reports canonical provenance: ${label}`, async () => {
+  const { createTicket } = await import("../src/session/tickets.js");
+  const ticket = { id: "t-new", title: "file once", createdBy: "probe-a", version: 1, ...fields };
+  let posts = 0;
+  const created = await createTicket(SID, {
+    title: "file once", agentId: "probe-a", sourceSequenceId: 7, idempotencyKey: "create-key-recorded",
+    resolveAuthSession: async () => ({ token: "synthetic", apiUrl: API }),
+    requestMutation: async () => { posts += 1; return ticket; },
+  });
+  assert.deepEqual(created.provenance, { agentRequested: "probe-a", agentRecorded, sourceRequested: 7, sourceRecorded });
+  assert.deepEqual(created.ticket, ticket, "retain committed ticket and original assurance even if provenance is incomplete");
+  assert.equal(created.idempotencyKey, "create-key-recorded");
+  assert.equal(posts, 1, "never create another ticket to repair provenance");
+});
+
+for (const [label, creator, expected] of [
+  ["admission", { kind: "agent", id: AGENT, identitySource: "session_admission", credentialBound: true }, /Creator: agent ticket-agent \(credential-bound\)/],
+  ["legacy grant", { kind: "agent", id: AGENT, identitySource: "authorized_agent_grant", credentialBound: false }, /Creator: agent ticket-agent \(authorized account grant; not a separate agent credential\)/],
+  ["account", { kind: "account", id: "account-1", identitySource: "account", credentialBound: false }, /Creator: account account-1 \(the credential holder's physical identity is not established\)/],
+  ["missing", null, /Creator: not recorded/],
+]) test(`ticket create text preserves creator assurance: ${label}`, async () => {
+  await reset();
+  await storeAdmission();
+  fakeApi({ createResponse: { id: "created-ticket", createdBy: AGENT, creator, sourceMessage: null } });
+  const ran = await sl(["session", "ticket", "create", SID, "--title", "file once", "--agent", AGENT]);
+  assert.equal(ran.error, null, String(ran.error?.stack || ran.error));
+  assert.match(ran.text, /Created created-ticket/);
+  assert.match(ran.text, expected);
+  assert.doesNotMatch(ran.text, /the ticket is attributed to your account/);
+});
+
+test("ticket create keeps its key across an uncertain response, and a retry reuses it", async () => {
+  const { createTicket } = await import("../src/session/tickets.js");
+  const keys = [];
+  const opts = (requestMutation) => ({
+    title: "file once", idempotencyKey: "create-key-uncertain",
+    resolveAuthSession: async () => ({ token: "synthetic", apiUrl: API }), requestMutation,
+  });
+  // The server may have committed, but the response was lost.
+  await assert.rejects(
+    createTicket(SID, opts(async (_url, init) => { keys.push(init.idempotencyKey); throw new Error("socket hang up"); })),
+    (error) => {
+      assert.match(String(error.message), /socket hang up/);
+      assert.match(String(error.message), /retry with --idempotency-key create-key-uncertain/);
+      return true;
+    },
+  );
+  const retried = await createTicket(SID, opts(async (_url, init) => { keys.push(init.idempotencyKey); return { id: "t-1", title: "file once", version: 1 }; }));
+  assert.equal(retried.idempotencyKey, "create-key-uncertain");
+  assert.deepEqual(keys, ["create-key-uncertain", "create-key-uncertain"]);
+});
+
+for (const [label, response] of [["null", null], ["missing", undefined], ["empty object", {}], ["blank ID", { id: " " }]]) {
+  test(`ticket create retains its retry key after an ambiguous success: ${label}`, async () => {
+    const { createTicket } = await import("../src/session/tickets.js");
+    let posts = 0;
+    await assert.rejects(createTicket(SID, {
+      title: "file once", idempotencyKey: "create-key-ambiguous",
+      resolveAuthSession: async () => ({ token: "synthetic", apiUrl: API }),
+      requestMutation: async () => { posts += 1; return response; },
+    }), (error) => {
+      assert.match(error.message, /may have committed/);
+      assert.match(error.message, /retry with --idempotency-key create-key-ambiguous/);
+      return true;
+    });
+    assert.equal(posts, 1);
+  });
+}
 
 test("a claim the server records for someone else is not recorded as ours", async () => {
   await reset();

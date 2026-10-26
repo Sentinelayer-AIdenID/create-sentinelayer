@@ -119,6 +119,7 @@ import {
 } from "../session/reactions.js";
 import {
   claimTicket,
+  createTicket,
   listTickets,
   releaseTicketLease,
   renewTicketLease,
@@ -7526,6 +7527,48 @@ Guide: https://sentinelayer.com/docs/senti/overview/
     }
     console.log(line);
   }
+
+  ticket
+    .command("create <sessionId>")
+    .description("Create a ticket in the room. Agent and source attribution are recorded only by servers that support them; the output says whether they were")
+    .requiredOption("--title <text>", "Ticket title")
+    .option("--body <text>", "Ticket description", "")
+    .option("--agent <id>", "Acting agent identity, authorized by the server")
+    .option("--assignee <id>", "Who should own the work")
+    .option("--source-sequence <n>", "Source message in this room")
+    .option("--idempotency-key <key>", "Reuse the key after an uncertain response")
+    .option("--path <path>", "Workspace path for the session", ".")
+    .option("--json", "Emit machine-readable output")
+    .action(async (sessionId, options, command) => {
+      const sid = normalizeString(sessionId), targetPath = path.resolve(process.cwd(), String(options.path || "."));
+      const identity = await resolveSessionSayIdentity({ sessionId: sid, agentId: options.agent, targetPath });
+      const agentId = normalizeString(identity.agentId);
+      const result = await createTicket(sid, { title: options.title, body: options.body, assignee: options.assignee,
+        agentId: agentId === "cli-user" ? "" : agentId, targetPath,
+        sourceSequenceId: options.sourceSequence === undefined ? null : parsePositiveInteger(options.sourceSequence, "source-sequence", 1),
+        ...(options.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : {}),
+      });
+      const { agentRequested, agentRecorded, sourceRequested, sourceRecorded } = result.provenance;
+      const creator = result.ticket?.creator;
+      let creatorNote = " Creator: not recorded.";
+      if (typeof creator?.id === "string" && creator.id.trim()) {
+        if (creator.kind === "agent") {
+          const assurance = creator.credentialBound === true && ["session_admission", "agent_token"].includes(creator.identitySource)
+            ? "credential-bound"
+            : creator.credentialBound === false && creator.identitySource === "authorized_agent_grant"
+              ? "authorized account grant; not a separate agent credential"
+              : "identity assurance unavailable";
+          creatorNote = ` Creator: agent ${creator.id} (${assurance}).`;
+        } else if (creator.kind === "account") {
+          creatorNote = ` Creator: account ${creator.id} (the credential holder's physical identity is not established).`;
+        }
+      }
+      const notes = [
+        agentRequested && !agentRecorded ? ` The response did not confirm requested agent ${agentRequested}.` : "",
+        sourceRequested !== null && !sourceRecorded ? ` The response did not confirm source #${sourceRequested}.` : "",
+      ].join("");
+      ticketOutput(options, command, { command: "session ticket create", ...result }, `Created ${result.ticket.id}.${creatorNote}${notes}`);
+    });
 
   ticket
     .command("list <sessionId>")
