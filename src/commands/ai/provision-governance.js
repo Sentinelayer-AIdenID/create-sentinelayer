@@ -24,7 +24,7 @@ import {
 } from "../../ai/domain-target-store.js";
 import { listSites, recordTemporarySite } from "../../ai/site-store.js";
 import { getIdentityById, recordProvisionedIdentity } from "../../ai/identity-store.js";
-import { resolveOutputRoot } from "../../config/service.js";
+import { resolveOutputRoot, resolveOutputContext } from "../../config/service.js";
 import { fetchAidenIdCredentials, resolveActiveAuthSession } from "../../auth/service.js";
 import {
   buildCurlPreview,
@@ -76,7 +76,7 @@ async function provisionEmailAction(options, command) {
       extractionTypes: options.extractionTypes,
     });
 
-    const outputRoot = await resolveOutputRoot({
+    const { outputRoot, outputFs } = await resolveOutputContext({
       cwd: targetPath,
       outputDirOverride: options.outputDir,
       env: process.env,
@@ -90,7 +90,7 @@ async function provisionEmailAction(options, command) {
       apiUrl,
       idempotencyKey,
       payload,
-    });
+    }, outputFs);
 
     const session = await resolveActiveAuthSession({ cwd: process.cwd(), env: process.env, autoRotate: false }).catch(
       () => null,
@@ -170,10 +170,11 @@ async function provisionEmailAction(options, command) {
       apiUrl,
       idempotencyKey,
       response: execution.response,
-    });
+    }, outputFs);
 
     const responseIdentity = execution.response || {};
     const registryUpdate = await recordProvisionedIdentity({
+      outputFs,
       outputRoot,
       response: execution.response || {},
       context: {
@@ -259,7 +260,7 @@ domain
   .action(async (domainName, options, command) => {
     const emitJson = shouldEmitJson(options, command);
     const targetPath = path.resolve(process.cwd(), String(options.path || "."));
-    const outputRoot = await resolveOutputRoot({
+    const { outputRoot, outputFs } = await resolveOutputContext({
       cwd: targetPath,
       outputDirOverride: options.outputDir,
       env: process.env,
@@ -287,7 +288,7 @@ domain
       apiUrl,
       idempotencyKey,
       payload,
-    });
+    }, outputFs);
 
     const resolvedCredentials = await resolveAidenIdCredentials({
       apiKey: options.apiKey,
@@ -355,10 +356,11 @@ domain
       apiUrl,
       idempotencyKey,
       response: execution.response,
-    });
+    }, outputFs);
 
     const proofResponse = execution.response || {};
     const registryUpdate = await recordDomainProofResponse({
+      outputFs,
       outputRoot,
       domain: proofResponse.domain || {},
       proof: proofResponse,
@@ -416,7 +418,7 @@ domain
   .action(async (domainId, options, command) => {
     const emitJson = shouldEmitJson(options, command);
     const targetPath = path.resolve(process.cwd(), String(options.path || "."));
-    const outputRoot = await resolveOutputRoot({
+    const { outputRoot, outputFs } = await resolveOutputContext({
       cwd: targetPath,
       outputDirOverride: options.outputDir,
       env: process.env,
@@ -451,7 +453,7 @@ domain
       idempotencyKey,
       domainId,
       payload,
-    });
+    }, outputFs);
 
     const resolvedCredentials = await resolveAidenIdCredentials({
       apiKey: options.apiKey,
@@ -511,10 +513,11 @@ domain
       idempotencyKey,
       domainId,
       response: execution.response,
-    });
+    }, outputFs);
 
     const proofResponse = execution.response || {};
     const registryUpdate = await recordDomainProofResponse({
+      outputFs,
       outputRoot,
       domain: proofResponse.domain || {},
       proof: proofResponse,
@@ -571,7 +574,7 @@ domain
   .action(async (domainId, options, command) => {
     const emitJson = shouldEmitJson(options, command);
     const targetPath = path.resolve(process.cwd(), String(options.path || "."));
-    const outputRoot = await resolveOutputRoot({
+    const { outputRoot, outputFs } = await resolveOutputContext({
       cwd: targetPath,
       outputDirOverride: options.outputDir,
       env: process.env,
@@ -593,7 +596,7 @@ domain
       idempotencyKey,
       domainId,
       payload,
-    });
+    }, outputFs);
 
     const resolvedCredentials = await resolveAidenIdCredentials({
       apiKey: options.apiKey,
@@ -653,9 +656,10 @@ domain
       idempotencyKey,
       domainId,
       response: execution.response,
-    });
+    }, outputFs);
 
     const registryUpdate = await recordDomainProofResponse({
+      outputFs,
       outputRoot,
       domain: execution.response || {},
       proof: {},
@@ -712,7 +716,7 @@ target
   .action(async (host, options, command) => {
     const emitJson = shouldEmitJson(options, command);
     const targetPath = path.resolve(process.cwd(), String(options.path || "."));
-    const outputRoot = await resolveOutputRoot({
+    const { outputRoot, outputFs } = await resolveOutputContext({
       cwd: targetPath,
       outputDirOverride: options.outputDir,
       env: process.env,
@@ -745,7 +749,7 @@ target
       apiUrl,
       idempotencyKey,
       payload,
-    });
+    }, outputFs);
 
     const resolvedCredentials = await resolveAidenIdCredentials({
       apiKey: options.apiKey,
@@ -802,10 +806,11 @@ target
       apiUrl,
       idempotencyKey,
       response: execution.response,
-    });
+    }, outputFs);
 
     const proofResponse = execution.response || {};
     const registryUpdate = await recordTargetProofResponse({
+      outputFs,
       outputRoot,
       target: proofResponse.target || {},
       proof: proofResponse,
@@ -862,7 +867,7 @@ target
   .action(async (targetId, options, command) => {
     const emitJson = shouldEmitJson(options, command);
     const targetPath = path.resolve(process.cwd(), String(options.path || "."));
-    const outputRoot = await resolveOutputRoot({
+    const { outputRoot, outputFs } = await resolveOutputContext({
       cwd: targetPath,
       outputDirOverride: options.outputDir,
       env: process.env,
@@ -897,7 +902,7 @@ target
       idempotencyKey,
       targetId,
       payload,
-    });
+    }, outputFs);
 
     const resolvedCredentials = await resolveAidenIdCredentials({
       apiKey: options.apiKey,
@@ -957,10 +962,11 @@ target
       idempotencyKey,
       targetId,
       response: execution.response,
-    });
+    }, outputFs);
 
     const proofResponse = execution.response || {};
     const registryUpdate = await recordTargetProofResponse({
+      outputFs,
       outputRoot,
       target: proofResponse.target || {},
       proof: proofResponse,
@@ -1012,7 +1018,7 @@ target
   .action(async (targetId, options, command) => {
     const emitJson = shouldEmitJson(options, command);
     const targetPath = path.resolve(process.cwd(), String(options.path || "."));
-    const outputRoot = await resolveOutputRoot({
+    const { outputRoot, outputFs } = await resolveOutputContext({
       cwd: targetPath,
       outputDirOverride: options.outputDir,
       env: process.env,
@@ -1041,9 +1047,10 @@ target
       generatedAt: new Date().toISOString(),
       targetId,
       response: execution.response,
-    });
+    }, outputFs);
 
     const registryUpdate = await recordTargetProofResponse({
+      outputFs,
       outputRoot,
       target: execution.response || {},
       proof: {},
@@ -1098,7 +1105,7 @@ site
   .action(async (identityId, options, command) => {
     const emitJson = shouldEmitJson(options, command);
     const targetPath = path.resolve(process.cwd(), String(options.path || "."));
-    const outputRoot = await resolveOutputRoot({
+    const { outputRoot, outputFs } = await resolveOutputContext({
       cwd: targetPath,
       outputDirOverride: options.outputDir,
       env: process.env,
@@ -1132,7 +1139,7 @@ site
       apiUrl,
       idempotencyKey,
       payload,
-    });
+    }, outputFs);
 
     const resolvedCredentials = await resolveAidenIdCredentials({
       apiKey: options.apiKey,
@@ -1190,9 +1197,10 @@ site
       apiUrl,
       idempotencyKey,
       response: execution.response,
-    });
+    }, outputFs);
 
     const registryUpdate = await recordTemporarySite({
+      outputFs,
       outputRoot,
       site: execution.response || {},
       context: {

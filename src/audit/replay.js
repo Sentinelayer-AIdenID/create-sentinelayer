@@ -1,4 +1,4 @@
-import fsp from "node:fs/promises";
+import { requireOutputFileSystem } from "../config/output-filesystem.js";
 import path from "node:path";
 
 function normalizeString(value) {
@@ -87,15 +87,17 @@ export function compareAuditReports(baseReport = {}, candidateReport = {}) {
 }
 
 export async function writeAuditComparisonArtifact({
+  outputFs,
   baseReport = {},
   candidateReport = {},
   outputDirectory = "",
 } = {}) {
+  requireOutputFileSystem(outputFs);
   const resolvedOutputDirectory = path.resolve(String(outputDirectory || "."));
   const comparison = compareAuditReports(baseReport, candidateReport);
   const fileName = `AUDIT_COMPARISON_${comparison.baseRunId}_vs_${comparison.candidateRunId}.json`;
   const outputPath = path.join(resolvedOutputDirectory, fileName);
-  await fsp.writeFile(outputPath, `${JSON.stringify(comparison, null, 2)}\n`, "utf-8");
+  await outputFs.writeFile(outputPath, `${JSON.stringify(comparison, null, 2)}\n`, "utf-8");
   return {
     comparison,
     outputPath,

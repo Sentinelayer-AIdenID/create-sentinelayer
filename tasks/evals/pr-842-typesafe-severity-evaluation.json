@@ -9,15 +9,15 @@
     "canonicalization": "UTF-8; CRLF converted to LF only for Git-canonical source comparison",
     "sourceSha256": {
       "src/review/typesafe-severity.js": "82a628b1c7b06756ba71c98df8e7b9b0e96f62c774ca713a1658fca754aebc5a",
-      "src/review/ai-review.js": "d6dfc3bda0988e8bd7d62c871859cbbeac54bf39ad36830bcbebd7ea22faed01",
+      "src/review/ai-review.js": "03610770b40997a40bdf87954fc06550daa48489400324fb365f0ca9a0672b4b",
       "src/review/omargate-orchestrator.js": "90d6d8f61e6e3056e937f79f584725f6cbd9e47128d22e61d1bd600227f75725",
       "src/commands/omargate.js": "c59eee4a1bd833065e4cd6e136917adc42052c1e35e0089ef010115b6f1d83e4",
       "src/commands/legacy-args.js": "83772b6ccd5765d1a0bd1f3ee3eefcf5c1fdaf4e9fb1a301c0312b286dbc0d29",
-      "src/legacy-cli.js": "284fb9798504f3b3bd13d12208e805b3d091f50456d8918ec92eaf25d57d1601",
+      "src/legacy-cli.js": "095ddd1ea897811cfce02507389a566048c0a1574e88a22fa31e82f052913a59",
       "src/session/redact.js": "a92cd2e70b165e4e015edcbeff1d3119c3b1f091ef72654e776c0139ace663a2"
     },
     "testPath": "tests/unit.typesafe-severity.test.mjs",
-    "testSha256": "bedc5ceb8a9ffe21465faaa4b9e10727cc8b765fc87987a9da36ca1922f7ece0",
+    "testSha256": "a1bbdb78a7e271d8bd183da13abe007473e0bc33968230680caefc94a6f4e86d",
     "dictionaryVersion": "omar-severity-evaluation/1",
     "privacyCorrection": {
       "baseRevision": "22b8553073bb72cfccd71fb1c06217c3e6844ff4",
@@ -55,6 +55,34 @@
       "currentLegacySha256": "284fb9798504f3b3bd13d12208e805b3d091f50456d8918ec92eaf25d57d1601",
       "scope": "Only the test-only credential helper export name changed in src/legacy-cli.js, with its two credential test imports updated. The seven synthetic cases, shared input, mock responses, expected outcomes, TypeSafe implementation files and unchanged evaluation test hash are retained.",
       "provenance": "Earlier source bindings and mock observations remain historical anchors. This refresh binds the current CLI source after CRLF-to-LF normalization only; it is not a new model-accuracy, live-provider, billing, or security-acceptance result."
+    },
+    "outputBoundaryMaintenance": {
+      "kind": "artifact_write_boundary_source_binding_refresh",
+      "baseRevision": "265b6510ab375e21d4b67abb102dc16a6d51c5aa",
+      "baselineEvidencePath": "tasks/evals/pr-854-output-boundary/baseline-265b6510.json",
+      "baselineEvidenceSha256": "25b9bcc4b938dc6a6c7fd20068da96979b5b0bacfb120bd1855006fdb8b37c23",
+      "changedSourceSha256": {
+        "src/review/ai-review.js": {
+          "prior": "d6dfc3bda0988e8bd7d62c871859cbbeac54bf39ad36830bcbebd7ea22faed01",
+          "current": "03610770b40997a40bdf87954fc06550daa48489400324fb365f0ca9a0672b4b"
+        },
+        "src/legacy-cli.js": {
+          "prior": "284fb9798504f3b3bd13d12208e805b3d091f50456d8918ec92eaf25d57d1601",
+          "current": "095ddd1ea897811cfce02507389a566048c0a1574e88a22fa31e82f052913a59"
+        }
+      },
+      "scope": "Only artifact destination capability resolution and write propagation changed in the two bound files. Prompt, model selection, severity classification, cost and usage contracts, seven synthetic cases, original inputs, expected outputs, invariants, other implementation bindings and the evaluation test remain unchanged.",
+      "provenance": "Earlier revisions and observations remain historical. Current canonical source hashes bind the output-boundary repair. This is deterministic mocked contract evidence, not live-provider, billing, model-accuracy, or hosted-gate acceptance evidence."
+    },
+    "outputBoundaryFixtureMaintenance": {
+      "kind": "workspace_fixture_setup_only",
+      "baseRevision": "88a6a24d96da090363ce2a649ab37b800b34d43f",
+      "baselineEvidencePath": "tasks/evals/pr-854-output-boundary/baseline-88a6a24.json",
+      "baselineEvidenceSha256": "0b72ddedbc7ec8aa5853b6e63ecbcdfa40b5b13063868a183b9ba8f0ca5543bf",
+      "priorTestSha256": "bedc5ceb8a9ffe21465faaa4b9e10727cc8b765fc87987a9da36ca1922f7ece0",
+      "currentTestSha256": "a1bbdb78a7e271d8bd183da13abe007473e0bc33968230680caefc94a6f4e86d",
+      "scope": "Creates each existing synthetic target workspace before the actual caller runs. All seven cases, mock responses, expected classifications, privacy checks, monetary-cap and usage assertions, production implementation bindings and prior evidence are unchanged.",
+      "provenance": "Required fixture setup for a realpath-constrained existing workspace. This refresh is not live-provider, model-accuracy, billing or new security acceptance evidence."
     }
   },
   "baselineMeaning": "Published base generation-only contract, with candidate off mode exercised on identical synthetic inputs; no independent baseline model/provider run.",

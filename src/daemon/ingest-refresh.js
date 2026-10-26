@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { resolveOutputContext } from "../config/service.js";
 import { collectCodebaseIngest, generateCodebaseIngest } from "../ingest/engine.js";
 import { createAgentEvent } from "../events/schema.js";
 import {
@@ -74,6 +75,7 @@ export function detectIngestDrift(targetPath) {
  * @returns {Promise<{ refreshed: boolean, reason: string, durationMs: number }>}
  */
 export async function refreshIngestIfNeeded(targetPath, options = {}) {
+  const { outputFs } = await resolveOutputContext({ cwd: path.resolve(targetPath), outputDirOverride: ".sentinelayer" });
   const maxDurationMs = options.maxDurationMs || DEFAULT_MAX_DURATION_MS;
   const driftMode = options.driftMode === "ast" ? "ast" : "file-count";
   let astOutcome = null;
@@ -137,6 +139,7 @@ export async function refreshIngestIfNeeded(targetPath, options = {}) {
     let ingest;
     try {
       ingest = await generateCodebaseIngest({
+        outputFs,
         rootPath: targetPath,
         outputDir: path.join(targetPath, ".sentinelayer"),
         refresh: true,
@@ -152,6 +155,7 @@ export async function refreshIngestIfNeeded(targetPath, options = {}) {
     if (driftMode === "ast" && astOutcome?.currentSnapshot) {
       try {
         await writeAstSnapshot({
+          outputFs,
           rootPath: targetPath,
           snapshot: astOutcome.currentSnapshot,
         });

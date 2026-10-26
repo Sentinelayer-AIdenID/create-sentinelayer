@@ -1,5 +1,6 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
+import { requireOutputFileSystem } from "../config/output-filesystem.js";
 
 const REGISTRY_SCHEMA_VERSION = "1.0.0";
 
@@ -104,15 +105,16 @@ async function loadRegistryInternal(filePath) {
   }
 }
 
-async function writeRegistryInternal(filePath, registry = {}) {
+async function writeRegistryInternal(filePath, registry = {}, outputFs) {
+  requireOutputFileSystem(outputFs);
   const normalized = {
     schemaVersion: REGISTRY_SCHEMA_VERSION,
     generatedAt: new Date().toISOString(),
     domains: Array.isArray(registry.domains) ? registry.domains.map(normalizeDomainRecord) : [],
     targets: Array.isArray(registry.targets) ? registry.targets.map(normalizeTargetRecord) : [],
   };
-  await fsp.mkdir(path.dirname(filePath), { recursive: true });
-  await fsp.writeFile(filePath, `${JSON.stringify(normalized, null, 2)}\n`, "utf-8");
+  await outputFs.mkdir(path.dirname(filePath), { recursive: true });
+  await outputFs.writeFile(filePath, `${JSON.stringify(normalized, null, 2)}\n`, "utf-8");
   return normalized;
 }
 
@@ -153,11 +155,13 @@ export async function getTargetById({ outputRoot, targetId } = {}) {
 }
 
 export async function recordDomainProofResponse({
+  outputFs,
   outputRoot,
   domain = {},
   proof = {},
   context = {},
 } = {}) {
+  requireOutputFileSystem(outputFs);
   const domainId = normalizeString(domain.id || context.domainId);
   if (!domainId) {
     throw new Error("Cannot record domain without domain.id.");
@@ -201,7 +205,7 @@ export async function recordDomainProofResponse({
     registry.domains.push(nextRecord);
   }
 
-  const saved = await writeRegistryInternal(registryPath, registry);
+  const saved = await writeRegistryInternal(registryPath, registry, outputFs);
   const record = saved.domains.find((item) => item.domainId === domainId) || null;
   return {
     registryPath,
@@ -210,11 +214,13 @@ export async function recordDomainProofResponse({
 }
 
 export async function recordTargetProofResponse({
+  outputFs,
   outputRoot,
   target = {},
   proof = {},
   context = {},
 } = {}) {
+  requireOutputFileSystem(outputFs);
   const targetId = normalizeString(target.id || context.targetId);
   if (!targetId) {
     throw new Error("Cannot record target without target.id.");
@@ -259,7 +265,7 @@ export async function recordTargetProofResponse({
     registry.targets.push(nextRecord);
   }
 
-  const saved = await writeRegistryInternal(registryPath, registry);
+  const saved = await writeRegistryInternal(registryPath, registry, outputFs);
   const record = saved.targets.find((item) => item.targetId === targetId) || null;
   return {
     registryPath,

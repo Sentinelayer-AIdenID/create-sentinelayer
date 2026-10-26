@@ -18,7 +18,7 @@ import {
 import { recordProvisionedIdentity } from "../ai/identity-store.js";
 import { fetchAidenIdCredentials } from "../auth/service.js";
 import { resolveActiveAuthSession } from "../auth/service.js";
-import { resolveOutputRoot } from "../config/service.js";
+import { resolveOutputContext } from "../config/service.js";
 import {
   listAssignments,
   releaseLease,
@@ -8849,7 +8849,7 @@ Guide: https://sentinelayer.com/docs/senti/overview/
       const concurrency = Math.max(1, Math.min(10, requestedConcurrency, count));
       const tags = parseCsvTokens(options.tags, ["session", "swarm"]);
       const apiUrl = normalizeAidenIdApiUrl(options.apiUrl);
-      const outputRoot = await resolveOutputRoot({
+      const { outputRoot, outputFs } = await resolveOutputContext({
         cwd: targetPath,
         outputDirOverride: options.outputDir,
         env: process.env,
@@ -8942,6 +8942,7 @@ Guide: https://sentinelayer.com/docs/senti/overview/
       for (const identity of provisioned) {
         await recordProvisionedIdentity({
           outputRoot,
+          outputFs,
           response: identity.response || {},
           context: {
             source: "session-provision-emails",

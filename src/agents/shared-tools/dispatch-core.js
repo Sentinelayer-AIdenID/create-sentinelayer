@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { bindOutputFileSystem, requireOutputFileSystem } from "../../config/output-filesystem.js";
 import { evaluateBudget } from "../../cost/budget.js";
 import {
   normalizeRunEvent,
@@ -28,6 +29,7 @@ export function createToolDispatcher(toolMap, readOnlyTools) {
   const READ_ONLY_TOOLS = new Set(readOnlyTools || []);
 
   async function dispatchTool(toolName, input, ctx) {
+    if (ctx.artifactDir) requireOutputFileSystem(ctx.outputFs);
     const handler = TOOL_MAP[toolName];
     if (!handler) {
       throw new ToolDispatchError(`Unknown tool: ${toolName}`);
@@ -186,9 +188,9 @@ export function createToolDispatcher(toolMap, readOnlyTools) {
     const serialized = JSON.stringify(result);
     if (serialized.length > RESULT_PERSIST_THRESHOLD && ctx.artifactDir) {
       const refPath = `${ctx.artifactDir}/tool-results/${eventId}.json`;
-      const fsp = await import("node:fs/promises");
-      await fsp.mkdir(`${ctx.artifactDir}/tool-results`, { recursive: true });
-      await fsp.writeFile(refPath, serialized, "utf-8");
+      const outputFs = requireOutputFileSystem(ctx.outputFs);
+      await outputFs.mkdir(`${ctx.artifactDir}/tool-results`, { recursive: true });
+      await outputFs.writeFile(refPath, serialized, "utf-8");
       return {
         _persisted: true,
         _refPath: refPath,
@@ -224,9 +226,11 @@ export function createAgentContext({
   sessionId,
   runId,
   artifactDir,
+  outputFs,
   onEvent,
 }) {
-  return {
+  if (artifactDir || outputFs !== undefined) requireOutputFileSystem(outputFs);
+  const context = {
     agentIdentity,
     budget: {
       maxCostUsd: budget?.maxCostUsd ?? 5.0,
@@ -250,6 +254,7 @@ export function createAgentContext({
     lastToolName: null,
     onEvent,
   };
+  return outputFs === undefined ? context : bindOutputFileSystem(context, outputFs);
 }
 
 function snapshotUsage(ctx) {
@@ -295,7 +300,7 @@ async function safeAppendEvent(ctx, eventData) {
     });
     if (ctx.artifactDir) {
       await appendRunEvent(
-        { targetPath: ctx.artifactDir, outputDir: ctx.artifactDir },
+        { targetPath: ctx.artifactDir, outputDir: ctx.artifactDir, outputFs: ctx.outputFs },
         normalized,
       );
     }

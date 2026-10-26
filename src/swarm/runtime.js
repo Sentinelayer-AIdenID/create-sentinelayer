@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import fsp from "node:fs/promises";
 import path from "node:path";
 
-import { resolveOutputRoot } from "../config/service.js";
+import { resolveOutputContext } from "../config/service.js";
 import { evaluateBudget } from "../cost/budget.js";
 import { estimateTokens } from "../cost/tokenizer.js";
 
@@ -121,7 +121,7 @@ function createEvent({
   };
 }
 
-async function executePlaywrightAction({ page, action, runDirectory, usage, runId, step }) {
+async function executePlaywrightAction({ page, action, runDirectory, usage, runId, step, outputFs }) {
   const type = action.type;
   const metadata = {
     action: type,
@@ -195,14 +195,15 @@ async function executePlaywrightAction({ page, action, runDirectory, usage, runI
     });
   }
   if (type === "screenshot") {
-    const outputPath = action.path
+    const requestedOutputPath = action.path
       ? path.resolve(runDirectory, action.path)
       : path.join(runDirectory, "runtime", `step-${String(step).padStart(3, "0")}.png`);
-    await fsp.mkdir(path.dirname(outputPath), { recursive: true });
-    await page.screenshot({
-      path: outputPath,
+    const outputPath = await outputFs.assertFilePath(requestedOutputPath);
+    await outputFs.mkdir(path.dirname(outputPath), { recursive: true });
+    const screenshot = await page.screenshot({
       fullPage: true,
     });
+    await outputFs.writeFile(outputPath, screenshot);
     metadata.path = toPosixPath(path.relative(runDirectory, outputPath));
     usage.toolCalls += 1;
     usage.outputTokens += estimateTokens(`screenshot:${metadata.path}`);
@@ -268,7 +269,7 @@ async function writeRuntimeArtifacts({
   env,
   homeDir,
 } = {}) {
-  const outputRoot = await resolveOutputRoot({
+  const { outputRoot, outputFs } = await resolveOutputContext({
     cwd: path.resolve(String(summary.targetPath || ".")),
     outputDirOverride: outputDir,
     env,
@@ -279,8 +280,8 @@ async function writeRuntimeArtifacts({
   const runtimeJsonPath = path.join(runtimeDirectory, "SWARM_RUNTIME.json");
   const runtimeMarkdownPath = path.join(runtimeDirectory, "SWARM_RUNTIME.md");
   const runtimeEventsPath = path.join(runtimeDirectory, "events.ndjson");
-  await fsp.mkdir(runtimeDirectory, { recursive: true });
-  await fsp.writeFile(runtimeEventsPath, `${events.map((event) => JSON.stringify(event)).join("\n")}\n`, "utf-8");
+  await outputFs.mkdir(runtimeDirectory, { recursive: true });
+  await outputFs.writeFile(runtimeEventsPath, `${events.map((event) => JSON.stringify(event)).join("\n")}\n`, "utf-8");
 
   const fullSummary = {
     ...summary,
@@ -292,8 +293,8 @@ async function writeRuntimeArtifacts({
     runtimeEventsPath,
   };
 
-  await fsp.writeFile(runtimeJsonPath, `${JSON.stringify(fullSummary, null, 2)}\n`, "utf-8");
-  await fsp.writeFile(runtimeMarkdownPath, `${buildRuntimeMarkdown(fullSummary).trim()}\n`, "utf-8");
+  await outputFs.writeFile(runtimeJsonPath, `${JSON.stringify(fullSummary, null, 2)}\n`, "utf-8");
+  await outputFs.writeFile(runtimeMarkdownPath, `${buildRuntimeMarkdown(fullSummary).trim()}\n`, "utf-8");
 
   return fullSummary;
 }
@@ -323,7 +324,7 @@ export async function runSwarmRuntime({
   const normalizedTargetPath = path.resolve(String(targetPath || plan.targetPath || "."));
   const normalizedMaxSteps = normalizeMaxSteps(maxSteps);
   const runId = createRuntimeRunId();
-  const resolvedOutputRoot = await resolveOutputRoot({
+  const { outputRoot: resolvedOutputRoot, outputFs } = await resolveOutputContext({
     cwd: normalizedTargetPath,
     outputDirOverride: outputDir,
     env,
@@ -463,6 +464,7 @@ export async function runSwarmRuntime({
           const result = await runner(toolInput, {
             targetPath: normalizedTargetPath,
             outputRoot: resolvedOutputRoot,
+            outputFs,
             runId: toolInput.runId,
             execute: Boolean(execute),
             env,
@@ -583,6 +585,7 @@ export async function runSwarmRuntime({
             page,
             action,
             runDirectory: runtimeRunDirectory,
+            outputFs,
             usage,
             runId,
             step,

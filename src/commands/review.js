@@ -1,4 +1,3 @@
-import fsp from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 
@@ -26,6 +25,7 @@ import {
   writeReviewRunContext,
 } from "../review/replay.js";
 import { resolveActionOptions } from "./action-options.js";
+import { resolveOutputContext } from "../config/service.js";
 
 function shouldEmitJson(options, command) {
   const local = Boolean(options && options.json);
@@ -134,12 +134,14 @@ async function executeReviewRun({
     specFile,
   });
   const unifiedArtifacts = await writeUnifiedReviewArtifacts({
+    outputFs: deterministic.artifacts.outputFs,
     runDirectory: deterministic.artifacts.runDirectory,
     report: unified.report,
     markdown: unified.markdown,
   });
 
   const contextWrite = await writeReviewRunContext({
+    outputFs: deterministic.artifacts.outputFs,
     runDirectory: deterministic.artifacts.runDirectory,
     runId: deterministic.runId,
     targetPath: deterministic.targetPath,
@@ -511,6 +513,7 @@ export function registerReviewCommand(program) {
       const comparison = compareUnifiedReports(source.report, replayOutcome.unified.report);
       const artifact = await writeReviewComparisonArtifact({
         runDirectory: replayOutcome.deterministic.artifacts.runDirectory,
+        outputFs: replayOutcome.deterministic.artifacts.outputFs,
         baseRunId: source.report.runId,
         candidateRunId: replayOutcome.unified.report.runId,
         comparison,
@@ -571,6 +574,7 @@ export function registerReviewCommand(program) {
       const comparison = compareUnifiedReports(base.report, candidate.report);
       const artifact = await writeReviewComparisonArtifact({
         runDirectory: candidate.runDirectory,
+        outputFs: candidate.outputFs,
         baseRunId: base.report.runId,
         candidateRunId: candidate.report.runId,
         comparison,
@@ -578,9 +582,10 @@ export function registerReviewCommand(program) {
 
       let outputPath = artifact.artifactPath;
       if (actionOptions.outputFile) {
-        outputPath = path.resolve(targetPath, String(actionOptions.outputFile));
-        await fsp.mkdir(path.dirname(outputPath), { recursive: true });
-        await fsp.writeFile(outputPath, `${JSON.stringify(artifact.payload, null, 2)}\n`, "utf-8");
+        const outputContext = await resolveOutputContext({ cwd: targetPath, outputDirOverride: String(actionOptions.outputFile) });
+        outputPath = outputContext.outputRoot;
+        await outputContext.outputFs.mkdir(path.dirname(outputPath), { recursive: true });
+        await outputContext.outputFs.writeFile(outputPath, `${JSON.stringify(artifact.payload, null, 2)}\n`, "utf-8");
       }
 
       const payload = {

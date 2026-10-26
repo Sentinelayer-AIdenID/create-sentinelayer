@@ -12,7 +12,7 @@ import {
   resolveProvider,
 } from "../ai/client.js";
 import { recordCliLlmSessionUsage, usageNumber } from "../billing/llm-session-usage.js";
-import { loadConfig, resolveOutputRoot, userConfigValues } from "../config/service.js";
+import { loadConfig, resolveOutputContext, userConfigValues } from "../config/service.js";
 import { evaluateBudget } from "../cost/budget.js";
 import { appendCostEntry, summarizeCostHistory } from "../cost/history.js";
 import { estimateModelCost } from "../cost/tracker.js";
@@ -48,7 +48,7 @@ function shouldEmitJson(options, command) {
 function resolveSpecPath(targetPath, explicitSpecFile) {
   const explicit = String(explicitSpecFile || "").trim();
   if (explicit) {
-    return path.resolve(targetPath, explicit);
+    return { reportPath: path.resolve(targetPath, explicit), outputFs: fsp };
   }
 
   const candidates = [path.join(targetPath, "SPEC.md"), path.join(targetPath, "docs", "spec.md")];
@@ -292,15 +292,15 @@ async function resolvePreScanReportPath({
 } = {}) {
   const explicit = String(outputFile || "").trim();
   if (explicit) {
-    return path.resolve(targetPath, explicit);
+    return { reportPath: path.resolve(targetPath, explicit), outputFs: fsp };
   }
 
-  const outputRoot = await resolveOutputRoot({
+  const { outputRoot, outputFs } = await resolveOutputContext({
     cwd: targetPath,
     outputDirOverride,
     env: process.env,
   });
-  return path.join(outputRoot, "reports", `scan-precheck-${createTimestampToken()}.md`);
+  return { reportPath: path.join(outputRoot, "reports", `scan-precheck-${createTimestampToken()}.md`), outputFs };
 }
 
 function printAiPreScanSummary({ reportPath, ai }) {
@@ -610,13 +610,13 @@ export function registerScanCommand(program) {
         model: response.model,
         aiMarkdown,
       });
-      const reportPath = await resolvePreScanReportPath({
+      const { reportPath, outputFs } = await resolvePreScanReportPath({
         targetPath,
         outputDirOverride: options.outputDir,
         outputFile: options.outputFile,
       });
-      await fsp.mkdir(path.dirname(reportPath), { recursive: true });
-      await fsp.writeFile(reportPath, reportMarkdown, "utf-8");
+      await outputFs.mkdir(path.dirname(reportPath), { recursive: true });
+      await outputFs.writeFile(reportPath, reportMarkdown, "utf-8");
 
       const estimatedInputTokens = estimateTokens(prompt, { model: response.model });
       const estimatedOutputTokens = estimateTokens(aiMarkdown, { model: response.model });

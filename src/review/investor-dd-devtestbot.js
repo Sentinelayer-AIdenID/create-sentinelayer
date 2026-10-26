@@ -7,10 +7,10 @@
  * writes an explicit evidence-gap artifact bundle.
  */
 
-import fsp from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
+import { requireOutputFileSystem } from "../config/output-filesystem.js";
 
 import { recordProvisionedIdentity } from "../ai/identity-store.js";
 import { runDevTestBotSession } from "../agents/devtestbot/tool.js";
@@ -27,9 +27,10 @@ export const DEVTESTBOT_PHASE_DEFAULT_SCOPE = "smoke";
 export const DEVTESTBOT_PHASE_DEFAULT_SWARMS = 1;
 export const DEVTESTBOT_PHASE_DEFAULT_PER_SWARM_BUDGET_USD = 0.25;
 
-async function writeJson(filePath, obj) {
-  await fsp.mkdir(path.dirname(filePath), { recursive: true });
-  await fsp.writeFile(filePath, JSON.stringify(obj, null, 2), "utf-8");
+async function writeJsonWithFs(outputFs, filePath, obj) {
+  requireOutputFileSystem(outputFs);
+  await outputFs.mkdir(path.dirname(filePath), { recursive: true });
+  await outputFs.writeFile(filePath, JSON.stringify(obj, null, 2), "utf-8");
 }
 
 function normalizeString(value) {
@@ -347,14 +348,17 @@ function makeSyntheticIdentityResponse({ runId, index }) {
 }
 
 export async function provisionDevTestBotIdentities({
+  outputFs,
   outputRoot,
   runId,
   count,
   provisionIdentity = null,
   onEvent = () => {},
 } = {}) {
+  requireOutputFileSystem(outputFs);
   if (!outputRoot) throw new TypeError("provisionDevTestBotIdentities requires outputRoot");
   if (!runId) throw new TypeError("provisionDevTestBotIdentities requires runId");
+  await outputFs.assertPath(outputRoot);
   const total = clampInt(count, { min: 0, max: DEVTESTBOT_PHASE_MAX_CONCURRENT, fallback: 0 });
   const identities = [];
 
@@ -378,6 +382,7 @@ export async function provisionDevTestBotIdentities({
       response = makeSyntheticIdentityResponse({ runId, index });
     }
     const recorded = await recordProvisionedIdentity({
+      outputFs,
       outputRoot,
       response,
       context: {
@@ -459,6 +464,7 @@ function safeErrorMessage(error) {
 }
 
 export async function runDevTestBotPhase({
+  outputFs,
   runId,
   rootPath,
   outputRoot,
@@ -470,11 +476,15 @@ export async function runDevTestBotPhase({
   options = {},
   onEvent = () => {},
 } = {}) {
+  requireOutputFileSystem(outputFs);
+  const writeJson = (...args) => writeJsonWithFs(outputFs, ...args);
   if (!runId) throw new TypeError("runDevTestBotPhase requires runId");
   if (!rootPath) throw new TypeError("runDevTestBotPhase requires rootPath");
   if (!outputRoot) throw new TypeError("runDevTestBotPhase requires outputRoot");
   if (!runRoot) throw new TypeError("runDevTestBotPhase requires runRoot");
   if (!artifactDir) throw new TypeError("runDevTestBotPhase requires artifactDir");
+  const phaseRoot = path.join(runRoot, "devtestbot");
+  await Promise.all([outputRoot, phaseRoot, artifactDir].map((destination) => outputFs.assertPath(destination)));
 
   const normalized = normalizePhaseOptions(options);
   const phaseStartedAt = Date.now();
@@ -485,8 +495,7 @@ export async function runDevTestBotPhase({
     budget,
     options: normalized,
   });
-  const phaseRoot = path.join(runRoot, "devtestbot");
-  await fsp.mkdir(phaseRoot, { recursive: true });
+  await outputFs.mkdir(phaseRoot, { recursive: true });
 
   onEvent({
     type: "phase_start",
@@ -551,6 +560,7 @@ export async function runDevTestBotPhase({
   }
 
   const identities = await provisionDevTestBotIdentities({
+    outputFs,
     outputRoot,
     runId,
     count: plan.identityCount,
@@ -612,6 +622,7 @@ export async function runDevTestBotPhase({
           execute: plan.execute,
           recordVideo: plan.recordVideo,
         }, {
+          outputFs,
           targetPath: rootPath,
           outputRoot,
           runId,

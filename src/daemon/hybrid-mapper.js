@@ -1,6 +1,7 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
 
+import { bindOutputFileSystem, requireOutputFileSystem } from "../config/output-filesystem.js";
 import { parseAstModuleSpecifiers } from "./ast-parser-layer.js";
 import { buildCallgraphOverlay } from "./callgraph-overlay.js";
 import { collectCodebaseIngest } from "../ingest/engine.js";
@@ -110,14 +111,16 @@ async function readJsonFile(filePath, defaultFactory) {
   }
 }
 
-async function writeJsonFile(filePath, payload = {}) {
-  await fsp.mkdir(path.dirname(filePath), { recursive: true });
-  await fsp.writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
+async function writeJsonFile(filePath, payload = {}, outputFs) {
+  requireOutputFileSystem(outputFs);
+  await outputFs.mkdir(path.dirname(filePath), { recursive: true });
+  await outputFs.writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
 }
 
-async function appendJsonLine(filePath, payload = {}) {
-  await fsp.mkdir(path.dirname(filePath), { recursive: true });
-  await fsp.appendFile(filePath, `${JSON.stringify(payload)}\n`, "utf-8");
+async function appendJsonLine(filePath, payload = {}, outputFs) {
+  requireOutputFileSystem(outputFs);
+  await outputFs.mkdir(path.dirname(filePath), { recursive: true });
+  await outputFs.appendFile(filePath, `${JSON.stringify(payload)}\n`, "utf-8");
 }
 
 function tokenizeWorkItem(queueItem = {}) {
@@ -364,7 +367,7 @@ export async function resolveHybridMappingStorage({
     homeDir,
   });
   const mappingDir = path.join(daemonStorage.baseDir, "mapping");
-  return {
+  return bindOutputFileSystem({
     ...daemonStorage,
     mappingDir,
     mapIndexPath: path.join(mappingDir, "hybrid-map-index.json"),
@@ -373,7 +376,7 @@ export async function resolveHybridMappingStorage({
     handoffIndexPath: path.join(mappingDir, "hybrid-handoff-index.json"),
     handoffEventsPath: path.join(mappingDir, "hybrid-handoff-events.ndjson"),
     handoffRunsDir: path.join(mappingDir, "handoffs"),
-  };
+  }, daemonStorage.outputFs);
 }
 
 export async function buildHybridScopeMap({
@@ -577,8 +580,8 @@ export async function buildHybridScopeMap({
     },
   };
 
-  await fsp.mkdir(storage.mapRunsDir, { recursive: true });
-  await writeJsonFile(runPath, runPayload);
+  await storage.outputFs.mkdir(storage.mapRunsDir, { recursive: true });
+  await writeJsonFile(runPath, runPayload, storage.outputFs);
 
   const rawIndex = await readJsonFile(storage.mapIndexPath, () => createInitialMapIndex(normalizedNow));
   const index = normalizeMapIndex(rawIndex, normalizedNow);
@@ -600,7 +603,7 @@ export async function buildHybridScopeMap({
     ...index.maps.filter((entry) => entry.runId !== runId),
   ].slice(0, 2000);
   await Promise.all([
-    writeJsonFile(storage.mapIndexPath, index),
+    writeJsonFile(storage.mapIndexPath, index, storage.outputFs),
     appendJsonLine(storage.mapEventsPath, {
       timestamp: normalizedNow,
       eventType: "hybrid_scope_map",
@@ -618,7 +621,7 @@ export async function buildHybridScopeMap({
       callGraphParsedFileCount: callGraphOverlay.summary.parsedFileCount,
       callGraphFallbackParsedFileCount: callGraphOverlay.summary.fallbackParsedFileCount,
       callGraphParseErrorCount: callGraphOverlay.summary.parseErrorCount,
-    }),
+    }, storage.outputFs),
   ]);
 
   return {
@@ -791,8 +794,8 @@ export async function buildHybridHandoffPackage({
     },
     files: handoffFiles,
   };
-  await fsp.mkdir(storage.handoffRunsDir, { recursive: true });
-  await writeJsonFile(handoffPath, payload);
+  await storage.outputFs.mkdir(storage.handoffRunsDir, { recursive: true });
+  await writeJsonFile(handoffPath, payload, storage.outputFs);
 
   const rawIndex = await readJsonFile(storage.handoffIndexPath, () => createInitialHandoffIndex(normalizedNow));
   const index = normalizeHandoffIndex(rawIndex, normalizedNow);
@@ -812,7 +815,7 @@ export async function buildHybridHandoffPackage({
   ].slice(0, 2000);
 
   await Promise.all([
-    writeJsonFile(storage.handoffIndexPath, index),
+    writeJsonFile(storage.handoffIndexPath, index, storage.outputFs),
     appendJsonLine(storage.handoffEventsPath, {
       timestamp: normalizedNow,
       eventType: "hybrid_handoff_package",
@@ -822,7 +825,7 @@ export async function buildHybridHandoffPackage({
       assignee: normalizedAssignee,
       scopedFileCount: handoffFiles.length,
       estimatedInputTokens: budgets.estimatedInputTokens,
-    }),
+    }, storage.outputFs),
   ]);
 
   return {
