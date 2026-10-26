@@ -225,13 +225,21 @@ export async function createTicket(sessionId, {
         ...(normalizeString(assignee) ? { assignee: normalizeString(assignee) } : {}),
         ...(sourceSequenceId !== null ? { sourceSequenceId } : {}) },
     });
-    // Report what the server RECORDED, not what was sent: a server without the creator-provenance change accepts
-    // and ignores agentId/sourceSequenceId, so a requested attribution may be absent from the stored ticket.
+    if (typeof ticket?.id !== "string" || !ticket.id.trim()) {
+      throw new Error("The API returned no usable ticket identity; creation may have committed.");
+    }
+    // The public API projects server-authored creator/sourceMessage. Legacy
+    // createdBy and a top-level sourceSequenceId do not establish that provenance.
+    // Keep the returned ticket and retry key even when confirmation is incomplete.
+    const creator = ticket?.creator;
+    const source = ticket?.sourceMessage;
     const provenance = {
       agentRequested: cleanAgent || null,
-      agentRecorded: Boolean(cleanAgent) && ticket?.createdBy === cleanAgent,
+      agentRecorded: Boolean(cleanAgent) && creator?.kind === "agent" && creator.id === cleanAgent,
       sourceRequested: sourceSequenceId,
-      sourceRecorded: sourceSequenceId !== null && Number(ticket?.sourceSequenceId) === sourceSequenceId,
+      sourceRecorded: sourceSequenceId !== null && source?.sequenceId === sourceSequenceId
+        && typeof source.id === "string" && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(source.id)
+        && Number.isSafeInteger(source.revision) && source.revision >= 1,
     };
     return { ticket, idempotencyKey, provenance };
   } catch (error) {

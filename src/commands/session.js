@@ -7549,11 +7549,25 @@ Guide: https://sentinelayer.com/docs/senti/overview/
         ...(options.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : {}),
       });
       const { agentRequested, agentRecorded, sourceRequested, sourceRecorded } = result.provenance;
+      const creator = result.ticket?.creator;
+      let creatorNote = " Creator: not recorded.";
+      if (typeof creator?.id === "string" && creator.id.trim()) {
+        if (creator.kind === "agent") {
+          const assurance = creator.credentialBound === true && ["session_admission", "agent_token"].includes(creator.identitySource)
+            ? "credential-bound"
+            : creator.credentialBound === false && creator.identitySource === "authorized_agent_grant"
+              ? "authorized account grant; not a separate agent credential"
+              : "identity assurance unavailable";
+          creatorNote = ` Creator: agent ${creator.id} (${assurance}).`;
+        } else if (creator.kind === "account") {
+          creatorNote = ` Creator: account ${creator.id} (the credential holder's physical identity is not established).`;
+        }
+      }
       const notes = [
-        agentRequested && !agentRecorded ? ` This server did not record agent ${agentRequested}; the ticket is attributed to your account.` : "",
-        sourceRequested !== null && !sourceRecorded ? ` This server did not record source #${sourceRequested}.` : "",
+        agentRequested && !agentRecorded ? ` The response did not confirm requested agent ${agentRequested}.` : "",
+        sourceRequested !== null && !sourceRecorded ? ` The response did not confirm source #${sourceRequested}.` : "",
       ].join("");
-      ticketOutput(options, command, { command: "session ticket create", ...result }, `Created ${result.ticket.id}.${notes}`);
+      ticketOutput(options, command, { command: "session ticket create", ...result }, `Created ${result.ticket.id}.${creatorNote}${notes}`);
     });
 
   ticket
