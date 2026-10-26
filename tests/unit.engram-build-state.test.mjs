@@ -186,7 +186,151 @@ test("Unit engram build-state: end-to-end over a real document ingest", async ()
     // store's own directory function rather than a second copy of the convention.
     const dir = namespaceDir(root, NS);
     const listing = await fsp.readdir(dir);
-    assert.deepEqual(listing.sort(), ["build-state.json", "items.ndjson"]);
+    assert.deepEqual(listing.sort(), ["build-state.json", "items.ndjson", "namespace.json"]);
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+// --- namespaceDir collision safety ---
+
+import { ensureNamespace } from "../src/engram/store.js";
+
+test("Unit engram namespaceDir: distinct namespaces get distinct directories", async () => {
+  const root = await tmpRoot();
+  try {
+    const a = parseNamespace("project:a:b");
+    const b = parseNamespace("project:a_b");
+    const dirA = namespaceDir(root, a);
+    const dirB = namespaceDir(root, b);
+    assert.notEqual(dirA, dirB,
+      "project:a:b and project:a_b must not share a directory");
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Unit engram namespaceDir: case-differing namespaces get distinct directories (case-insensitive FS safety)", async () => {
+  const root = await tmpRoot();
+  try {
+    const a = parseNamespace("project:Alpha");
+    const b = parseNamespace("project:alpha");
+    const dirA = namespaceDir(root, a);
+    const dirB = namespaceDir(root, b);
+    assert.notEqual(dirA, dirB,
+      "project:Alpha and project:alpha must not share a directory");
+    // The stronger claim: even the final path component must differ when
+    // lowercased, so the directories cannot collide on a case-insensitive FS.
+    const baseA = path.basename(dirA).toLowerCase();
+    const baseB = path.basename(dirB).toLowerCase();
+    assert.notEqual(baseA, baseB,
+      `directory basenames must differ case-insensitively: ${path.basename(dirA)} vs ${path.basename(dirB)}`);
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Unit engram ensureNamespace: writes namespace.json sidecar on first access", async () => {
+  const root = await tmpRoot();
+  try {
+    const ns = parseNamespace("document:sidecar-test");
+    const dir = namespaceDir(root, ns);
+    await ensureNamespace(dir, ns);
+    const raw = await fsp.readFile(path.join(dir, "namespace.json"), "utf-8");
+    const parsed = JSON.parse(raw);
+    // kind is not stored in the sidecar (only raw is needed for ownership)
+    assert.equal(parsed.raw, "document:sidecar-test");
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Unit engram ensureNamespace: idempotent on repeated access", async () => {
+  const root = await tmpRoot();
+  try {
+    const ns = parseNamespace("document:idempotent");
+    const dir = namespaceDir(root, ns);
+    await ensureNamespace(dir, ns);
+    await ensureNamespace(dir, ns); // must not throw
+    const raw = await fsp.readFile(path.join(dir, "namespace.json"), "utf-8");
+    const parsed = JSON.parse(raw);
+    assert.equal(parsed.raw, "document:idempotent");
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Unit engram ensureNamespace: throws on cross-namespace collision", async () => {
+  const root = await tmpRoot();
+  try {
+    const a = parseNamespace("project:owner-a");
+    const b = parseNamespace("project:owner-b");
+    const dirA = namespaceDir(root, a);
+    const dirB = namespaceDir(root, b);
+    // These MUST be different dirs (sha256), but test the sidecar guard anyway:
+    // manually write a's sidecar into b's directory to simulate a collision
+    await ensureNamespace(dirA, a);
+    // Create dirB manually without sidecar, then write a's sidecar there
+    await fsp.mkdir(dirB, { recursive: true });
+    await fsp.writeFile(
+      path.join(dirB, "namespace.json"),
+      JSON.stringify({ kind: a.kind, raw: a.raw }) + "\n",
+      "utf-8",
+    );
+    // Now accessing dirB as namespace b must throw
+    await assert.rejects(
+      () => ensureNamespace(dirB, b),
+      /namespace dir collision/,
+    );
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Unit engram ensureNamespace: null sidecar is not treated as absent (refuses)", async () => {
+  const root = await tmpRoot();
+  try {
+    const ns = parseNamespace("document:null-sidecar");
+    const dir = namespaceDir(root, ns);
+    await fsp.mkdir(dir, { recursive: true });
+    await fsp.writeFile(path.join(dir, "namespace.json"), "null", "utf-8");
+    // null sidecar is corrupt — ensureNamespace should refuse, not overwrite
+    await assert.rejects(
+      () => ensureNamespace(dir, ns),
+      /corrupt namespace sidecar/,
+    );
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Unit engram ensureNamespace: throws on malformed sidecar (not an object)", async () => {
+  const root = await tmpRoot();
+  try {
+    const ns = parseNamespace("document:malformed-test");
+    const dir = namespaceDir(root, ns);
+    await fsp.mkdir(dir, { recursive: true });
+    await fsp.writeFile(path.join(dir, "namespace.json"), "true", "utf-8");
+    await assert.rejects(
+      () => ensureNamespace(dir, ns),
+      /corrupt namespace sidecar/,
+    );
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Unit engram ensureNamespace: throws on malformed sidecar (bad JSON)", async () => {
+  const root = await tmpRoot();
+  try {
+    const ns = parseNamespace("document:badjson-test");
+    const dir = namespaceDir(root, ns);
+    await fsp.mkdir(dir, { recursive: true });
+    await fsp.writeFile(path.join(dir, "namespace.json"), "{not json}", "utf-8");
+    await assert.rejects(
+      () => ensureNamespace(dir, ns),
+      /corrupt namespace sidecar/,
+    );
   } finally {
     await fsp.rm(root, { recursive: true, force: true });
   }
