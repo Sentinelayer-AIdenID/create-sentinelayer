@@ -51,6 +51,7 @@ test("the legacy data-plane list is exactly posting, replying, reading, message 
   assert.deepEqual([...LEGACY_DATA_PLANE_TOOLS].sort(), [
     "cli:session action",
     "cli:session comment",
+    "cli:session events",
     "cli:session history",
     "cli:session observe",
     "cli:session pins",

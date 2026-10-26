@@ -35,6 +35,7 @@ async function seedWorkspace(rootPath) {
 }
 
 async function runSessionCommand(args = []) {
+  const savedExitCode = process.exitCode;
   const program = new Command();
   program
     .name("sl")
@@ -52,6 +53,7 @@ async function runSessionCommand(args = []) {
     await program.parseAsync(args, { from: "user" });
   } finally {
     console.log = originalLog;
+    process.exitCode = savedExitCode;
   }
   return logs.join("\n").trim();
 }
@@ -3090,3 +3092,641 @@ test("Unit session read: --remote surfaces unacknowledged human asks from action
     await rm(tempRoot, { recursive: true, force: true });
   }
 });
+
+test("Unit session events: --remote returns one raw page, no local merge", async () => {
+  resetSessionSyncStateForTests();
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-session-events-remote-"));
+  const restoreEnv = installAuthEnv();
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  try {
+    await seedWorkspace(tempRoot);
+    const session = await createSession({ targetPath: tempRoot, sessionId: "events-test", ttlSeconds: 120 });
+    globalThis.fetch = async (url, options = {}) => {
+      calls.push({ url: String(url), options });
+      const textUrl = String(url);
+      if (textUrl.includes("/events/before?")) {
+        const urlParams = new URL(textUrl).searchParams;
+        const beforeSeq = Number(urlParams.get("beforeSequence") || 0);
+        if (beforeSeq === 53535) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              count: 3,
+              next_before_sequence: 53532,
+              has_more: true,
+              partial: false,
+              events: [
+                {
+                  event: "session_message",
+                  sessionId: session.sessionId,
+                  cursor: "c534",
+                  sequenceId: 53534,
+                  ts: "2026-10-26T04:15:00.000Z",
+                  agent: { id: "tester" },
+                  payload: { message: "event 53534" },
+                },
+                {
+                  event: "session_message",
+                  sessionId: session.sessionId,
+                  cursor: "c533",
+                  sequenceId: 53533,
+                  ts: "2026-10-26T04:14:00.000Z",
+                  agent: { id: "tester" },
+                  payload: { message: "event 53533" },
+                },
+                {
+                  event: "session_message",
+                  sessionId: session.sessionId,
+                  cursor: "c532",
+                  sequenceId: 53532,
+                  ts: "2026-10-26T04:13:00.000Z",
+                  agent: { id: "tester" },
+                  payload: { message: "event 53532" },
+                },
+              ],
+            }),
+          };
+        }
+        // default: empty page
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ count: 0, next_before_sequence: null, has_more: false, partial: false, events: [] }),
+        };
+      }
+      return { ok: false, status: 404, json: async () => ({}) };
+    };
+
+    // 1. --remote is required
+    await assert.rejects(
+      () =>
+        runSessionCommand([
+          "session", "events", session.sessionId,
+          "--path", tempRoot, "--json",
+        ]),
+      /session events requires --remote/,
+    );
+
+    // 2. JSON output with --before-sequence
+    const jsonOutput = await runSessionCommand([
+      "session", "events", session.sessionId,
+      "--remote", "--before-sequence", "53535", "--limit", "3",
+      "--path", tempRoot, "--json",
+    ]);
+    const payload = JSON.parse(jsonOutput);
+    assert.equal(payload.command, "session events");
+    assert.equal(payload.sessionId, session.sessionId);
+    assert.equal(payload.ok, true);
+    assert.equal(payload.beforeSequence, 53535);
+    assert.equal(payload.count, 3);
+    assert.equal(payload.nextBeforeSequence, 53532);
+    assert.equal(payload.events.length, 3);
+    assert.equal(payload.events[0].sequenceId, 53532);
+    assert.equal(payload.events[1].sequenceId, 53533);
+    assert.equal(payload.events[2].sequenceId, 53534);
+    assert.equal(payload.hasMore, true);
+    assert.equal(payload.partial, false);
+    assert.equal(payload.reason, "");
+
+    // 3. Plain-text output
+    const textOutput = await runSessionCommand([
+      "session", "events", session.sessionId,
+      "--remote", "--before-sequence", "53535", "--limit", "3",
+      "--path", tempRoot,
+    ]);
+    assert.match(textOutput, /#53534/);
+    assert.match(textOutput, /#53533/);
+    assert.match(textOutput, /#53532/);
+    assert.match(textOutput, /event 53534/);
+    assert.match(textOutput, /More events before sequence 53532/);
+
+    // 4. No --before-sequence means newest (no filter)
+    const newestOutput = await runSessionCommand([
+      "session", "events", session.sessionId,
+      "--remote", "--limit", "5",
+      "--path", tempRoot, "--json",
+    ]);
+    const newestPayload = JSON.parse(newestOutput);
+    assert.equal(newestPayload.command, "session events");
+    assert.equal(newestPayload.beforeSequence, null);
+    assert.equal(newestPayload.ok, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetSessionSyncStateForTests();
+    restoreEnv();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("Unit session events: rejects before-sequence <= 0", async () => {
+  resetSessionSyncStateForTests();
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-session-events-badseq-"));
+  const restoreEnv = installAuthEnv();
+  try {
+    await seedWorkspace(tempRoot);
+    await createSession({ targetPath: tempRoot, sessionId: "events-badseq", ttlSeconds: 120 });
+    await assert.rejects(
+      () =>
+        runSessionCommand([
+          "session", "events", "events-badseq",
+          "--remote", "--before-sequence", "0",
+          "--path", tempRoot, "--json",
+        ]),
+      /before-sequence must be a positive integer/,
+    );
+  } finally {
+    resetSessionSyncStateForTests();
+    restoreEnv();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("Unit session events: --no-auto-grant is accepted", async () => {
+  resetSessionSyncStateForTests();
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-session-events-noauto-"));
+  const restoreEnv = installAuthEnv();
+  const originalFetch = globalThis.fetch;
+  try {
+    await seedWorkspace(tempRoot);
+    const session = await createSession({ targetPath: tempRoot, sessionId: "events-noauto", ttlSeconds: 120 });
+    globalThis.fetch = async (_url, _options) => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ count: 0, next_before_sequence: null, has_more: false, partial: false, events: [] }),
+    });
+    const output = await runSessionCommand([
+      "session", "events", session.sessionId,
+      "--remote", "--no-auto-grant", "--limit", "5",
+      "--path", tempRoot, "--json",
+    ]);
+    const payload = JSON.parse(output);
+    assert.equal(payload.ok, true);
+    assert.equal(payload.command, "session events");
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetSessionSyncStateForTests();
+    restoreEnv();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("Unit session events: rejects --limit 0", async () => {
+  resetSessionSyncStateForTests();
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-session-events-limit0-"));
+  const restoreEnv = installAuthEnv();
+  try {
+    await seedWorkspace(tempRoot);
+    await createSession({ targetPath: tempRoot, sessionId: "events-limit0", ttlSeconds: 120 });
+    await assert.rejects(
+      () =>
+        runSessionCommand([
+          "session", "events", "events-limit0",
+          "--remote", "--limit", "0",
+          "--path", tempRoot, "--json",
+        ]),
+      /limit must be a positive integer/,
+    );
+  } finally {
+    resetSessionSyncStateForTests();
+    restoreEnv();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("Unit session events: rejects --limit 201", async () => {
+  resetSessionSyncStateForTests();
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-session-events-limit201-"));
+  const restoreEnv = installAuthEnv();
+  try {
+    await seedWorkspace(tempRoot);
+    await createSession({ targetPath: tempRoot, sessionId: "events-limit201", ttlSeconds: 120 });
+    await assert.rejects(
+      () =>
+        runSessionCommand([
+          "session", "events", "events-limit201",
+          "--remote", "--limit", "201",
+          "--path", tempRoot, "--json",
+        ]),
+      /limit must be between 1 and 200/,
+    );
+  } finally {
+    resetSessionSyncStateForTests();
+    restoreEnv();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("Unit session events: C2 page_contract_violation on event sequence >= beforeSequence", async () => {
+  resetSessionSyncStateForTests();
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-session-events-c2-seq-"));
+  const restoreEnv = installAuthEnv();
+  const originalFetch = globalThis.fetch;
+  try {
+    await seedWorkspace(tempRoot);
+    const session = await createSession({ targetPath: tempRoot, sessionId: "events-c2-seq", ttlSeconds: 120 });
+    globalThis.fetch = async (_url, _options) => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        count: 2,
+        next_before_sequence: 53533,
+        has_more: false,
+        partial: false,
+        events: [
+          { event: "session_message", sessionId: session.sessionId, sequenceId: 53536, ts: "2026-10-26T04:17:00.000Z", agent: { id: "tester" }, payload: { message: "bad" } },
+          { event: "session_message", sessionId: session.sessionId, sequenceId: 53534, ts: "2026-10-26T04:15:00.000Z", agent: { id: "tester" }, payload: { message: "ok" } },
+        ],
+      }),
+    });
+    const output = await runSessionCommand([
+      "session", "events", session.sessionId,
+      "--remote", "--before-sequence", "53535", "--limit", "5",
+      "--path", tempRoot, "--json",
+    ]);
+    const payload = JSON.parse(output);
+    assert.equal(payload.ok, false);
+    assert.equal(payload.reason, "page_contract_violation");
+    assert.equal(payload.contractViolation, "event_sequence_not_before_requested");
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetSessionSyncStateForTests();
+    restoreEnv();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("Unit session events: C2 page_contract_violation on duplicate sequence ids", async () => {
+  resetSessionSyncStateForTests();
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-session-events-c2-dup-"));
+  const restoreEnv = installAuthEnv();
+  const originalFetch = globalThis.fetch;
+  try {
+    await seedWorkspace(tempRoot);
+    const session = await createSession({ targetPath: tempRoot, sessionId: "events-c2-dup", ttlSeconds: 120 });
+    globalThis.fetch = async (_url, _options) => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        count: 2,
+        next_before_sequence: 53532,
+        has_more: false,
+        partial: false,
+        events: [
+          { event: "session_message", sessionId: session.sessionId, sequenceId: 53534, ts: "2026-10-26T04:16:00.000Z", agent: { id: "tester" }, payload: { message: "dup1" } },
+          { event: "session_message", sessionId: session.sessionId, sequenceId: 53534, ts: "2026-10-26T04:15:00.000Z", agent: { id: "tester" }, payload: { message: "dup2" } },
+        ],
+      }),
+    });
+    const output = await runSessionCommand([
+      "session", "events", session.sessionId,
+      "--remote", "--before-sequence", "53535", "--limit", "5",
+      "--path", tempRoot, "--json",
+    ]);
+    const payload = JSON.parse(output);
+    assert.equal(payload.ok, false);
+    assert.equal(payload.reason, "page_contract_violation");
+    assert.equal(payload.contractViolation, "duplicate_event_sequence");
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetSessionSyncStateForTests();
+    restoreEnv();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("Unit session events: C2 page_contract_violation on session id mismatch", async () => {
+  resetSessionSyncStateForTests();
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-session-events-c2-sid-"));
+  const restoreEnv = installAuthEnv();
+  const originalFetch = globalThis.fetch;
+  try {
+    await seedWorkspace(tempRoot);
+    const session = await createSession({ targetPath: tempRoot, sessionId: "events-c2-sid", ttlSeconds: 120 });
+    globalThis.fetch = async (_url, _options) => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        count: 1,
+        next_before_sequence: 53534,
+        has_more: false,
+        partial: false,
+        events: [
+          { event: "session_message", sessionId: "other-session", sequenceId: 53534, ts: "2026-10-26T04:15:00.000Z", agent: { id: "tester" }, payload: { message: "wrong" } },
+        ],
+      }),
+    });
+    const output = await runSessionCommand([
+      "session", "events", session.sessionId,
+      "--remote", "--before-sequence", "53535", "--limit", "5",
+      "--path", tempRoot, "--json",
+    ]);
+    const payload = JSON.parse(output);
+    assert.equal(payload.ok, false);
+    assert.equal(payload.reason, "page_contract_violation");
+    assert.equal(payload.contractViolation, "event_session_id_mismatch");
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetSessionSyncStateForTests();
+    restoreEnv();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("Unit session events: C2 page_contract_violation on nextBeforeSequence >= beforeSequence", async () => {
+  resetSessionSyncStateForTests();
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-session-events-c2-next-"));
+  const restoreEnv = installAuthEnv();
+  const originalFetch = globalThis.fetch;
+  try {
+    await seedWorkspace(tempRoot);
+    const session = await createSession({ targetPath: tempRoot, sessionId: "events-c2-next", ttlSeconds: 120 });
+    globalThis.fetch = async (_url, _options) => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        count: 1,
+        next_before_sequence: 53536,
+        has_more: false,
+        partial: false,
+        events: [
+          { event: "session_message", sessionId: session.sessionId, sequenceId: 53534, ts: "2026-10-26T04:15:00.000Z", agent: { id: "tester" }, payload: { message: "ok" } },
+        ],
+      }),
+    });
+    const output = await runSessionCommand([
+      "session", "events", session.sessionId,
+      "--remote", "--before-sequence", "53535", "--limit", "5",
+      "--path", tempRoot, "--json",
+    ]);
+    const payload = JSON.parse(output);
+    assert.equal(payload.ok, false);
+    assert.equal(payload.reason, "page_contract_violation");
+    assert.equal(payload.contractViolation, "next_before_sequence_not_less_than_requested");
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetSessionSyncStateForTests();
+    restoreEnv();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("Unit session events: C2 page_contract_violation on non-positive sequence id", async () => {
+  resetSessionSyncStateForTests();
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-session-events-c2-pos-"));
+  const restoreEnv = installAuthEnv();
+  const originalFetch = globalThis.fetch;
+  try {
+    await seedWorkspace(tempRoot);
+    const session = await createSession({ targetPath: tempRoot, sessionId: "events-c2-pos", ttlSeconds: 120 });
+    globalThis.fetch = async (_url, _options) => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        count: 1,
+        next_before_sequence: 53534,
+        has_more: false,
+        partial: false,
+        events: [
+          { event: "session_message", sessionId: session.sessionId, sequenceId: -1, ts: "2026-10-26T04:15:00.000Z", agent: { id: "tester" }, payload: { message: "bad" } },
+        ],
+      }),
+    });
+    const output = await runSessionCommand([
+      "session", "events", session.sessionId,
+      "--remote", "--before-sequence", "53535", "--limit", "5",
+      "--path", tempRoot, "--json",
+    ]);
+    const payload = JSON.parse(output);
+    assert.equal(payload.ok, false);
+    assert.equal(payload.reason, "page_contract_violation");
+    assert.equal(payload.contractViolation, "event_sequence_not_safe_positive_integer");
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetSessionSyncStateForTests();
+    restoreEnv();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("Unit session events: auth failure exits non-zero in --json", async () => {
+  resetSessionSyncStateForTests();
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-session-events-authfail-"));
+  // No installAuthEnv — no token set, so auth will fail
+  try {
+    await seedWorkspace(tempRoot);
+    await createSession({ targetPath: tempRoot, sessionId: "events-authfail", ttlSeconds: 120 });
+    // We expect this to fail because there's no auth
+    await assert.rejects(
+      () =>
+        runSessionCommand([
+          "session", "events", "events-authfail",
+          "--remote", "--limit", "5",
+          "--path", tempRoot, "--json",
+        ]),
+      /authentication/,
+    );
+  } finally {
+    resetSessionSyncStateForTests();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("Unit session events: ascending order by sequence", async () => {
+  resetSessionSyncStateForTests();
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-session-events-asc-"));
+  const restoreEnv = installAuthEnv();
+  const originalFetch = globalThis.fetch;
+  try {
+    await seedWorkspace(tempRoot);
+    const session = await createSession({ targetPath: tempRoot, sessionId: "events-asc", ttlSeconds: 120 });
+    globalThis.fetch = async (_url, _options) => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        count: 3,
+        next_before_sequence: 53532,
+        has_more: false,
+        partial: false,
+        events: [
+          { event: "session_message", sessionId: session.sessionId, sequenceId: 53534, ts: "2026-10-26T04:17:00.000Z", agent: { id: "tester" }, payload: { message: "c" } },
+          { event: "session_message", sessionId: session.sessionId, sequenceId: 53532, ts: "2026-10-26T04:15:00.000Z", agent: { id: "tester" }, payload: { message: "a" } },
+          { event: "session_message", sessionId: session.sessionId, sequenceId: 53533, ts: "2026-10-26T04:16:00.000Z", agent: { id: "tester" }, payload: { message: "b" } },
+        ],
+      }),
+    });
+    const output = await runSessionCommand([
+      "session", "events", session.sessionId,
+      "--remote", "--before-sequence", "53535", "--limit", "5",
+      "--path", tempRoot, "--json",
+    ]);
+    const payload = JSON.parse(output);
+    assert.equal(payload.ok, true);
+    assert.equal(payload.events.length, 3);
+    // chronologically ascending = oldest first
+    assert.equal(payload.events[0].sequenceId, 53532);
+    assert.equal(payload.events[1].sequenceId, 53533);
+    assert.equal(payload.events[2].sequenceId, 53534);
+    assert.equal(payload.hasMore, false);
+    assert.equal(payload.partial, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetSessionSyncStateForTests();
+    restoreEnv();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("Unit session events: C6 missing has_more gives page_contract_violation", async () => {
+  resetSessionSyncStateForTests();
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-session-events-c6-nohasmore-"));
+  const restoreEnv = installAuthEnv();
+  const originalFetch = globalThis.fetch;
+  try {
+    await seedWorkspace(tempRoot);
+    const session = await createSession({ targetPath: tempRoot, sessionId: "events-c6-nohm", ttlSeconds: 120 });
+    globalThis.fetch = async (_url, _options) => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        count: 1,
+        next_before_sequence: 53532,
+        // has_more intentionally omitted
+        partial: false,
+        events: [
+          { event: "session_message", sessionId: session.sessionId, sequenceId: 53534, ts: "2026-10-26T04:17:00.000Z", agent: { id: "tester" }, payload: { message: "hi" } },
+        ],
+      }),
+    });
+    const output = await runSessionCommand([
+      "session", "events", session.sessionId,
+      "--remote", "--before-sequence", "53535", "--limit", "5",
+      "--path", tempRoot, "--json",
+    ]);
+    const payload = JSON.parse(output);
+    assert.equal(payload.ok, false);
+    assert.equal(payload.reason, "page_contract_violation");
+    assert.equal(payload.contractViolation, "page_coverage_fields_missing");
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetSessionSyncStateForTests();
+    restoreEnv();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("Unit session events: C6 missing partial gives page_contract_violation", async () => {
+  resetSessionSyncStateForTests();
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-session-events-c6-nopartial-"));
+  const restoreEnv = installAuthEnv();
+  const originalFetch = globalThis.fetch;
+  try {
+    await seedWorkspace(tempRoot);
+    const session = await createSession({ targetPath: tempRoot, sessionId: "events-c6-np", ttlSeconds: 120 });
+    globalThis.fetch = async (_url, _options) => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        count: 1,
+        next_before_sequence: 53532,
+        has_more: false,
+        // partial intentionally omitted
+        events: [
+          { event: "session_message", sessionId: session.sessionId, sequenceId: 53534, ts: "2026-10-26T04:17:00.000Z", agent: { id: "tester" }, payload: { message: "hi" } },
+        ],
+      }),
+    });
+    const output = await runSessionCommand([
+      "session", "events", session.sessionId,
+      "--remote", "--before-sequence", "53535", "--limit", "5",
+      "--path", tempRoot, "--json",
+    ]);
+    const payload = JSON.parse(output);
+    assert.equal(payload.ok, false);
+    assert.equal(payload.reason, "page_contract_violation");
+    assert.equal(payload.contractViolation, "page_coverage_fields_missing");
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetSessionSyncStateForTests();
+    restoreEnv();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("Unit session events: C6 partial:true gives page_contract_violation", async () => {
+  resetSessionSyncStateForTests();
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-session-events-c6-partialtrue-"));
+  const restoreEnv = installAuthEnv();
+  const originalFetch = globalThis.fetch;
+  try {
+    await seedWorkspace(tempRoot);
+    const session = await createSession({ targetPath: tempRoot, sessionId: "events-c6-pt", ttlSeconds: 120 });
+    globalThis.fetch = async (_url, _options) => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        count: 1,
+        next_before_sequence: 53532,
+        has_more: false,
+        partial: true,
+        events: [
+          { event: "session_message", sessionId: session.sessionId, sequenceId: 53534, ts: "2026-10-26T04:17:00.000Z", agent: { id: "tester" }, payload: { message: "hi" } },
+        ],
+      }),
+    });
+    const output = await runSessionCommand([
+      "session", "events", session.sessionId,
+      "--remote", "--before-sequence", "53535", "--limit", "5",
+      "--path", tempRoot, "--json",
+    ]);
+    const payload = JSON.parse(output);
+    assert.equal(payload.ok, false);
+    assert.equal(payload.reason, "page_contract_violation");
+    assert.equal(payload.contractViolation, "page_partial");
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetSessionSyncStateForTests();
+    restoreEnv();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("Unit session events: C6 explicit has_more:false partial:false passes contract", async () => {
+  resetSessionSyncStateForTests();
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-session-events-c6-ok-"));
+  const restoreEnv = installAuthEnv();
+  const originalFetch = globalThis.fetch;
+  try {
+    await seedWorkspace(tempRoot);
+    const session = await createSession({ targetPath: tempRoot, sessionId: "events-c6-ok", ttlSeconds: 120 });
+    globalThis.fetch = async (_url, _options) => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        count: 1,
+        next_before_sequence: 53532,
+        has_more: false,
+        partial: false,
+        events: [
+          { event: "session_message", sessionId: session.sessionId, sequenceId: 53534, ts: "2026-10-26T04:17:00.000Z", agent: { id: "tester" }, payload: { message: "hi" } },
+        ],
+      }),
+    });
+    const output = await runSessionCommand([
+      "session", "events", session.sessionId,
+      "--remote", "--before-sequence", "53535", "--limit", "5",
+      "--path", tempRoot, "--json",
+    ]);
+    const payload = JSON.parse(output);
+    assert.equal(payload.ok, true);
+    assert.equal(payload.hasMore, false);
+    assert.equal(payload.partial, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetSessionSyncStateForTests();
+    restoreEnv();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+

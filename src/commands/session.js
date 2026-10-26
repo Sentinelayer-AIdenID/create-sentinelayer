@@ -6883,6 +6883,152 @@ export function registerSessionCommand(program) {
     });
 
   session
+    .command("events <sessionId>")
+    .description("Return one raw, verifiable page of session events from the remote API (ascending by sequence, no local merge). Use --before-sequence to walk backwards.")
+    .option("--remote", "Fetch from the SentinelLayer API (required; this command is remote-only)")
+    .option("--before-sequence <n>", "Return events older than this sequence id (omit for newest)")
+    .option("--limit <n>", "Maximum events (1-200, default 50)", "50")
+    .option("--path <path>", "Workspace path for the session", ".")
+    .option("--no-auto-grant", "Accepted, has no effect (session events is read-only; reads never auto-grant)")
+    .option("--json", "Emit machine-readable output")
+    .action(async (sessionId, options, command) => {
+      const normalizedSessionId = normalizeString(sessionId);
+      if (!normalizedSessionId) {
+        throw new Error("session id is required.");
+      }
+      if (!options.remote) {
+        throw new Error("session events requires --remote (this command is remote-only; use 'session read' for local streams).");
+      }
+      const targetPath = path.resolve(process.cwd(), String(options.path || "."));
+      const beforeSequence = parseOptionalPositiveInteger(options.beforeSequence, "before-sequence");
+      const rawLimit = parsePositiveInteger(options.limit, "limit", 50);
+      if (rawLimit > 200) {
+        throw new Error("limit must be between 1 and 200.");
+      }
+      const limit = Math.max(1, rawLimit);
+      const emitJson = shouldEmitJson(options, command);
+
+      const authSession = await resolveActiveAuthSession({
+        cwd: targetPath,
+        env: process.env,
+        autoRotate: false,
+      });
+      if (!isAuthenticated(authSession)) {
+        throw new Error(`Remote session events requires authentication. Run \`${authLoginHint()}\` first.`);
+      }
+
+      const result = await pollSessionEventsBefore(normalizedSessionId, {
+        targetPath,
+        beforeSequence,
+        limit,
+        timeoutMs: 15_000,
+      });
+
+      const contractViolation = pageContractViolation(normalizedSessionId, beforeSequence, result);
+
+      const payload = {
+        command: "session events",
+        targetPath,
+        sessionId: normalizedSessionId,
+        ok: result.ok && !contractViolation,
+        beforeSequence: beforeSequence || null,
+        count: Array.isArray(result.events) ? result.events.length : 0,
+        nextBeforeSequence: result.beforeSequence || null,
+        hasMore: Boolean(result.hasMore),
+        partial: Boolean(result.partial),
+        events: Array.isArray(result.events) ? result.events : [],
+        reason: contractViolation ? "page_contract_violation" : (result.reason || ""),
+        contractViolation: contractViolation || undefined,
+      };
+
+      // C3: non-zero exit on failure in --json mode
+      if (emitJson && !payload.ok) {
+        process.exitCode = 1;
+        console.log(JSON.stringify(payload, null, 2));
+        return;
+      }
+
+      if (emitJson) {
+        console.log(JSON.stringify(payload, null, 2));
+        return;
+      }
+      if (!payload.ok) {
+        if (contractViolation) {
+          throw new Error(`Session events page contract violated: ${contractViolation}`);
+        }
+        throw new Error(`Session events fetch failed (${result.reason || "unknown"}).`);
+      }
+      for (const event of result.events || []) {
+        const seq = Number(event.sequenceId || event.sequence_id || 0);
+        const seqLabel = Number.isFinite(seq) && seq > 0 ? `#${Math.floor(seq)}` : "";
+        console.log(`${seqLabel} ${formatEventLine(event)}`);
+      }
+      if (result.beforeSequence && result.events && result.events.length >= limit) {
+        console.log(pc.gray(`More events before sequence ${result.beforeSequence}.`));
+      }
+    });
+
+
+function pageContractViolation(requestedSessionId, beforeSequence, result) {
+  if (!result || !result.ok) return null;
+  const events = Array.isArray(result.events) ? result.events : [];
+
+  // C6: coverage fields must be present booleans; absence is fail-closed
+  if (typeof result.hasMore !== "boolean") {
+    return "page_coverage_fields_missing";
+  }
+  if (typeof result.partial !== "boolean") {
+    return "page_coverage_fields_missing";
+  }
+
+  // C6: the bridge cannot use a partial page
+  if (result.partial === true) {
+    return "page_partial";
+  }
+
+  // C2: no events is not a violation (empty page is valid)
+  if (events.length === 0) return null;
+
+  const seen = new Set();
+  for (const event of events) {
+    const seq = eventSequenceNumber(event);
+
+    // sequenceId is not a safe positive integer
+    if (!Number.isSafeInteger(seq) || seq <= 0) {
+      return "event_sequence_not_safe_positive_integer";
+    }
+
+    // event's sequenceId >= beforeSequence
+    if (Number.isFinite(beforeSequence) && seq >= beforeSequence) {
+      return "event_sequence_not_before_requested";
+    }
+
+    // event carries a sessionId other than the one requested
+    const eventSessionId = normalizeString(event?.sessionId ?? event?.session_id);
+    if (eventSessionId && eventSessionId !== requestedSessionId) {
+      return "event_session_id_mismatch";
+    }
+
+    // duplicate sequence ids
+    if (seen.has(seq)) {
+      return "duplicate_event_sequence";
+    }
+    seen.add(seq);
+  }
+
+  // nextBeforeSequence is not < beforeSequence
+  if (Number.isFinite(beforeSequence)) {
+    const nextBefore = result.beforeSequence;
+    if (Number.isFinite(nextBefore) && nextBefore >= beforeSequence) {
+      return "next_before_sequence_not_less_than_requested";
+    }
+  }
+
+  return null;
+}
+
+
+  session
     .command("recall <need>")
     .description(
       "Hydrate a session by RETRIEVAL, not full-tail replay: return the top-K relevant memories (dense int8 exact-scan + BM25 + RRF + graph diffusion + ACT-R) each with a one-line provenance path (ENGRAM §1)",
