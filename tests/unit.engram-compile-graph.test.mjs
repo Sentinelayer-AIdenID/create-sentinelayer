@@ -1,4 +1,4 @@
-import './setup-env.mjs';
+import "./setup-env.mjs";
 // unit.engram-compile-graph.test.mjs — EW05 compile-graph tests.
 // Drives compile-graph.js and graph-store.js directly.
 
