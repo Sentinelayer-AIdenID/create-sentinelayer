@@ -85,34 +85,36 @@ function entitySearchText(entity, assertionsForEntity) {
     if (pred && !["contains", "describes", "references", "variant_of", "same_as_candidate"].includes(pred)) {
       parts.push(pred);
     }
+    // Safely extract string values from any JSON-compatible assertion object.
     const obj = assertion.object;
     if (typeof obj === "string") {
       parts.push(normalizeString(obj));
-    } else if (obj && typeof obj === "object" && !Array.isArray(obj)) {
-      for (const val of Object.values(obj)) {
-        if (typeof val === "string") parts.push(normalizeString(val));
+    } else if (typeof obj === "number" || typeof obj === "boolean") {
+      parts.push(String(obj));
+    } else if (obj !== null && typeof obj === "object") {
+      if (Array.isArray(obj)) {
+        for (const item of obj) {
+          if (typeof item === "string") parts.push(normalizeString(item));
+          else if (typeof item === "number" || typeof item === "boolean") parts.push(String(item));
+        }
+      } else {
+        for (const val of Object.values(obj)) {
+          if (typeof val === "string") parts.push(normalizeString(val));
+          else if (typeof val === "number" || typeof val === "boolean") parts.push(String(val));
+        }
       }
     }
   }
 
   // Entity attributes (SKUs, prices, etc.)
-  if (entity.attributes && typeof entity.attributes === "object") {
+  if (entity.attributes !== null && entity.attributes !== undefined && typeof entity.attributes === "object") {
     for (const val of Object.values(entity.attributes)) {
       if (typeof val === "string") parts.push(normalizeString(val));
-      else if (typeof val === "number") parts.push(String(val));
+      else if (typeof val === "number" || typeof val === "boolean") parts.push(String(val));
     }
   }
 
   return parts.filter(Boolean).join(" · ");
-}
-
-/**
- * Collect assertions that reference a specific entity (as subject).
- */
-function assertionsForEntityId(assertions, entityId) {
-  return (assertions || []).filter(
-    (a) => normalizeString(a.subject) === entityId,
-  );
 }
 
 /**
