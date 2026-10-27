@@ -399,29 +399,52 @@ test('EW05 R03 traversal: links form navigable adjacency', async () => {
 // R09 source reconciliation: contradictions retained
 // ---------------------------------------------------------------------------
 
-test('EW05 R09 reconciliation: contradictions are detected and retained', async () => {
+test('EW05 R09 reconciliation: real contradictions are detected with correct content', async () => {
   await withGraphStore(async (store) => {
     const ns = parseNamespace(TENANT);
     const { contentHash: _ch, ...snapBase } = VALID_SOURCE_SNAPSHOT;
 
-    const snap = { ...snapBase, sourceId: 'src-with-links', tenantScope: TENANT, sourceType: 'ingest' };
-    await store.writeSourceSnapshot(CALLER, ns, snap, Buffer.from('<html>Links</html>'));
+    const productName = 'Widget Pro';
+
+    // Two independent sources describing the same product differently
+    const snapA = { ...snapBase, sourceId: 'src-vendor-a', tenantScope: TENANT, sourceType: 'ingest' };
+    const snapB = { ...snapBase, sourceId: 'src-vendor-b', tenantScope: TENANT, sourceType: 'ingest' };
+
+    await store.writeSourceSnapshot(CALLER, ns, snapA, Buffer.from('<html>Vendor A</html>'));
+    await store.writeSourceSnapshot(CALLER, ns, snapB, Buffer.from('<html>Vendor B</html>'));
+
+    // Per-snapshot facts provider: each source describes the same product differently
+    const perSourceFacts = async (snap) => {
+      if (snap.sourceId === 'src-vendor-a') {
+        return {
+          canonical: 'https://example.com/vendor-a',
+          jsonLd: [{ '@type': 'Product', name: productName, description: 'Premium widget with gold finish' }],
+        };
+      }
+      return {
+        canonical: 'https://example.com/vendor-b',
+        jsonLd: [{ '@type': 'Product', name: productName, description: 'Basic widget, plastic body' }],
+      };
+    };
 
     const result = await compileGraph({
       graphStore: store, caller: CALLER, namespace: ns,
-      factsProvider: mockFactsProvider({
-        canonical: 'https://example.com/with-refs',
-        links: [
-          { href: 'https://example.com/target-1', text: 'T1' },
-          { href: 'https://example.com/target-2', text: 'T2' },
-        ],
-      }),
+      factsProvider: perSourceFacts,
     });
 
-    // contradictions field should exist
+    // contradictions field should exist and contain real conflicts
     assert.ok(Array.isArray(result.contradictions), 'contradictions should be an array');
+    assert.ok(result.contradictions.length > 0, 'should detect at least one contradiction');
+    const c = result.contradictions[0];
+    assert.ok(c.key, 'contradiction should have a key');
+    assert.ok(Array.isArray(c.assertionIds), 'contradiction should list assertionIds');
+    assert.ok(Array.isArray(c.sourceIds), 'contradiction should list sourceIds');
+    assert.ok(c.sourceIds.length >= 2, 'contradiction should involve at least 2 sources');
+    assert.ok(Array.isArray(c.objects), 'contradiction should list conflicting objects');
+    assert.ok(c.objects.length >= 2, 'contradiction should have at least 2 conflicting values');
   });
 });
+
 
 // ---------------------------------------------------------------------------
 // Top professional: candidate generations
@@ -575,5 +598,58 @@ test('EW05 safety: non-object heading entries are skipped', async () => {
       (a) => a.predicate === EW05_PREDICATES.CONTAINS,
     );
     assert.equal(headingAssertions.length, 1, 'only valid heading objects should produce assertions');
+  });
+
+});
+// ---------------------------------------------------------------------------
+// Per-attribute merge: conflicting source attributes are retained
+// ---------------------------------------------------------------------------
+
+test('EW05 merge: per-attribute merge preserves conflicting source attributes', async () => {
+  await withGraphStore(async (store) => {
+    const ns = parseNamespace(TENANT);
+    const { contentHash: _ch, ...snapBase } = VALID_SOURCE_SNAPSHOT;
+
+    const productName = 'MergedWidget';
+
+    const snapA = { ...snapBase, sourceId: 'src-merge-a', tenantScope: TENANT, sourceType: 'ingest' };
+    const snapB = { ...snapBase, sourceId: 'src-merge-b', tenantScope: TENANT, sourceType: 'ingest' };
+
+    await store.writeSourceSnapshot(CALLER, ns, snapA, Buffer.from('<html>Merge A</html>'));
+    await store.writeSourceSnapshot(CALLER, ns, snapB, Buffer.from('<html>Merge B</html>'));
+
+    const perSourceFacts = async (snap) => {
+      if (snap.sourceId === 'src-merge-a') {
+        return {
+          canonical: 'https://example.com/merge-a',
+          jsonLd: [{ '@type': 'Product', name: productName, description: 'Desc A', sku: 'SKU-A' }],
+        };
+      }
+      return {
+        canonical: 'https://example.com/merge-b',
+        jsonLd: [{ '@type': 'Product', name: productName, description: 'Desc B', color: 'blue' }],
+      };
+    };
+
+    const result = await compileGraph({
+      graphStore: store, caller: CALLER, namespace: ns,
+      factsProvider: perSourceFacts,
+    });
+
+    // Find the merged product entity
+    const productEntities = result.entities.filter((e) => e.type === 'product');
+    assert.equal(productEntities.length, 1, 'product should be deduplicated by deterministic id');
+
+    const product = productEntities[0];
+
+    // Per-attribute merge should preserve that the description came from both sources
+    // and the non-conflicting attributes (sku, color) should both be present
+    assert.ok(product.attributes, 'entity should have attributes');
+    // description is contested across two sources
+    const descSources = product.attributes.description;
+    assert.ok(descSources !== undefined, 'description attribute should exist');
+    // Non-conflicting attributes from each source
+    assert.ok(product.attributes.sku !== undefined, 'sku from source A should be preserved');
+    assert.ok(product.attributes.color !== undefined, 'color from source B should be preserved');
   });
 });

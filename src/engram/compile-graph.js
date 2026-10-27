@@ -224,6 +224,17 @@ function extractAssertions(tenantScope, sourceId, sourceVersion, capturedAt, fac
     }
   }
 
+  // Entity attribute assertions: create assertions for each entity attribute
+  // so that conflicting attribute values from different sources are detectable.
+  for (const entity of entities) {
+    if (!entity.id || !entity.attributes) continue;
+    for (const [attrKey, attrVal] of Object.entries(entity.attributes)) {
+      if (attrVal === undefined || attrVal === null) continue;
+      const attrPredicate = `${EW05_PREDICATES.DESCRIBES}_${attrKey}`;
+      add(entity.id, attrPredicate, String(attrVal).slice(0, 1000), { provenance: 'observed' });
+    }
+  }
+
   for (const heading of facts.headings || []) {
     if (pageId && heading && typeof heading === 'object' && heading !== null && typeof heading.text === 'string' && heading.text) {
       // Heading level encoded in text to avoid numeric type issues
@@ -262,10 +273,47 @@ function mergeEntities(entityLists) {
       if (!existing) {
         map.set(entity.id, { ...entity });
       } else {
+        // Per-attribute merge: non-attribute fields follow provenance rank,
+        // attributes are merged per-key preserving conflicting source values.
         const existingRank = provenanceRank(existing.provenance);
         const newRank = provenanceRank(entity.provenance);
+
+        // Merge label: keep higher-provenance label, fall back to existing
+        if (!existing.label && entity.label) {
+          existing.label = entity.label;
+        } else if (newRank >= existingRank && entity.label) {
+          existing.label = entity.label;
+        }
+
+        // If new has higher provenance, update scalar fields (type, provenance)
         if (newRank >= existingRank) {
-          map.set(entity.id, { ...entity });
+          existing.type = entity.type;
+          existing.provenance = entity.provenance;
+        }
+
+        // Per-attribute merge: merge attributes objects by key
+        if (entity.attributes && Object.keys(entity.attributes).length > 0) {
+          if (!existing.attributes) existing.attributes = {};
+          for (const [attrKey, attrVal] of Object.entries(entity.attributes)) {
+            if (attrVal === undefined || attrVal === null) continue;
+            if (!(attrKey in existing.attributes)) {
+              // New attribute: adopt it
+              existing.attributes[attrKey] = attrVal;
+            } else if (existing.attributes[attrKey] !== attrVal) {
+              // Conflicting value: retain both as an array of source-attributed values
+              const prev = existing.attributes[attrKey];
+              if (Array.isArray(prev)) {
+                if (!prev.some((v) => typeof v === 'object' && v.value === attrVal)) {
+                  prev.push({ value: attrVal, provenance: entity.provenance, sourceId: entity.sourceId });
+                }
+              } else {
+                existing.attributes[attrKey] = [
+                  { value: prev, provenance: existing.provenance, sourceId: existing.sourceId },
+                  { value: attrVal, provenance: entity.provenance, sourceId: entity.sourceId },
+                ];
+              }
+            }
+          }
         }
       }
     }
