@@ -11,6 +11,7 @@
 
 // Money contract (§ step-9, step-10)
 export {
+  KNOWN_CURRENCIES,
   moneySchema,
   migrateLegacyMoney,
   minorUnitsSchema,
@@ -22,6 +23,7 @@ export {
 
 // Graph contract (R02 graph, R09 truth)
 export {
+  MONEY_FIELD_NAMES,
   PROVENANCE_CLASSES,
   SCHEMA_VALIDITY,
   MODEL_CONFIDENCE,
