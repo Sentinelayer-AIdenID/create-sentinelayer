@@ -5,6 +5,7 @@
  * authoritative priority resolution, revalidation gate (TOCTOU guard),
  * source outage handling, and commerce context.
  */
+import "./setup-env.mjs";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
