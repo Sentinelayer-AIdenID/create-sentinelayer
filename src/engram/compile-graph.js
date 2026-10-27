@@ -196,8 +196,9 @@ function extractAssertions(tenantScope, sourceId, sourceVersion, capturedAt, fac
     });
   };
 
-  const pageId = facts.canonical
-    ? pageEntityId(tenantScope, facts.canonical)
+  const canonicalStr = typeof facts.canonical === 'string' ? facts.canonical : null;
+  const pageId = canonicalStr
+    ? pageEntityId(tenantScope, canonicalStr)
     : pageEntityId(tenantScope, sourceId);
 
   if (pageId) {
@@ -224,7 +225,7 @@ function extractAssertions(tenantScope, sourceId, sourceVersion, capturedAt, fac
   }
 
   for (const heading of facts.headings || []) {
-    if (pageId && heading.text) {
+    if (pageId && heading && typeof heading.text === 'string' && heading.text) {
       // Heading level encoded in text to avoid numeric type issues
       const headingLevel = `h${heading.level}`;
       add(pageId, EW05_PREDICATES.CONTAINS, {
@@ -385,8 +386,9 @@ async function extractFromSnapshots(snapshots, factsProvider) {
       snap.tenantScope, snap.sourceId, snap.version, snap.capturedAt, facts, entities,
     );
 
-    const pageId = facts?.canonical
-      ? pageEntityId(snap.tenantScope, facts.canonical)
+    const canonicalStr2 = facts && typeof facts.canonical === 'string' ? facts.canonical : null;
+    const pageId = canonicalStr2
+      ? pageEntityId(snap.tenantScope, canonicalStr2)
       : pageEntityId(snap.tenantScope, snap.sourceId);
 
     // DESCRIBES links: page → entity
