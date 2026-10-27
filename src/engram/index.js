@@ -7,7 +7,7 @@
  * store adapter (see the CLI wiring in src/mcp/session-stdio-server.js).
  */
 
-export { createStore, itemId } from "./store.js";
+export { createStore, itemId, LegacyStorageError } from "./store.js";
 export {
   parseNamespace,
   authorize,
@@ -47,6 +47,8 @@ import { ingestDocumentIntoNamespace } from "./ingest-document.js";
 import { createMemoryTools } from "./tools.js";
 import { createEmbedder } from "../session/recall/embedder.js";
 
+const DEFAULT_CONSENT = Symbol("default consent");
+
 /**
  * Convenience factory: wire a default CLI-local MaaS instance (permissive-local
  * consent, stub governance, hash-projection embedder) over a store. Callers
@@ -61,22 +63,37 @@ import { createEmbedder } from "../session/recall/embedder.js";
  * @param {object} [options.renderer]
  * @returns {{tools: object, store: object}}
  */
-export function createMemoryService({
-  storeRoot,
-  adapters = {},
-  embedder = createEmbedder(),
-  consent = createLocalConsent(),
-  governance = createGovernance(),
-  renderer = null,
-  isAuthorizedForSealed,
-} = {}) {
-  const store = createStore({ storeRoot, adapters });
+export function createMemoryService(options = {}) {
+  const {
+    storeRoot,
+    adapters = {},
+    embedder = createEmbedder(),
+    consent: rawConsent = DEFAULT_CONSENT,
+    governance = createGovernance(),
+    renderer = null,
+    isAuthorizedForSealed,
+  } = options;
+
+  // Detect whether the caller injected a consent.  When options.consent is
+  // undefined the rawConsent is the DEFAULT_CONSENT sentinel; any other
+  // value (including createLocalConsent() passed explicitly) means the
+  // caller injected one.
+  const callerInjectedConsent = rawConsent !== DEFAULT_CONSENT;
+  const consent = callerInjectedConsent ? rawConsent : createLocalConsent();
+
+  // Default local consent: use "first-claim" to migrate legacy dirs
+  // safely (one user's own namespaces, no cross-tenant risk).
+  // Injected (non-default) consent: "refuse" — never trust legacy dirs
+  // when a scoped or hosted consent is in play.
+  const legacyLossyDirs = callerInjectedConsent ? "refuse" : "first-claim";
+
+  const store = createStore({ storeRoot, adapters, legacyLossyDirs });
   // Wired by DEFAULT, not opt-in: a readiness gate nobody injects is a comment.
-  const buildState = createBuildState({ storeRoot });
+  const buildState = createBuildState({ storeRoot, legacyLossyDirs });
   const tools = createMemoryTools({ store, consent, governance, embedder, renderer, isAuthorizedForSealed, buildState });
   // Exposed on the service so the lifecycle cannot be bypassed by a caller who has a
   // store but forgets the buildState -- the deps are bound here, once.
-  const ingestDocument = (options) =>
-    ingestDocumentIntoNamespace({ ...options, deps: { store, buildState } });
+  const ingestDocument = (opts) =>
+    ingestDocumentIntoNamespace({ ...opts, deps: { store, buildState } });
   return { tools, store, buildState, ingestDocument };
 }
