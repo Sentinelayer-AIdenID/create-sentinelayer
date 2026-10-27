@@ -495,6 +495,7 @@ export class CommerceContextError extends Error {
 }
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 // Live-source adapter interface (contract only — adapter is injected)
 // ---------------------------------------------------------------------------
 
@@ -502,12 +503,13 @@ export class CommerceContextError extends Error {
  * A live-source adapter MUST fulfil this interface. No concrete implementation
  * is provided here; callers inject an adapter per authoritative source.
  *
- *   fetchLive(commerceContext, fieldNames) → Promise<Map<string, any>>
+ *   fetchLive(commerceContext, entityIds, fieldNames) → Promise<Map<string, Map<string, any>>>
  *
  *   - commerceContext: a CommerceContext (created by createCommerceContext)
+ *   - entityIds: string[] of entity identifiers (e.g. ["product:1", "product:2"])
  *   - fieldNames: string[] of field names to fetch (e.g. ["price", "inventory"])
- *   - Returns: Map keyed by field name → live value
- *     Fields that are unknown or unavailable are simply absent from the Map.
+ *   - Returns: Map keyed by entityId → Map keyed by field name → live value
+ *     Entities or fields that are unknown or unavailable are simply absent from the Maps.
  *
  *   sourceId: string — identifies the live source (e.g. "catalog:us-east-1")
  *
@@ -538,7 +540,323 @@ export function validateAdapterShape(adapter) {
 }
 
 // ---------------------------------------------------------------------------
-// hydrate — read graph through graph-store, overlay live values
+// Offsets helper — walk schema.org-style offers for volatile fields
+// ---------------------------------------------------------------------------
+
+/**
+ * Walk an entity's offers (object, array of variants, or AggregateOffer)
+ * and collect volatile field values keyed by field name.
+ *
+ * Schema.org Products carry price and availability inside `offers`, not at the
+ * top level. This helper extracts them so they can be treated as volatile.
+ *
+ * Returns: Map<fieldName, value> — only fields that were found in the offers.
+ */
+function collectOfferVolatiles(entity) {
+  const result = new Map();
+  const offers = entity?.attributes?.offers ?? entity?.offers;
+  if (!offers) return result;
+
+  // Single offer object
+  if (!Array.isArray(offers) && typeof offers === "object" && offers !== null) {
+    if (offers.price !== undefined) result.set("offers.price", offers.price);
+    if (offers.availability !== undefined) result.set("offers.availability", offers.availability);
+    if (offers.inventory !== undefined) result.set("offers.inventory", offers.inventory);
+    // AggregateOffer fields
+    if (offers.lowPrice !== undefined) result.set("offers.lowPrice", offers.lowPrice);
+    if (offers.highPrice !== undefined) result.set("offers.highPrice", offers.highPrice);
+    if (offers.priceSpecification?.price !== undefined) result.set("offers.priceSpecification.price", offers.priceSpecification.price);
+    return result;
+  }
+
+  // Array of offers (variants)
+  if (Array.isArray(offers)) {
+    for (let i = 0; i < offers.length; i++) {
+      const offer = offers[i];
+      if (offer && typeof offer === "object") {
+        if (offer.price !== undefined) result.set(`offers[${i}].price`, offer.price);
+        if (offer.availability !== undefined) result.set(`offers[${i}].availability`, offer.availability);
+        if (offer.inventory !== undefined) result.set(`offers[${i}].inventory`, offer.inventory);
+      }
+    }
+    return result;
+  }
+
+  return result;
+}
+
+/**
+ * Check whether an entity has any volatile field (top-level or in offers).
+ * Returns: Set<fieldName> of volatile field names present on this entity.
+ */
+function volatileFieldsForEntity(entity) {
+  const names = new Set();
+  if (!entity) return names;
+
+  // Top-level attributes
+  if (entity.attributes) {
+    for (const [key] of Object.entries(entity.attributes)) {
+      if (isVolatileField(key)) names.add(key);
+    }
+  }
+
+  // Offers (schema.org pattern)
+  const offerVolatiles = collectOfferVolatiles(entity);
+  for (const key of offerVolatiles.keys()) {
+    names.add(key);
+  }
+
+  return names;
+}
+
+
+// ---------------------------------------------------------------------------
+// Path helpers for nested attribute writes
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse a field path like "offers.price", "offers[0].price",
+ * "offers.lowPrice", "offers.priceSpecification.price" into segments.
+ *
+ * Returns: string[] of property keys / array indices
+ *   "offers.price"    -> ["offers", "price"]
+ *   "offers[0].price" -> ["offers", "0", "price"]
+ *   "price"           -> ["price"]
+ */
+function parseFieldPath(path) {
+  if (!path.includes(".") && !path.includes("[")) return [path];
+  const segments = [];
+  let i = 0;
+  while (i < path.length) {
+    let j = i;
+    while (j < path.length && path[j] !== "." && path[j] !== "[") j++;
+    const prop = path.slice(i, j);
+    if (prop) segments.push(prop);
+    if (j >= path.length) break;
+    if (path[j] === ".") {
+      i = j + 1;
+    } else if (path[j] === "[") {
+      const close = path.indexOf("]", j);
+      if (close === -1) { i = path.length; break; }
+      segments.push(path.slice(j + 1, close));
+      i = close + 1;
+      if (i < path.length && path[i] === ".") i++;
+    }
+  }
+  return segments;
+}
+
+/**
+ * Set a value at a dotted / bracketed path in an object tree.
+ * Creates intermediate objects/arrays as needed.
+ * Returns a new tree; the original is not mutated.
+ */
+function setAtPath(obj, path, value) {
+  const segments = parseFieldPath(path);
+  if (segments.length === 0) return obj;
+  return _setAtPath(obj, segments, value);
+}
+
+function _setAtPath(obj, segments, value) {
+  if (segments.length === 0) return value;
+  const [head, ...rest] = segments;
+  const isArrayIndex = /^\d+$/.test(head);
+  const existing = obj?.[head];
+  const child = _setAtPath(
+    existing !== null && typeof existing === "object" ? existing : (isArrayIndex ? [] : {}),
+    rest,
+    value,
+  );
+  if (Array.isArray(obj)) {
+    const copy = [...obj];
+    copy[Number(head)] = child;
+    return copy;
+  }
+  const copy = { ...obj };
+  copy[head] = child;
+  return copy;
+}
+
+/**
+ * Delete the value at a dotted path from an object tree.
+ * Returns a new tree; the original is not mutated.
+ */
+function deleteAtPath(obj, path) {
+  const segments = parseFieldPath(path);
+  if (segments.length === 0) return obj;
+  return _deleteAtPath(obj, segments);
+}
+
+function _deleteAtPath(obj, segments) {
+  if (segments.length === 0) return obj;
+  const [head, ...rest] = segments;
+  if (!(head in (obj ?? {}))) return obj;
+  if (rest.length === 0) {
+    if (Array.isArray(obj)) {
+      const copy = [...obj];
+      copy.splice(Number(head), 1);
+      return copy;
+    }
+    const copy = { ...obj };
+    delete copy[head];
+    return copy;
+  }
+  const nested = obj[head];
+  if (nested === null || typeof nested !== "object") return obj;
+  const updated = _deleteAtPath(nested, rest);
+  if (Array.isArray(obj)) {
+    const copy = [...obj];
+    copy[Number(head)] = updated;
+    return copy;
+  }
+  return { ...obj, [head]: updated };
+}
+
+/**
+ * Clear all volatile field values from an entity's attributes and offers.
+ * Returns a new entity object; the original is not mutated.
+ */
+function clearVolatileFields(entity) {
+  if (!entity) return entity;
+  const result = { ...entity };
+
+  // Clear top-level volatile attributes
+  if (result.attributes) {
+    const attrs = { ...result.attributes };
+    let cleared = false;
+    for (const key of Object.keys(attrs)) {
+      if (isVolatileField(key)) {
+        delete attrs[key];
+        cleared = true;
+      }
+    }
+    result.attributes = cleared ? attrs : result.attributes;
+  }
+
+  // Clear offers volatiles
+  const offers = result.attributes?.offers ?? result.offers;
+  if (offers) {
+    if (!Array.isArray(offers) && typeof offers === "object") {
+      const cleaned = { ...offers };
+      delete cleaned.price;
+      delete cleaned.availability;
+      delete cleaned.inventory;
+      delete cleaned.lowPrice;
+      delete cleaned.highPrice;
+      if (cleaned.priceSpecification && typeof cleaned.priceSpecification === "object") {
+        const ps = { ...cleaned.priceSpecification };
+        delete ps.price;
+        cleaned.priceSpecification = ps;
+      }
+      if (result.attributes) {
+        result.attributes = { ...result.attributes, offers: cleaned };
+      } else {
+        result.offers = cleaned;
+      }
+    } else if (Array.isArray(offers)) {
+      const cleaned = offers.map((o) => {
+        if (!o || typeof o !== "object") return o;
+        const c = { ...o };
+        delete c.price;
+        delete c.availability;
+        delete c.inventory;
+        delete c.lowPrice;
+        delete c.highPrice;
+        return c;
+      });
+      if (result.attributes) {
+        result.attributes = { ...result.attributes, offers: cleaned };
+      } else {
+        result.offers = cleaned;
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Merge live values (per-entity Map<entityId, Map<field, value>>) into
+ * entity attributes. When source is unavailable, volatile fields are cleared.
+ *
+ * Returns: hydrated entities array and the set of live field names used.
+ */
+function mergeLiveValues(entities, liveValues, sourceStatus) {
+  const liveFieldNames = new Set();
+  const hydratedEntities = entities.map((entity) => {
+    if (!entity) return entity;
+    const perEntity = liveValues.get(entity.id);
+    const entityVolatiles = volatileFieldsForEntity(entity);
+
+    // On outage: clear volatile fields, never serve cached values
+    if (sourceStatus === "unavailable") {
+      for (const fn of entityVolatiles) liveFieldNames.add(fn);
+      return clearVolatileFields(entity);
+    }
+
+    // Merge per-entity live values
+    if (!perEntity || perEntity.size === 0) {
+      // No live values for this entity — still track its volatile field names
+      for (const fn of entityVolatiles) liveFieldNames.add(fn);
+      return entity;
+    }
+
+    let attrs = entity.attributes ? { ...entity.attributes } : {};
+    let changed = false;
+
+    for (const [path, value] of perEntity) {
+      liveFieldNames.add(path);
+      const segments = parseFieldPath(path);
+
+      if (segments.length === 1) {
+        // Top-level attribute: write directly
+        attrs[path] = value;
+        changed = true;
+      } else {
+        // Nested path (e.g. "offers.price", "offers[0].price", "offers.lowPrice")
+        // Only write through attrs, never add a new top-level key
+        const root = segments[0];
+        const existing = attrs[root];
+        if (existing !== null && typeof existing === "object") {
+          const restPath = segments.slice(1).reduce((acc, seg, idx) => {
+            if (/^\d+$/.test(seg)) return acc + `[${seg}]`;
+            return acc + (idx === 0 ? seg : `.${seg}`);
+          }, "");
+          attrs[root] = setAtPath(existing, restPath, value);
+          changed = true;
+        }
+      }
+    }
+
+    // Also merge simple offer-level fields into attrs.offers for backward compat
+    // when offers is a single object (not array). This is now handled by the
+    // path-based writes above (offers.price writes to attrs.offers.price).
+    // Keep this for fields the adapter returns without "offers." prefix.
+    if (attrs.offers && !Array.isArray(attrs.offers) && typeof attrs.offers === "object") {
+      for (const [path, value] of perEntity) {
+        const segments = parseFieldPath(path);
+        if (segments.length === 1) {
+          // Top-level field that might belong in offers
+          if (path === "price" || path === "availability" || path === "inventory") {
+            // Only if offers has this field (it was there before hydration)
+            if (path in attrs.offers) {
+              attrs.offers = { ...attrs.offers, [path]: value };
+              changed = true;
+            }
+          }
+        }
+      }
+    }
+
+    if (!changed) return entity;
+    return { ...entity, attributes: attrs };
+  });
+
+  return { hydratedEntities, liveFieldNames };
+}
+
+// ---------------------------------------------------------------------------
+// hydrate — read graph through graph-store, overlay live values per entity
 // ---------------------------------------------------------------------------
 
 /**
@@ -546,8 +864,13 @@ export function validateAdapterShape(adapter) {
  *
  * Reads the graph through graph-store and resolves every entity whose
  * freshness class is `live_required` against the live-source adapter.
- * The returned graph has live values merged into the entity attributes;
- * cached values are preserved for `static` and `stale_readable` entities.
+ * Each entity gets its own live values — never a single shared value.
+ *
+ * When the source is unavailable, volatile fields are CLEARED from entities
+ * (never served from cache). The caller sees sourceStatus="unavailable".
+ *
+ * Optional `entityIds` and `fieldNames` filter the returned graph to only
+ * the requested entities and fields.
  *
  * Returns:
  *   { graph, version, publishedAt, hydratedAt, liveFields: string[],
@@ -556,7 +879,14 @@ export function validateAdapterShape(adapter) {
  * When the adapter is absent or the graph has no entities, returns the
  * raw graph with an empty liveFields set.
  */
-export async function hydrate(caller, namespace, graphStore, liveSourceAdapter, commerceContext) {
+export async function hydrate(
+  caller,
+  namespace,
+  graphStore,
+  liveSourceAdapter,
+  commerceContext,
+  { entityIds, fieldNames } = {},
+) {
   // Read the currently published graph
   const result = await graphStore.readCurrentGraph(caller, namespace);
 
@@ -572,13 +902,23 @@ export async function hydrate(caller, namespace, graphStore, liveSourceAdapter, 
   }
 
   const { graph, version, publishedAt } = result;
-  const entities = graph.entities ?? [];
+  let entities = graph.entities ?? [];
   const assertions = graph.assertions ?? [];
+
+  // Filter to requested entities
+  if (entityIds && entityIds.length > 0) {
+    const idSet = new Set(entityIds);
+    entities = entities.filter((e) => idSet.has(e.id));
+  }
 
   if (entities.length === 0 || !liveSourceAdapter) {
     const status = liveSourceAdapter ? liveSourceAdapter.sourceStatus() : "unavailable";
+    // If source is unavailable and we have entities, clear volatiles
+    const clearedEntities = status === "unavailable"
+      ? entities.map((e) => clearVolatileFields(e))
+      : entities;
     return {
-      graph,
+      graph: { ...graph, entities: clearedEntities },
       version,
       publishedAt,
       hydratedAt: new Date().toISOString(),
@@ -587,33 +927,31 @@ export async function hydrate(caller, namespace, graphStore, liveSourceAdapter, 
     };
   }
 
-  // Collect field names that are live_required from entity attributes
-  const liveFieldNames = new Set();
-
+  // Collect all entity ids and their volatile field names
+  const ids = entities.map((e) => e.id).filter(Boolean);
+  const allLiveFieldNames = new Set();
   for (const entity of entities) {
-    if (!entity.attributes) continue;
-    for (const [key] of Object.entries(entity.attributes)) {
-      if (isVolatileField(key)) {
-        liveFieldNames.add(key);
-      }
+    for (const fn of volatileFieldsForEntity(entity)) {
+      allLiveFieldNames.add(fn);
     }
   }
 
   // Also collect volatile predicates from assertions
   for (const a of assertions) {
     if (isVolatileField(a.predicate)) {
-      liveFieldNames.add(a.predicate);
+      allLiveFieldNames.add(a.predicate);
     }
   }
 
   let liveValues = new Map();
   let sourceStatus = liveSourceAdapter.sourceStatus();
 
-  if (liveFieldNames.size > 0 && sourceStatus !== "unavailable") {
+  if (allLiveFieldNames.size > 0 && ids.length > 0 && sourceStatus !== "unavailable") {
     try {
       liveValues = await liveSourceAdapter.fetchLive(
         commerceContext ?? {},
-        [...liveFieldNames],
+        ids,
+        [...allLiveFieldNames],
       );
     } catch {
       // Transport failure → treat as unavailable for this hydration
@@ -621,24 +959,26 @@ export async function hydrate(caller, namespace, graphStore, liveSourceAdapter, 
     }
   }
 
-  // Build hydrated graph: merge live values into entity attributes
-  const hydratedEntities = entities.map((entity) => {
-    if (!entity.attributes) return entity;
-    const attrs = { ...entity.attributes };
-    let changed = false;
-    for (const key of liveFieldNames) {
-      if (liveValues.has(key)) {
-        attrs[key] = liveValues.get(key);
-        changed = true;
+  // Merge per-entity live values (or clear volatiles on outage)
+  const { hydratedEntities, liveFieldNames } = mergeLiveValues(entities, liveValues, sourceStatus);
+
+  // Filter to requested fields
+  let finalEntities = hydratedEntities;
+  if (fieldNames && fieldNames.length > 0) {
+    const fieldSet = new Set(fieldNames);
+    finalEntities = hydratedEntities.map((entity) => {
+      if (!entity.attributes) return entity;
+      const filtered = {};
+      for (const [k, v] of Object.entries(entity.attributes)) {
+        if (fieldSet.has(k)) filtered[k] = v;
       }
-    }
-    if (!changed) return entity;
-    return { ...entity, attributes: attrs };
-  });
+      return { ...entity, attributes: filtered };
+    });
+  }
 
   const hydratedGraph = {
     ...graph,
-    entities: hydratedEntities,
+    entities: finalEntities,
   };
 
   return {
@@ -659,13 +999,13 @@ export async function hydrate(caller, namespace, graphStore, liveSourceAdapter, 
  * Revalidate live_required fields against the live source before an
  * authorization-significant action.
  *
- * Reads the current graph via graph-store, extracts every live_required
- * field, fetches current values from the adapter, and compares them
- * against the cached graph values. If any live field has changed,
+ * Accepts `expectedVersions`: a Map<entityId, Map<fieldName, version>> that
+ * records what the caller saw. Compares live values against THESE versions,
+ * not against cached graph values. If the caller's version differs from live,
  * the action MUST be re-attempted with the new values.
  *
  * Returns:
- *   { ok: boolean, mustRetry: boolean, changedFields: Map<string, {cached, live}>,
+ *   { ok: boolean, mustRetry: boolean, changedFields: Map<string, {callerVersion, live}>,
  *     sourceStatus: string, revalidatedAt: string }
  *
  * When ok=false the action is blocked (source unavailable, no graph, etc.).
@@ -678,6 +1018,7 @@ export async function revalidateForAction(
   liveSourceAdapter,
   commerceContext,
   actionDependencies,
+  expectedVersions,
 ) {
   const revalidatedAt = new Date().toISOString();
 
@@ -695,25 +1036,19 @@ export async function revalidateForAction(
 
   const { graph } = result;
   const entities = graph.entities ?? [];
-  const assertions = graph.assertions ?? [];
 
-  // Collect live_required fields
-  const liveFieldNames = new Set();
+  // Collect live_required fields per entity (including offers)
+  const allLiveFieldNames = new Set();
+  const ids = [];
   for (const entity of entities) {
-    if (!entity.attributes) continue;
-    for (const [key] of Object.entries(entity.attributes)) {
-      if (isVolatileField(key)) {
-        liveFieldNames.add(key);
-      }
-    }
-  }
-  for (const a of assertions) {
-    if (isVolatileField(a.predicate)) {
-      liveFieldNames.add(a.predicate);
+    if (!entity) continue;
+    if (entity.id) ids.push(entity.id);
+    for (const fn of volatileFieldsForEntity(entity)) {
+      allLiveFieldNames.add(fn);
     }
   }
 
-  if (liveFieldNames.size === 0) {
+  if (allLiveFieldNames.size === 0) {
     return { ok: true, mustRetry: false, changedFields: new Map(), revalidatedAt };
   }
 
@@ -746,12 +1081,13 @@ export async function revalidateForAction(
     }
   }
 
-  // Fetch live values
+  // Fetch live values per entity
   let liveValues;
   try {
     liveValues = await liveSourceAdapter.fetchLive(
       commerceContext ?? {},
-      [...liveFieldNames],
+      ids,
+      [...allLiveFieldNames],
     );
   } catch {
     return {
@@ -763,21 +1099,40 @@ export async function revalidateForAction(
     };
   }
 
-  // Compare cached vs live
+  // Compare expectedVersions against live values (TOCTOU guard)
   const changedFields = new Map();
+  const ev = expectedVersions ?? new Map();
+
   for (const entity of entities) {
-    if (!entity.attributes) continue;
-    for (const key of liveFieldNames) {
-      if (liveValues.has(key)) {
-        const liveVal = liveValues.get(key);
-        const cachedVal = entity.attributes[key];
-        // Deep-strict comparison for objects, shallow for primitives
-        const changed = typeof liveVal === "object" && liveVal !== null
-          ? JSON.stringify(liveVal) !== JSON.stringify(cachedVal)
-          : liveVal !== cachedVal;
-        if (changed) {
-          changedFields.set(key, { cached: cachedVal, live: liveVal });
+    if (!entity || !entity.id) continue;
+    const perEntityLive = liveValues.get(entity.id);
+    const perEntityExpected = ev.get(entity.id);
+
+    if (!perEntityLive) continue;
+
+    for (const [field, liveVal] of perEntityLive) {
+      const expectedVersion = perEntityExpected?.get(field);
+      if (expectedVersion !== undefined) {
+        // Compare against caller's expected version
+        const liveVersion = typeof liveVal === "object" && liveVal !== null
+          ? JSON.stringify(liveVal)
+          : String(liveVal);
+        const expectedStr = typeof expectedVersion === "object" && expectedVersion !== null
+          ? JSON.stringify(expectedVersion)
+          : String(expectedVersion);
+
+        if (liveVersion !== expectedStr) {
+          changedFields.set(`${entity.id}:${field}`, {
+            callerVersion: expectedVersion,
+            live: liveVal,
+          });
         }
+      } else {
+        // No expected version provided for this field — report as changed (pessimistic)
+        changedFields.set(`${entity.id}:${field}`, {
+          callerVersion: undefined,
+          live: liveVal,
+        });
       }
     }
   }
@@ -810,6 +1165,10 @@ export class LiveStateError extends Error {
  * Field names that are always served from the live source, never from cache.
  * These correspond to the volatile commerce fields from the ticket:
  * price, availability, inventory, delivery estimate.
+ *
+ * Note: schema.org Products typically carry price and availability inside
+ * `offers` (an object, array of variants, or AggregateOffer). The hydrate and
+ * revalidateForAction functions walk offers to detect these fields.
  */
 export const VOLATILE_FIELD_NAMES = Object.freeze([
   "price",
