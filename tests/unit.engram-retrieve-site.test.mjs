@@ -220,7 +220,7 @@ test("EW06 retrieve-site: access filter excludes entities before indexing and re
   assert.equal(productsInResults.length, 0, "no products must leak through access filter");
 });
 
-test("EW06 retrieve-site: graph-store integration — publish graph, then retrieve via graphStore", async () => {
+test("EW06 retrieve-site: graph-store integration — publish, read back, retrieve via store", async () => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), "ew06-graph-store-"));
   const storeRoot = path.join(tempRoot, "workspace");
   try {
@@ -229,7 +229,7 @@ test("EW06 retrieve-site: graph-store integration — publish graph, then retrie
     const ns = parseNamespace("site:test-site");
     const caller = { id: "test-runner", roles: ["admin"] };
 
-    // Publish a graph directly (bypassing compile-from-HTML for test simplicity).
+    // Publish a graph via the graph store.
     const graph = makeGraph([
       productEntity("site:test-site:product:a1b2", "Widget Pro"),
       productEntity("site:test-site:product:e5f6", "Gadget Max"),
@@ -241,13 +241,16 @@ test("EW06 retrieve-site: graph-store integration — publish graph, then retrie
 
     const published = await graphStore.publishGraph(caller, ns, graph);
     assert.ok(published.version >= 1, "graph must be published");
+    assert.ok(published.contentHash, "content hash must be present");
 
-    // Read back to verify.
+    // Verify the graph was actually written to disk by reading it back.
     const current = await graphStore.readCurrentGraph(caller, ns);
     assert.ok(current.graph, "current graph must exist");
     assert.ok(current.graph.entities.length >= 3);
+    assert.equal(current.version, published.version);
 
-    // Now retrieve via the graph store integration.
+    // retrieveFromGraphStore must call readCurrentGraph internally and
+    // return results from the stored graph.
     const result = await retrieveFromGraphStore({
       graphStore,
       caller,
@@ -259,8 +262,9 @@ test("EW06 retrieve-site: graph-store integration — publish graph, then retrie
 
     assert.equal(result.ok, true);
     assert.ok(result.results.length > 0);
-    // Top result should be Widget Pro.
     assert.ok(result.results[0].entityLabel.toLowerCase().includes("widget"));
+    // Assert meta reflects the store-sourced graph entity count.
+    assert.equal(result.meta.totalEntities, 3);
 
     // Exact ID match through graph store.
     const exactResult = await retrieveFromGraphStore({
@@ -273,6 +277,27 @@ test("EW06 retrieve-site: graph-store integration — publish graph, then retrie
     });
     assert.equal(exactResult.exactMatchFound, true);
     assert.equal(exactResult.results[0].entityId, "site:test-site:product:e5f6");
+
+    // Verify that invalid graphStore is rejected.
+    const badResult = await retrieveFromGraphStore({
+      graphStore: null,
+      caller,
+      namespace: ns,
+      query: "test",
+    });
+    assert.equal(badResult.ok, false);
+    assert.equal(badResult.reason, "invalid_graph_store");
+
+    // Verify that a namespace with no published graph returns error.
+    const emptyNs = parseNamespace("site:empty-site");
+    const emptyResult = await retrieveFromGraphStore({
+      graphStore,
+      caller,
+      namespace: emptyNs,
+      query: "test",
+    });
+    assert.equal(emptyResult.ok, false);
+    assert.equal(emptyResult.reason, "no_published_graph");
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
   }
