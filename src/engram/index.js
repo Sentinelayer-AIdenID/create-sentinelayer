@@ -59,22 +59,14 @@ export {
   createFreshnessMarker,
   isFreshnessStale,
   FreshnessClassError,
-} from "./live-state.js";
-export {
   SOURCE_STATUSES,
   createSourceVersion,
   resolveAuthoritativeSource,
   SourceVersionError,
-} from "./live-state.js";
-export {
   mustRevalidate,
   RevalidationRequiredError,
-} from "./live-state.js";
-export {
   disabledByOutage,
   SourceOutageError,
-} from "./live-state.js";
-export {
   createCommerceContext,
   CommerceContextError,
 } from "./live-state.js";
