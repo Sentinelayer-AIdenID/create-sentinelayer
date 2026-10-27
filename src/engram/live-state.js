@@ -493,3 +493,337 @@ export class CommerceContextError extends Error {
     this.name = "CommerceContextError";
   }
 }
+
+// ---------------------------------------------------------------------------
+// Live-source adapter interface (contract only — adapter is injected)
+// ---------------------------------------------------------------------------
+
+/**
+ * A live-source adapter MUST fulfil this interface. No concrete implementation
+ * is provided here; callers inject an adapter per authoritative source.
+ *
+ *   fetchLive(commerceContext, fieldNames) → Promise<Map<string, any>>
+ *
+ *   - commerceContext: a CommerceContext (created by createCommerceContext)
+ *   - fieldNames: string[] of field names to fetch (e.g. ["price", "inventory"])
+ *   - Returns: Map keyed by field name → live value
+ *     Fields that are unknown or unavailable are simply absent from the Map.
+ *
+ *   sourceId: string — identifies the live source (e.g. "catalog:us-east-1")
+ *
+ *   sourceStatus(): "available" | "degraded" | "unavailable"
+ *
+ * Adapters may throw on transport failure; callers MUST handle that.
+ */
+
+/**
+ * Validate that an object satisfies the minimal live-source adapter shape.
+ * Returns an array of missing/invalid members (empty = valid).
+ */
+export function validateAdapterShape(adapter) {
+  const issues = [];
+  if (!adapter || typeof adapter !== "object") {
+    return ["adapter must be an object"];
+  }
+  if (typeof adapter.fetchLive !== "function") {
+    issues.push("adapter.fetchLive must be a function");
+  }
+  if (typeof adapter.sourceId !== "string" || adapter.sourceId.length === 0) {
+    issues.push("adapter.sourceId must be a non-empty string");
+  }
+  if (typeof adapter.sourceStatus !== "function") {
+    issues.push("adapter.sourceStatus must be a function");
+  }
+  return issues;
+}
+
+// ---------------------------------------------------------------------------
+// hydrate — read graph through graph-store, overlay live values
+// ---------------------------------------------------------------------------
+
+/**
+ * Hydrate the caller's view of the published graph.
+ *
+ * Reads the graph through graph-store and resolves every entity whose
+ * freshness class is `live_required` against the live-source adapter.
+ * The returned graph has live values merged into the entity attributes;
+ * cached values are preserved for `static` and `stale_readable` entities.
+ *
+ * Returns:
+ *   { graph, version, publishedAt, hydratedAt, liveFields: string[],
+ *     sourceStatus: "available"|"degraded"|"unavailable" }
+ *
+ * When the adapter is absent or the graph has no entities, returns the
+ * raw graph with an empty liveFields set.
+ */
+export async function hydrate(caller, namespace, graphStore, liveSourceAdapter, commerceContext) {
+  // Read the currently published graph
+  const result = await graphStore.readCurrentGraph(caller, namespace);
+
+  if (!result || result.graph === null) {
+    return {
+      graph: null,
+      version: result?.version ?? 0,
+      reason: result?.reason ?? "no graph published",
+      hydratedAt: new Date().toISOString(),
+      liveFields: [],
+      sourceStatus: "unavailable",
+    };
+  }
+
+  const { graph, version, publishedAt } = result;
+  const entities = graph.entities ?? [];
+  const assertions = graph.assertions ?? [];
+
+  if (entities.length === 0 || !liveSourceAdapter) {
+    const status = liveSourceAdapter ? liveSourceAdapter.sourceStatus() : "unavailable";
+    return {
+      graph,
+      version,
+      publishedAt,
+      hydratedAt: new Date().toISOString(),
+      liveFields: [],
+      sourceStatus: status,
+    };
+  }
+
+  // Collect field names that are live_required from entity attributes
+  const liveFieldNames = new Set();
+
+  for (const entity of entities) {
+    if (!entity.attributes) continue;
+    for (const [key] of Object.entries(entity.attributes)) {
+      if (isVolatileField(key)) {
+        liveFieldNames.add(key);
+      }
+    }
+  }
+
+  // Also collect volatile predicates from assertions
+  for (const a of assertions) {
+    if (isVolatileField(a.predicate)) {
+      liveFieldNames.add(a.predicate);
+    }
+  }
+
+  let liveValues = new Map();
+  let sourceStatus = liveSourceAdapter.sourceStatus();
+
+  if (liveFieldNames.size > 0 && sourceStatus !== "unavailable") {
+    try {
+      liveValues = await liveSourceAdapter.fetchLive(
+        commerceContext ?? {},
+        [...liveFieldNames],
+      );
+    } catch {
+      // Transport failure → treat as unavailable for this hydration
+      sourceStatus = "unavailable";
+    }
+  }
+
+  // Build hydrated graph: merge live values into entity attributes
+  const hydratedEntities = entities.map((entity) => {
+    if (!entity.attributes) return entity;
+    const attrs = { ...entity.attributes };
+    let changed = false;
+    for (const key of liveFieldNames) {
+      if (liveValues.has(key)) {
+        attrs[key] = liveValues.get(key);
+        changed = true;
+      }
+    }
+    if (!changed) return entity;
+    return { ...entity, attributes: attrs };
+  });
+
+  const hydratedGraph = {
+    ...graph,
+    entities: hydratedEntities,
+  };
+
+  return {
+    graph: hydratedGraph,
+    version,
+    publishedAt,
+    hydratedAt: new Date().toISOString(),
+    liveFields: [...liveFieldNames],
+    sourceStatus,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// revalidateForAction — TOCTOU re-check before authorisation
+// ---------------------------------------------------------------------------
+
+/**
+ * Revalidate live_required fields against the live source before an
+ * authorization-significant action.
+ *
+ * Reads the current graph via graph-store, extracts every live_required
+ * field, fetches current values from the adapter, and compares them
+ * against the cached graph values. If any live field has changed,
+ * the action MUST be re-attempted with the new values.
+ *
+ * Returns:
+ *   { ok: boolean, mustRetry: boolean, changedFields: Map<string, {cached, live}>,
+ *     sourceStatus: string, revalidatedAt: string }
+ *
+ * When ok=false the action is blocked (source unavailable, no graph, etc.).
+ * When mustRetry=true the action must be re-attempted with the live values.
+ */
+export async function revalidateForAction(
+  caller,
+  namespace,
+  graphStore,
+  liveSourceAdapter,
+  commerceContext,
+  actionDependencies,
+) {
+  const revalidatedAt = new Date().toISOString();
+
+  // Read current graph
+  const result = await graphStore.readCurrentGraph(caller, namespace);
+
+  if (!result || result.graph === null) {
+    return {
+      ok: false,
+      mustRetry: false,
+      reason: result?.reason ?? "no graph published",
+      revalidatedAt,
+    };
+  }
+
+  const { graph } = result;
+  const entities = graph.entities ?? [];
+  const assertions = graph.assertions ?? [];
+
+  // Collect live_required fields
+  const liveFieldNames = new Set();
+  for (const entity of entities) {
+    if (!entity.attributes) continue;
+    for (const [key] of Object.entries(entity.attributes)) {
+      if (isVolatileField(key)) {
+        liveFieldNames.add(key);
+      }
+    }
+  }
+  for (const a of assertions) {
+    if (isVolatileField(a.predicate)) {
+      liveFieldNames.add(a.predicate);
+    }
+  }
+
+  if (liveFieldNames.size === 0) {
+    return { ok: true, mustRetry: false, changedFields: new Map(), revalidatedAt };
+  }
+
+  // Check source outage
+  const sourceStatus = liveSourceAdapter.sourceStatus();
+  if (sourceStatus === "unavailable") {
+    return {
+      ok: false,
+      mustRetry: false,
+      reason: "live source unavailable — cannot revalidate",
+      sourceStatus,
+      revalidatedAt,
+    };
+  }
+
+  // Check action dependencies against source versions
+  if (actionDependencies && actionDependencies.length > 0) {
+    const outageCheck = disabledByOutage(
+      actionDependencies.map((dep) => createSourceVersion({ sourceId: dep, sourceStatus })),
+      actionDependencies,
+    );
+    if (outageCheck.disabled) {
+      return {
+        ok: false,
+        mustRetry: false,
+        reason: outageCheck.reason,
+        sourceStatus,
+        revalidatedAt,
+      };
+    }
+  }
+
+  // Fetch live values
+  let liveValues;
+  try {
+    liveValues = await liveSourceAdapter.fetchLive(
+      commerceContext ?? {},
+      [...liveFieldNames],
+    );
+  } catch {
+    return {
+      ok: false,
+      mustRetry: false,
+      reason: "live source fetch failed — cannot revalidate",
+      sourceStatus: "unavailable",
+      revalidatedAt,
+    };
+  }
+
+  // Compare cached vs live
+  const changedFields = new Map();
+  for (const entity of entities) {
+    if (!entity.attributes) continue;
+    for (const key of liveFieldNames) {
+      if (liveValues.has(key)) {
+        const liveVal = liveValues.get(key);
+        const cachedVal = entity.attributes[key];
+        // Deep-strict comparison for objects, shallow for primitives
+        const changed = typeof liveVal === "object" && liveVal !== null
+          ? JSON.stringify(liveVal) !== JSON.stringify(cachedVal)
+          : liveVal !== cachedVal;
+        if (changed) {
+          changedFields.set(key, { cached: cachedVal, live: liveVal });
+        }
+      }
+    }
+  }
+
+  return {
+    ok: true,
+    mustRetry: changedFields.size > 0,
+    changedFields,
+    sourceStatus,
+    revalidatedAt,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// LiveStateError
+// ---------------------------------------------------------------------------
+
+export class LiveStateError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "LiveStateError";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Known volatile commerce field names (always live_required)
+// ---------------------------------------------------------------------------
+
+/**
+ * Field names that are always served from the live source, never from cache.
+ * These correspond to the volatile commerce fields from the ticket:
+ * price, availability, inventory, delivery estimate.
+ */
+export const VOLATILE_FIELD_NAMES = Object.freeze([
+  "price",
+  "availability",
+  "inventory",
+  "delivery_estimate",
+  "deliveryEstimate",
+]);
+
+const VOLATILE_FIELD_SET = new Set(VOLATILE_FIELD_NAMES);
+
+/**
+ * Check whether a field name is volatile (must be fetched live).
+ */
+export function isVolatileField(fieldName) {
+  return VOLATILE_FIELD_SET.has(fieldName);
+}

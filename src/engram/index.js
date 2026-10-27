@@ -70,6 +70,14 @@ export {
   createCommerceContext,
   CommerceContextError,
 } from "./live-state.js";
+export {
+  validateAdapterShape,
+  hydrate,
+  revalidateForAction,
+  LiveStateError,
+  VOLATILE_FIELD_NAMES,
+  isVolatileField,
+} from "./live-state.js";
 import { createStore } from "./store.js";
 import { createLocalConsent } from "./namespace.js";
 import { createGovernance } from "./governance.js";
