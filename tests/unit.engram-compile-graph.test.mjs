@@ -511,3 +511,69 @@ test('EW05 entity kinds: all defined', () => {
   assert.equal(ENTITY_KIND.ORGANISATION, 'organisation');
   assert.equal(ENTITY_KIND.UNKNOWN, 'unknown');
 });
+
+// ---------------------------------------------------------------------------
+// Heading level safety (step-12: no action from guessed data)
+// ---------------------------------------------------------------------------
+
+test('EW05 safety: invalid heading levels are skipped', async () => {
+  await withGraphStore(async (store) => {
+    const ns = parseNamespace(TENANT);
+    const { contentHash: _ch, ...snapBase } = VALID_SOURCE_SNAPSHOT;
+
+    const snap = { ...snapBase, sourceId: 'src-safety-headings', tenantScope: TENANT, sourceType: 'ingest' };
+    await store.writeSourceSnapshot(CALLER, ns, snap, Buffer.from('<html>Safety</html>'));
+
+    const result = await compileGraph({
+      graphStore: store, caller: CALLER, namespace: ns,
+      factsProvider: mockFactsProvider({
+        canonical: 'https://example.com/safety',
+        headings: [
+          { level: 1, text: 'Valid H1' },
+          { level: 0, text: 'Invalid H0' },
+          { level: 7, text: 'Invalid H7' },
+          { level: -1, text: 'Negative' },
+          { level: 'xss', text: 'String level' },
+          { level: 1.5, text: 'Float level' },
+        ],
+      }),
+    });
+
+    const headingAssertions = result.assertions.filter(
+      (a) => a.predicate === EW05_PREDICATES.CONTAINS,
+    );
+    // Only valid heading levels (1-6) produce assertions
+    assert.equal(headingAssertions.length, 1, 'only valid heading level should produce an assertion');
+    assert.equal(headingAssertions[0].object.kind, 'h1');
+  });
+});
+
+test('EW05 safety: non-object heading entries are skipped', async () => {
+  await withGraphStore(async (store) => {
+    const ns = parseNamespace(TENANT);
+    const { contentHash: _ch, ...snapBase } = VALID_SOURCE_SNAPSHOT;
+
+    const snap = { ...snapBase, sourceId: 'src-safety-heading-type', tenantScope: TENANT, sourceType: 'ingest' };
+    await store.writeSourceSnapshot(CALLER, ns, snap, Buffer.from('<html>Safety</html>'));
+
+    const result = await compileGraph({
+      graphStore: store, caller: CALLER, namespace: ns,
+      factsProvider: mockFactsProvider({
+        canonical: 'https://example.com/safety-heading-type',
+        headings: [
+          { level: 1, text: 'Valid' },
+          'not-an-object',
+          null,
+          42,
+          true,
+        ],
+      }),
+    });
+
+    // Only the valid heading object should produce an assertion
+    const headingAssertions = result.assertions.filter(
+      (a) => a.predicate === EW05_PREDICATES.CONTAINS,
+    );
+    assert.equal(headingAssertions.length, 1, 'only valid heading objects should produce assertions');
+  });
+});

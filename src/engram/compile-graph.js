@@ -225,9 +225,11 @@ function extractAssertions(tenantScope, sourceId, sourceVersion, capturedAt, fac
   }
 
   for (const heading of facts.headings || []) {
-    if (pageId && heading && typeof heading.text === 'string' && heading.text) {
+    if (pageId && heading && typeof heading === 'object' && heading !== null && typeof heading.text === 'string' && heading.text) {
       // Heading level encoded in text to avoid numeric type issues
-      const headingLevel = `h${heading.level}`;
+      const level = Number(heading.level);
+      if (!Number.isSafeInteger(level) || level < 1 || level > 6) continue;
+      const headingLevel = `h${level}`;
       add(pageId, EW05_PREDICATES.CONTAINS, {
         kind: headingLevel,
         text: heading.text,
