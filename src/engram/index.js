@@ -50,6 +50,15 @@ export {
   VersionNotFoundError,
   IntegrityError,
 } from "./graph-store.js";
+export {
+  buildSiteRetrievalIndex,
+  retrieveSiteEntities,
+  retrieveFromGraphStore,
+  RETRIEVE_SITE_INDEX_VERSION,
+  REQUIRED_EMBEDDER_DIM,
+  SITE_RETRIEVAL_DEFAULTS,
+} from "./retrieve-site.js";
+
 
 import { createStore } from "./store.js";
 import { createLocalConsent } from "./namespace.js";
