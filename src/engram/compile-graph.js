@@ -487,54 +487,23 @@ function buildGraph(allEntities, allAssertions, allLinks) {
   return { graph, contradictions, cycles, mergedEntities, mergedAssertions, mergedLinks };
 }
 
-export async function compileGraph({
+async function _compile({
   graphStore,
   caller,
   namespace,
   factsProvider,
+  publish = false,
 } = {}) {
-  const snapshots = await graphStore.listSourceSnapshots(caller, namespace);
-  if (!Array.isArray(snapshots) || snapshots.length === 0) {
-    throw new CompileGraphError('no source snapshots to compile');
+  if (!graphStore || typeof graphStore.listSourceSnapshots !== 'function') {
+    throw new CompileGraphError('graphStore with listSourceSnapshots is required');
+  }
+  if (!caller || typeof caller !== 'object') {
+    throw new CompileGraphError('caller identity is required');
+  }
+  if (!namespace || typeof namespace.raw !== 'string') {
+    throw new CompileGraphError('namespace is required');
   }
 
-  const { allEntities, allAssertions, allLinks } = await extractFromSnapshots(snapshots, factsProvider);
-  const { graph, contradictions, cycles, mergedEntities, mergedAssertions, mergedLinks } =
-    buildGraph(allEntities, allAssertions, allLinks);
-
-  // Validate
-  const schemaResult = graphSchema.safeParse(graph);
-  if (!schemaResult.success) {
-    const messages = schemaResult.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`);
-    throw new CompileGraphError(`Compiled graph invalid: ${messages.join('; ')}`);
-  }
-
-  // Publish
-  const published = await graphStore.publishGraph(caller, namespace, schemaResult.data);
-
-  return {
-    graph: published.graph,
-    version: published.version,
-    publishedAt: published.publishedAt,
-    contentHash: published.contentHash,
-    entities: mergedEntities,
-    links: mergedLinks,
-    assertions: mergedAssertions,
-    contradictions,
-    cycles,
-    entityCount: mergedEntities.length,
-    assertionCount: mergedAssertions.length,
-    linkCount: mergedLinks.length,
-    sourceCount: snapshots.length,
-  };
-}
-
-export async function compileCandidate({
-  graphStore,
-  caller,
-  namespace,
-  factsProvider,
-} = {}) {
   const snapshots = await graphStore.listSourceSnapshots(caller, namespace);
   if (!Array.isArray(snapshots) || snapshots.length === 0) {
     throw new CompileGraphError('no source snapshots to compile');
@@ -545,6 +514,29 @@ export async function compileCandidate({
     buildGraph(allEntities, allAssertions, allLinks);
 
   const schemaResult = graphSchema.safeParse(graph);
+  if (!schemaResult.success && publish) {
+    const messages = schemaResult.error.issues.map((i) => i.path.join('.') + ': ' + i.message);
+    throw new CompileGraphError('Compiled graph invalid: ' + messages.join('; '));
+  }
+
+  if (publish) {
+    const published = await graphStore.publishGraph(caller, namespace, schemaResult.data);
+    return {
+      graph: published.graph,
+      version: published.version,
+      publishedAt: published.publishedAt,
+      contentHash: published.contentHash,
+      entities: mergedEntities,
+      links: mergedLinks,
+      assertions: mergedAssertions,
+      contradictions,
+      cycles,
+      entityCount: mergedEntities.length,
+      assertionCount: mergedAssertions.length,
+      linkCount: mergedLinks.length,
+      sourceCount: snapshots.length,
+    };
+  }
 
   return {
     status: schemaResult.success ? GENERATION_STATUS.CANDIDATE : 'invalid',
@@ -557,6 +549,14 @@ export async function compileCandidate({
     linkCount: mergedLinks.length,
     sourceCount: snapshots.length,
   };
+}
+
+export async function compileGraph(opts = {}) {
+  return _compile({ ...opts, publish: true });
+}
+
+export async function compileCandidate(opts = {}) {
+  return _compile({ ...opts, publish: false });
 }
 
 // ---------------------------------------------------------------------------
