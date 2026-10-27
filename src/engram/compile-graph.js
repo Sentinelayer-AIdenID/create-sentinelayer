@@ -76,9 +76,13 @@ const ID_SEPARATOR = ':';
  * Deterministic entity id from tenant scope + kind + normalised key.
  */
 function entityId(tenantScope, kind, key) {
+  // Identifier-first: identity is derived from the normalised key first.
+  // The kind is included in the final id only for human-readability but
+  // the digest is key-only so the same name resolves to the same identity
+  // regardless of how different sources classify the @type.
   const normalised = String(key ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
   if (!normalised) return null;
-  const digest = createHash('sha256').update(`${tenantScope}|${kind}|${normalised}`, 'utf-8').digest('hex').slice(0, 16);
+  const digest = createHash('sha256').update(`${tenantScope}|${normalised}`, 'utf-8').digest('hex').slice(0, 16);
   return `${tenantScope}${ID_SEPARATOR}${kind}${ID_SEPARATOR}${digest}`;
 }
 
@@ -273,52 +277,111 @@ function mergeEntities(entityLists) {
       if (!existing) {
         map.set(entity.id, { ...entity });
       } else {
-        // Per-attribute merge: non-attribute fields follow provenance rank,
-        // attributes are merged per-key preserving conflicting source values.
-        const existingRank = provenanceRank(existing.provenance);
-        const newRank = provenanceRank(entity.provenance);
+        mergeTwoEntities(existing, entity);
+      }
+    }
+  }
 
-        // Merge label: keep higher-provenance label, fall back to existing
-        if (!existing.label && entity.label) {
-          existing.label = entity.label;
-        } else if (newRank >= existingRank && entity.label) {
-          existing.label = entity.label;
-        }
+  // Identifier-first second pass: merge entities that share the same
+  // identity digest but ended up with different kinds (e.g. one source
+  // says Product, another says UNKNOWN). The kind from the entity with
+  // higher provenance rank wins.
+  const byDigest = new Map();
+  for (const entity of map.values()) {
+    // Extract digest from id. Format: tenantScope:kind:digest
+    // tenantScope may contain colons (e.g. tenant:ew05-test), so we
+    // take everything except the last two colon-separated parts.
+    const parts = entity.id.split(ID_SEPARATOR);
+    const digest = parts[parts.length - 1];
+    // kind is parts[parts.length - 2], tenantScope is parts.slice(0, -2).join(':')
+    const tenantScope = parts.slice(0, -2).join(ID_SEPARATOR);
+    const digestKey = tenantScope + ID_SEPARATOR + digest;
+    if (!byDigest.has(digestKey)) {
+      byDigest.set(digestKey, [entity]);
+    } else {
+      byDigest.get(digestKey).push(entity);
+    }
+  }
 
-        // If new has higher provenance, update scalar fields (type, provenance)
-        if (newRank >= existingRank) {
-          existing.type = entity.type;
-          existing.provenance = entity.provenance;
-        }
+  // Build a map for remapping old ids to merged ids
+  const idRemap = new Map();
+  for (const [dk, group] of byDigest) {
+    if (group.length < 2) continue;
+    // Only merge when the kind difference is classification variance
+    // (one source says Product, another has UNKNOWN). If both have
+    // specific but different kinds (Product vs Organization), they
+    // are genuinely different entities.
+    const hasUnknown = group.some((e) => e.type === ENTITY_KIND.UNKNOWN);
+    if (!hasUnknown) continue;
 
-        // Per-attribute merge: merge attributes objects by key
-        if (entity.attributes && Object.keys(entity.attributes).length > 0) {
-          if (!existing.attributes) existing.attributes = {};
-          for (const [attrKey, attrVal] of Object.entries(entity.attributes)) {
-            if (attrVal === undefined || attrVal === null) continue;
-            if (!(attrKey in existing.attributes)) {
-              // New attribute: adopt it
-              existing.attributes[attrKey] = attrVal;
-            } else if (existing.attributes[attrKey] !== attrVal) {
-              // Conflicting value: retain both as an array of source-attributed values
-              const prev = existing.attributes[attrKey];
-              if (Array.isArray(prev)) {
-                if (!prev.some((v) => typeof v === 'object' && v.value === attrVal)) {
-                  prev.push({ value: attrVal, provenance: entity.provenance, sourceId: entity.sourceId });
-                }
-              } else {
-                existing.attributes[attrKey] = [
-                  { value: prev, provenance: existing.provenance, sourceId: existing.sourceId },
-                  { value: attrVal, provenance: entity.provenance, sourceId: entity.sourceId },
-                ];
-              }
-            }
+    // Merge all into the first entity with a known kind
+    let target = group.find((e) => e.type !== ENTITY_KIND.UNKNOWN);
+    if (!target) target = group[0]; // all UNKNOWN
+    const targetIdBefore = target.id;
+    for (const other of group) {
+      if (other === target) continue;
+      // Record remapping: old id -> new resolved id
+      idRemap.set(other.id, target.id);
+      mergeTwoEntities(target, other);
+      map.delete(other.id);
+    }
+    // Rebuild id with the resolved kind (pick best non-unknown)
+    const best = target.type !== ENTITY_KIND.UNKNOWN ? target.type : ENTITY_KIND.UNKNOWN;
+    const parts = target.id.split(ID_SEPARATOR);
+    const tenantScope = parts.slice(0, -2).join(ID_SEPARATOR);
+    target.id = tenantScope + ID_SEPARATOR + best + ID_SEPARATOR + parts[parts.length - 1];
+    if (target.id !== targetIdBefore) {
+      idRemap.set(targetIdBefore, target.id);
+    }
+  }
+
+  return { entities: [...map.values()], idRemap };
+}
+
+function mergeTwoEntities(existing, entity) {
+  const existingRank = provenanceRank(existing.provenance);
+  const newRank = provenanceRank(entity.provenance);
+
+  // Merge label: keep higher-provenance label, fall back to existing
+  if (!existing.label && entity.label) {
+    existing.label = entity.label;
+  } else if (newRank >= existingRank && entity.label) {
+    existing.label = entity.label;
+  }
+
+  // If new has higher provenance, update scalar fields (type, provenance).
+  // Never downgrade a known type to UNKNOWN.
+  if (newRank >= existingRank) {
+    if (entity.type !== ENTITY_KIND.UNKNOWN || existing.type === ENTITY_KIND.UNKNOWN) {
+      existing.type = entity.type;
+    }
+    existing.provenance = entity.provenance;
+  }
+
+  // Per-attribute merge: merge attributes objects by key
+  if (entity.attributes && Object.keys(entity.attributes).length > 0) {
+    if (!existing.attributes) existing.attributes = {};
+    for (const [attrKey, attrVal] of Object.entries(entity.attributes)) {
+      if (attrVal === undefined || attrVal === null) continue;
+      if (!(attrKey in existing.attributes)) {
+        // New attribute: adopt it
+        existing.attributes[attrKey] = attrVal;
+      } else if (existing.attributes[attrKey] !== attrVal) {
+        // Conflicting value: retain both as an array of source-attributed values
+        const prev = existing.attributes[attrKey];
+        if (Array.isArray(prev)) {
+          if (!prev.some((v) => typeof v === 'object' && v.value === attrVal)) {
+            prev.push({ value: attrVal, provenance: entity.provenance, sourceId: entity.sourceId });
           }
+        } else {
+          existing.attributes[attrKey] = [
+            { value: prev, provenance: existing.provenance, sourceId: existing.sourceId },
+            { value: attrVal, provenance: entity.provenance, sourceId: entity.sourceId },
+          ];
         }
       }
     }
   }
-  return [...map.values()];
 }
 
 function provenanceRank(p) {
@@ -333,8 +396,17 @@ function provenanceRank(p) {
 // ---------------------------------------------------------------------------
 
 function detectContradictions(assertions) {
+  // Only single-valued attribute assertions can produce contradictions.
+  // Multi-valued predicates (CONTAINS, REFERENCES, DESCRIBES) are expected
+  // to have multiple values and must not generate false contradictions.
+  function isSingleValued(predicate) {
+    // Attribute assertions: describes_name, describes_sku, etc.
+    return predicate.startsWith(EW05_PREDICATES.DESCRIBES + '_');
+  }
+
   const byKey = new Map();
   for (const a of assertions) {
+    if (!isSingleValued(a.predicate)) continue;
     const key = `${a.subject}|${a.predicate}`;
     if (!byKey.has(key)) byKey.set(key, []);
     byKey.get(key).push(a);
@@ -506,15 +578,19 @@ async function extractFromSnapshots(snapshots, factsProvider) {
  * Build the final graph from extracted data.
  */
 function buildGraph(allEntities, allAssertions, allLinks) {
-  const mergedEntities = mergeEntities(allEntities);
+  const { entities: mergedEntities, idRemap } = mergeEntities(allEntities);
   const mergedAssertions = allAssertions.flat();
 
-  // Deduplicate links
+  // Deduplicate links and remap targets after identifier-first merge
   const linkMap = new Map();
   for (const link of allLinks) {
-    const key = linkDedupKey(link.source, link.target, link.predicate);
+    // Remap link source/target after identifier-first entity merge
+    const remappedLink = { ...link };
+    if (idRemap.has(link.source)) remappedLink.source = idRemap.get(link.source);
+    if (idRemap.has(link.target)) remappedLink.target = idRemap.get(link.target);
+    const key = linkDedupKey(remappedLink.source, remappedLink.target, remappedLink.predicate);
     if (!linkMap.has(key)) {
-      linkMap.set(key, link);
+      linkMap.set(key, remappedLink);
     }
   }
   const mergedLinks = [...linkMap.values()];
