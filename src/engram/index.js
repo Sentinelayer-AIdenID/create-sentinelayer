@@ -51,6 +51,33 @@ export {
   IntegrityError,
 } from "./graph-store.js";
 
+
+export {
+  FRESHNESS_CLASSES,
+  classifyFreshness,
+  isValidFreshnessClass,
+  createFreshnessMarker,
+  isFreshnessStale,
+  FreshnessClassError,
+} from "./live-state.js";
+export {
+  SOURCE_STATUSES,
+  createSourceVersion,
+  resolveAuthoritativeSource,
+  SourceVersionError,
+} from "./live-state.js";
+export {
+  mustRevalidate,
+  RevalidationRequiredError,
+} from "./live-state.js";
+export {
+  disabledByOutage,
+  SourceOutageError,
+} from "./live-state.js";
+export {
+  createCommerceContext,
+  CommerceContextError,
+} from "./live-state.js";
 import { createStore } from "./store.js";
 import { createLocalConsent } from "./namespace.js";
 import { createGovernance } from "./governance.js";

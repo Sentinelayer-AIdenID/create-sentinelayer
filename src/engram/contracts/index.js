@@ -114,3 +114,23 @@ export {
   actionReceiptSchema,
   VALID_ACTION_RECEIPT,
 } from "./action-receipt.js";
+
+// Live-state contract (EW14)
+export {
+  FRESHNESS_CLASSES,
+  classifyFreshness,
+  isValidFreshnessClass,
+  createFreshnessMarker,
+  isFreshnessStale,
+  FreshnessClassError,
+  SOURCE_STATUSES,
+  createSourceVersion,
+  resolveAuthoritativeSource,
+  SourceVersionError,
+  mustRevalidate,
+  RevalidationRequiredError,
+  disabledByOutage,
+  SourceOutageError,
+  createCommerceContext,
+  CommerceContextError,
+} from "../live-state.js";
