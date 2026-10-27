@@ -116,3 +116,14 @@ export {
   actionReceiptSchema,
   VALID_ACTION_RECEIPT,
 } from "./action-receipt.js";
+
+// Capability Index contract (EW08)
+export {
+  skillSchema,
+  capabilityIndexSchema,
+  CapabilityIndexError,
+  digestMismatch,
+  indexExpired,
+  originMismatch,
+  capabilityRevoked,
+} from "./capability-index.js";
