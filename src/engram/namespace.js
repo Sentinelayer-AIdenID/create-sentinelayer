@@ -54,7 +54,9 @@ export function parseNamespace(scope) {
 }
 
 /**
- * Create a LOCAL consent policy (P0). Fail-closed by construction: a caller
+ * Create a LOCAL consent policy (P0) — single-tenant: any identified
+ * caller is trusted on every namespace. For multi-tenant isolation use
+ * {@link createScopedConsent} instead. Fail-closed by construction: a caller
  * with no identity, or a guest (unless explicitly allowed), is denied.
  * @param {object} [options]
  * @param {boolean} [options.allowGuests=false]
@@ -66,6 +68,37 @@ export function createLocalConsent({ allowGuests = false } = {}) {
       if (!caller || !caller.id) return false; // no identity -> deny
       if (caller.kind === "guest" && !allowGuests) return false; // guests denied by default
       return true;
+    },
+  };
+}
+
+/**
+ * Create a SCOPED consent policy (multi-tenant). Fail-closed by construction:
+ * a grant maps `callerId` → `[{ namespace, scopes }]`. A caller with no grant
+ * is denied; a caller with a grant that does not match the namespace AND scope
+ * is denied.  This is the production seam for the hosted AIdenID/UserAgentGrant
+ * path (§2.1).
+ *
+ * @param {Record<string, Array<{namespace: string, scopes: string[]}>>} grants
+ * @returns {{allows: (caller:object, namespace:object, scope:string)=>boolean}}
+ *
+ * @example
+ * const consent = createScopedConsent({
+ *   "agent-a": [{ namespace: "project:alpha", scopes: ["memory:read", "memory:write"] }],
+ * });
+ */
+export function createScopedConsent(grants = {}) {
+  return {
+    allows(caller, namespace, scope) {
+      if (!caller || !caller.id) return false;
+      if (!Object.hasOwn(grants, caller.id)) return false;
+      const entries = grants[caller.id];
+      if (!Array.isArray(entries)) return false;
+      return entries.some((entry) => {
+        if (typeof entry.namespace !== "string" || entry.namespace !== namespace?.raw) return false;
+        if (!Array.isArray(entry.scopes) || !entry.scopes.includes(scope)) return false;
+        return true;
+      });
     },
   };
 }
