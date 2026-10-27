@@ -22,8 +22,9 @@ import {
   SITE_RETRIEVAL_DEFAULTS,
 } from "../src/engram/retrieve-site.js";
 import { createGraphStore } from "../src/engram/graph-store.js";
+import { VALID_SOURCE_SNAPSHOT } from "../src/engram/contracts/source-snapshot.js";
 import { createLocalConsent, parseNamespace } from "../src/engram/namespace.js";
-import { ENTITY_KIND } from "../src/engram/compile-graph.js";
+import { ENTITY_KIND, compileGraph } from "../src/engram/compile-graph.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -518,3 +519,795 @@ test("EW06 retrieve-site: short hex query does not trigger digest prefix match",
   assert.equal(result.exactMatchFound, false);
 });
 
+
+test("EW06 retrieve-site: exact match on attribute value (sku) — identifiers first", () => {
+  const embedder = createEmbedder();
+  // Gadget Max has sku GM-200; the decoy has "GM-200" in its label but sku CASE-1.
+  const graph = makeGraph([
+    productEntity("test-tenant:product:gadget", "Gadget Max", { sku: "GM-200" }),
+    productEntity("test-tenant:product:decoy", "GM-200 GM-200 case for the GM-200", { sku: "CASE-1" }),
+  ], [
+    assertion("test-tenant:product:gadget", "describes_sku", "GM-200"),
+    assertion("test-tenant:product:decoy", "describes_sku", "CASE-1"),
+  ]);
+
+  const result = retrieveSiteEntities({
+    graph,
+    query: "GM-200",
+    k: 5,
+    embedder,
+    tenantScope: "test-tenant",
+    now: FIXED_NOW,
+  });
+
+  assert.equal(result.ok, true);
+  // Exact match on attribute value (sku=GM-200) must fire.
+  assert.equal(result.exactMatchFound, true, "exactMatchFound must be true for attribute SKU match");
+  // Gadget Max (the real GM-200) must be first, not the decoy.
+  assert.equal(result.results[0].entityId, "test-tenant:product:gadget",
+    "Gadget Max (real GM-200) must rank first, not the decoy");
+  assert.deepEqual(result.results[0].channels, ["exact_id"]);
+  assert.equal(result.results[0].score, 1.0);
+});
+
+test("EW06 retrieve-site: exact match on describes_sku assertion value (no entity attribute)", () => {
+  const embedder = createEmbedder();
+  // Entity has NO attributes but an assertion carries the identifier value.
+  const graph = makeGraph([
+    productEntity("test-tenant:product:prod1", "Alpha Desk Lamp"),
+    productEntity("test-tenant:product:prod2", "Zeta Claw Hammer"),
+  ], [
+    assertion("test-tenant:product:prod1", "describes_sku", "ADL-500"),
+    assertion("test-tenant:product:prod2", "describes_sku", "ZCH-100"),
+  ]);
+
+  const result = retrieveSiteEntities({
+    graph,
+    query: "ADL-500",
+    k: 5,
+    embedder,
+    tenantScope: "test-tenant",
+    now: FIXED_NOW,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.exactMatchFound, true,
+    "exactMatchFound must be true for describes_sku assertion value match");
+  assert.equal(result.results[0].entityId, "test-tenant:product:prod1");
+  assert.deepEqual(result.results[0].channels, ["exact_id"]);
+});
+
+test("EW06 retrieve-site: exact match on gtin attribute from EW05-style entity", () => {
+  const embedder = createEmbedder();
+  const graph = makeGraph([
+    productEntity("test-tenant:product:a", "Widget A", { gtin: "00012345678905" }),
+    productEntity("test-tenant:product:b", "Widget B", { gtin: "00098765432109" }),
+  ]);
+
+  const result = retrieveSiteEntities({
+    graph,
+    query: "00012345678905",
+    k: 3,
+    embedder,
+    tenantScope: "test-tenant",
+    now: FIXED_NOW,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.exactMatchFound, true);
+  assert.equal(result.results[0].entityId, "test-tenant:product:a");
+  assert.deepEqual(result.results[0].channels, ["exact_id"]);
+});
+
+test("EW06 retrieve-site: non-matching attribute query does not falsely flag exactMatchFound", () => {
+  const embedder = createEmbedder();
+  const graph = makeGraph([
+    productEntity("test-tenant:product:a", "Widget Pro", { sku: "WP-100" }),
+    productEntity("test-tenant:product:b", "Gadget Max", { sku: "GM-200" }),
+  ]);
+
+  // "Widget" appears in label but is NOT an attribute value — must NOT be exactMatchFound.
+  const result = retrieveSiteEntities({
+    graph,
+    query: "Widget",
+    k: 5,
+    embedder,
+    tenantScope: "test-tenant",
+    now: FIXED_NOW,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.exactMatchFound, false,
+    "label substring must not trigger exactMatchFound");
+  assert.ok(result.results.length > 0);
+});
+
+test("EW06 retrieve-site: expansion uses graph links — results carry non-empty channel diversity", () => {
+  const embedder = createEmbedder();
+  // Page describes two products — the recall engine should create entity
+  // bindings so that expansion diffuses across the graph, not just the author hub.
+  const graph = makeGraph([
+    productEntity("test-tenant:product:alpha", "Alpha Desk Lamp", { sku: "ADL-500" }),
+    productEntity("test-tenant:product:zeta", "Zeta Claw Hammer", { sku: "ZCH-100" }),
+    pageEntity("test-tenant:page:shop1", "Shop Page"),
+  ], [
+    assertion("test-tenant:page:shop1", "describes", { entityId: "test-tenant:product:alpha" }),
+    assertion("test-tenant:page:shop1", "describes", { entityId: "test-tenant:product:zeta" }),
+  ]);
+
+  const result = retrieveSiteEntities({
+    graph,
+    query: "reading lamp",
+    k: 5,
+    embedder,
+    tenantScope: "test-tenant",
+    now: FIXED_NOW,
+  });
+
+  assert.equal(result.ok, true);
+  assert.ok(result.results.length > 0, "must surface at least one result");
+
+  // Check that at least some results carry entity-linked provenance (not all
+  // are expansion-only with empty channels). With graph links populated,
+  // the recall engine should build entity bindings beyond the author hub.
+  const resultWithChannels = result.results.filter(
+    (r) => Array.isArray(r.channels) && r.channels.length > 0,
+  );
+  assert.ok(resultWithChannels.length > 0,
+    "at least one result must have non-empty channels from entity-linked expansion");
+
+  // Verify the breakdown reflects expansion activity (not all viaExpansionOnly).
+  const nonExpansionOnly = result.results.filter(
+    (r) => r.breakdown && r.breakdown.viaExpansionOnly !== true,
+  );
+  // At least the top semantic match should not be expansion-only.
+  assert.ok(nonExpansionOnly.length > 0,
+    "at least one result must not be viaExpansionOnly — direct semantic match expected");
+});
+
+test("EW06 retrieve-site: site graph expansion — depth 1 from top hits, Zeta not reachable", () => {
+  const embedder = createEmbedder();
+  // Two products linked to one page via describes. Query "reading lamp"
+  // matches Alpha semantically. Shop may appear via reverse link from Alpha
+  // (Shop describes Alpha). Zeta is depth 2 away (Alpha -> Shop -> Zeta)
+  // and must NOT appear.
+  const graph = makeGraph([
+    productEntity("test-tenant:product:alpha", "Alpha Desk Lamp"),
+    productEntity("test-tenant:product:zeta", "Zeta Claw Hammer"),
+    pageEntity("test-tenant:page:shop", "Shop"),
+  ], [
+    assertion("test-tenant:page:shop", "describes", { entityId: "test-tenant:product:alpha" }),
+    assertion("test-tenant:page:shop", "describes", { entityId: "test-tenant:product:zeta" }),
+  ]);
+
+  const result = retrieveSiteEntities({
+    graph,
+    query: "reading lamp",
+    k: 10,
+    embedder,
+    tenantScope: "test-tenant",
+    now: FIXED_NOW,
+  });
+
+  assert.equal(result.ok, true);
+  assert.ok(result.results.length > 0, "must surface at least one result");
+  const ids = result.results.map((r) => r.entityId);
+  // Alpha must be top semantic match for "reading lamp".
+  assert.ok(ids.includes("test-tenant:product:alpha"),
+    "Alpha Desk Lamp must appear for reading lamp query");
+  // Shop may appear via expansion (reverse link from Alpha).
+  // Zeta must NOT appear — it is depth 2 via Shop which is beyond depth-1 expansion.
+  assert.ok(!ids.includes("test-tenant:product:zeta"),
+    "Zeta Claw Hammer must NOT be reachable — depth 2 via Shop is beyond depth-1 expansion");
+});
+
+test("EW06 retrieve-site: null assertions/links do not crash entityToObservation", () => {
+  const embedder = createEmbedder();
+  // Graph with a null assertion and a null link — must not crash.
+  const graph = {
+    version: "1.0.0",
+    entities: [
+      productEntity("test-tenant:product:a", "Widget A", { sku: "W-100" }),
+    ],
+    assertions: [
+      null,
+      assertion("test-tenant:product:a", "describes_sku", "W-100"),
+      undefined,
+    ],
+    links: [
+      null,
+      { subject: "test-tenant:product:a", object: { entityId: "test-tenant:page:x" } },
+    ],
+    coverage: {
+      totalAssertions: 3,
+      byProvenance: { observed: 3 },
+    },
+    generatedAt: new Date().toISOString(),
+  };
+
+  // Must not throw.
+  const result = retrieveSiteEntities({
+    graph,
+    query: "W-100",
+    k: 5,
+    embedder,
+    tenantScope: "test-tenant",
+    now: FIXED_NOW,
+  });
+
+  assert.equal(result.ok, true);
+  // The valid assertion still works for exact match.
+  assert.equal(result.exactMatchFound, true);
+  assert.equal(result.results[0].entityId, "test-tenant:product:a");
+});
+
+test("EW06 retrieve-site: null entries in assertion map do not crash exact match", () => {
+  const embedder = createEmbedder();
+  const graph = makeGraph([
+    productEntity("test-tenant:product:a", "Widget A", { sku: "W-100" }),
+  ], [
+    null,
+    assertion("test-tenant:product:a", "describes_sku", "W-100"),
+  ]);
+
+  const result = retrieveSiteEntities({
+    graph,
+    query: "W-100",
+    k: 5,
+    embedder,
+    tenantScope: "test-tenant",
+    now: FIXED_NOW,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.exactMatchFound, true);
+});
+
+// ---------------------------------------------------------------------------
+// Problem 3: Generation-bound cursor tests
+// ---------------------------------------------------------------------------
+
+test("EW06 retrieve-site: garbage cursor returns cursor_invalid", () => {
+  const embedder = createEmbedder();
+  const graph = makeGraph([productEntity("test-tenant:product:a", "Widget A")]);
+
+  const result = retrieveSiteEntities({
+    graph,
+    query: "widget",
+    k: 5,
+    embedder,
+    tenantScope: "test-tenant",
+    cursor: "!!!not-valid-base64!!!",
+    now: FIXED_NOW,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "cursor_invalid");
+  assert.deepEqual(result.results, []);
+  assert.equal(result.nextCursor, null);
+});
+
+test("EW06 retrieve-site: stale generation cursor returns cursor_stale", () => {
+  const embedder = createEmbedder();
+  const graph = makeGraph([productEntity("test-tenant:product:a", "Widget A")]);
+  // graph has no generation field, defaults to 0
+  // Build a cursor for generation 99 (stale)
+  const staleCursor = Buffer.from(JSON.stringify({ v: "v99", o: 0, q: "123" }), "utf-8").toString("base64url");
+
+  const result = retrieveSiteEntities({
+    graph,
+    query: "widget",
+    k: 5,
+    embedder,
+    tenantScope: "test-tenant",
+    cursor: staleCursor,
+    now: FIXED_NOW,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "cursor_stale");
+});
+
+test("EW06 retrieve-site: mismatched query hash cursor returns cursor_stale", () => {
+  const embedder = createEmbedder();
+  const graph = makeGraph([productEntity("test-tenant:product:a", "Widget A")]);
+
+  // Build a cursor with correct generation (0) but wrong query hash.
+  const wrongHashCursor = Buffer.from(JSON.stringify({ v: "", o: 0, q: "wrong-hash" }), "utf-8").toString("base64url");
+
+  const result = retrieveSiteEntities({
+    graph,
+    query: "widget",
+    k: 5,
+    embedder,
+    tenantScope: "test-tenant",
+    cursor: wrongHashCursor,
+    now: FIXED_NOW,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "cursor_stale");
+});
+
+test("EW06 retrieve-site: generation-bound cursor produces valid nextCursor on successive pages", () => {
+  const embedder = createEmbedder();
+  // 25 entities — enough for multiple pages.
+  const entities = [];
+  for (let i = 0; i < 25; i++) {
+    entities.push(productEntity(`test-tenant:product:${String(i).padStart(3, "0")}`, `Product ${i}`));
+  }
+  const graph = makeGraph(entities);
+
+  // Page 1.
+  const page1 = retrieveSiteEntities({
+    graph,
+    query: "Product",
+    k: 25,
+    embedder,
+    tenantScope: "test-tenant",
+    now: FIXED_NOW,
+  });
+
+  assert.equal(page1.ok, true);
+  assert.ok(page1.results.length > 0);
+  assert.ok(page1.nextCursor, "must have next cursor");
+  assert.ok(page1.hasMore);
+
+  // Decode the cursor.
+  const decoded1 = JSON.parse(Buffer.from(page1.nextCursor, "base64url").toString("utf-8"));
+  assert.equal(typeof decoded1.v, "string", "version must be a string");
+  assert.ok(typeof decoded1.o === "number" && decoded1.o > 0, "offset must be > 0");
+  assert.ok(typeof decoded1.q === "string" && decoded1.q.length > 0, "query hash must be present");
+
+  // Page 2.
+  const page2 = retrieveSiteEntities({
+    graph,
+    query: "Product",
+    k: 25,
+    embedder,
+    tenantScope: "test-tenant",
+    cursor: page1.nextCursor,
+    now: FIXED_NOW,
+  });
+
+  assert.equal(page2.ok, true);
+  // Verify no overlap between pages.
+  const page1Ids = new Set(page1.results.map((r) => r.entityId));
+  const page2Overlap = page2.results.filter((r) => page1Ids.has(r.entityId));
+  assert.equal(page2Overlap.length, 0, "pages must not overlap");
+});
+
+// ---------------------------------------------------------------------------
+// Problem 4: Re-authorization test
+// ---------------------------------------------------------------------------
+
+test("EW06 retrieve-site: generation_changed when graph is republished between read and serve", async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "ew06-reauth-"));
+  const storeRoot = path.join(tempRoot, "workspace");
+  try {
+    const consent = createLocalConsent();
+    const graphStore = createGraphStore({ storeRoot, consent });
+    const ns = parseNamespace("site:test-reauth");
+    const caller = { id: "test-runner", roles: ["admin"] };
+
+    // Publish graph v1.
+    const graph1 = makeGraph([productEntity("site:test-reauth:product:a", "Widget Alpha")]);
+    await graphStore.publishGraph(caller, ns, graph1);
+
+    // Read current and get the version.
+    const current = await graphStore.readCurrentGraph(caller, ns);
+    assert.ok(current.version >= 1);
+
+    // Publish graph v2 (incrementing the generation).
+    const graph2 = makeGraph([productEntity("site:test-reauth:product:b", "Widget Beta")]);
+    await graphStore.publishGraph(caller, ns, graph2);
+
+    // Now retrieve with graphStore — it reads current (v2), but we'll simulate
+    // a stale read by directly comparing: the readCurrentGraph inside
+    // retrieveFromGraphStore will get v2, and listGraphVersions will also
+    // return v2, so no generation_changed. This is the normal case.
+    const result = await retrieveFromGraphStore({
+      graphStore,
+      caller,
+      namespace: ns,
+      query: "widget",
+      k: 5,
+      now: FIXED_NOW,
+    });
+
+    assert.equal(result.ok, true);
+
+    // Now test: if readCurrentGraph returns v1 but listGraphVersions returns v2,
+    // retrieveFromGraphStore should return generation_changed.
+    // We test this by mocking: create a store where read returns v1 but versions list v2.
+    // This simulates a concurrent publish between read and serve.
+    const mockStore = {
+      readCurrentGraph: async () => ({ graph: graph1, version: 1 }),
+      listGraphVersions: async () => [{ version: 1 }, { version: 2 }],
+    };
+
+    const staleResult = await retrieveFromGraphStore({
+      graphStore: mockStore,
+      caller,
+      namespace: ns,
+      query: "widget",
+      k: 5,
+      now: FIXED_NOW,
+    });
+
+    assert.equal(staleResult.ok, false);
+    assert.equal(staleResult.reason, "generation_changed");
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("EW06 retrieve-site: re-authorization failure returns forbidden", async () => {
+  const embedder = createEmbedder();
+
+  // Mock store where listGraphVersions throws an authorization error.
+  const mockStore = {
+    readCurrentGraph: async () => ({
+      graph: makeGraph([productEntity("test:product:a", "Widget A")]),
+      version: 1,
+    }),
+    listGraphVersions: async () => {
+      throw new Error("access denied");
+    },
+  };
+
+  const result = await retrieveFromGraphStore({
+    graphStore: mockStore,
+    caller: { id: "unauthorized" },
+    namespace: parseNamespace("site:test-forbid"),
+    query: "widget",
+    k: 5,
+    now: FIXED_NOW,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "forbidden");
+});
+
+// ---------------------------------------------------------------------------
+// Problem 5: Large catalog reachability
+// ---------------------------------------------------------------------------
+
+test("EW06 retrieve-site: 500-product catalog all reachable through pagination", () => {
+  const embedder = createEmbedder();
+  const entities = [];
+  for (let i = 0; i < 500; i++) {
+    entities.push(productEntity(
+      `test-tenant:product:${String(i).padStart(4, "0")}`,
+      `Widget ${i}`,
+    ));
+  }
+  const graph = makeGraph(entities);
+
+  let cursor = "";
+  const seen = new Set();
+  let pages = 0;
+  let totalResults = 0;
+
+  while (pages < 50) {
+    const result = retrieveSiteEntities({
+      graph,
+      query: "Widget",
+      k: 100,
+      embedder,
+      tenantScope: "test-tenant",
+      cursor,
+      now: FIXED_NOW,
+    });
+
+    if (!result.ok) break;
+    if (result.results.length === 0) break;
+
+    pages++;
+    totalResults += result.results.length;
+
+    for (const r of result.results) {
+      seen.add(r.entityId);
+    }
+
+    if (!result.nextCursor) break;
+    cursor = result.nextCursor;
+  }
+
+  // All 500 entities should be reachable.
+  assert.ok(seen.size >= 500, `all 500 products must be reachable through pagination, got ${seen.size}`);
+  assert.ok(pages > 1, "must span multiple pages");
+});
+
+
+test("EW06 retrieve-site: AccessDenied from graph store returns reason forbidden", async () => {
+  const mockStore = {
+    readCurrentGraph: async () => {
+      const err = new Error("caller 'agent-other' lacks access to namespace tenant:probe");
+      err.name = "AccessDeniedError";
+      throw err;
+    },
+  };
+
+  const result = await retrieveFromGraphStore({
+    graphStore: mockStore,
+    caller: { id: "agent-other" },
+    namespace: parseNamespace("tenant:probe"),
+    query: "widget",
+    k: 5,
+    now: FIXED_NOW,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "forbidden");
+});
+
+
+// ---------------------------------------------------------------------------
+// Case-insensitive identifier match
+// ---------------------------------------------------------------------------
+
+test("EW06 retrieve-site: lowercase query gm-200 is exact match for sku GM-200", () => {
+  const embedder = createEmbedder();
+  // Gadget Max has sku GM-200; the decoy has "GM-200" in its label but sku CASE-1.
+  const graph = makeGraph([
+    productEntity("test-tenant:product:gadget", "Gadget Max", { sku: "GM-200" }),
+    productEntity("test-tenant:product:decoy", "GM-200 GM-200 case for the GM-200", { sku: "CASE-1" }),
+  ], [
+    assertion("test-tenant:product:gadget", "describes_sku", "GM-200"),
+    assertion("test-tenant:product:decoy", "describes_sku", "CASE-1"),
+  ]);
+
+  // Lowercase query "gm-200" must still exact-match the sku "GM-200".
+  const result = retrieveSiteEntities({
+    graph,
+    query: "gm-200",
+    k: 5,
+    embedder,
+    tenantScope: "test-tenant",
+    now: FIXED_NOW,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.exactMatchFound, true,
+    "exactMatchFound must be true for case-insensitive SKU match");
+  // Gadget Max (the real GM-200) must be first, not the decoy.
+  assert.equal(result.results[0].entityId, "test-tenant:product:gadget",
+    "Gadget Max (real GM-200) must rank first with case-insensitive query");
+  assert.deepEqual(result.results[0].channels, ["exact_id"]);
+  assert.equal(result.results[0].score, 1.0);
+});
+
+
+// ---------------------------------------------------------------------------
+// Cursor stale after republish through graph-store
+// ---------------------------------------------------------------------------
+
+test("EW06 retrieve-site: cursor stale after graph republish through retrieveFromGraphStore", async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "ew06-cursor-stale-"));
+  const storeRoot = path.join(tempRoot, "workspace");
+  try {
+    const consent = createLocalConsent();
+    const graphStore = createGraphStore({ storeRoot, consent });
+    const ns = parseNamespace("site:test-cursor-stale");
+    const caller = { id: "test-runner", roles: ["admin"] };
+
+    // Publish graph v1 via writeSourceSnapshot + compileGraph.
+    const { contentHash: _ch, ...snapBase } = VALID_SOURCE_SNAPSHOT;
+    const snap1 = { ...snapBase, sourceId: "src-shop", tenantScope: "site:test-cursor-stale", sourceType: "ingest" };
+
+    // Build 25 products so there are enough for multiple pages.
+    const products1 = [];
+    for (let i = 0; i < 25; i++) {
+      products1.push({ "@type": "Product", name: `Widget ${i}`, sku: `W-${String(i).padStart(3, "0")}` });
+    }
+    await graphStore.writeSourceSnapshot(caller, ns, snap1, Buffer.from("<html><head><title>Shop</title></head><body>widgets</body></html>"));
+
+    const factsProvider1 = () => Promise.resolve({
+      title: "Shop",
+      description: "Shop page for cursor stale test",
+      canonical: "https://shop.example.com/cursor-stale",
+      headings: [],
+      links: [],
+      jsonLd: products1,
+    });
+    await compileGraph({
+      graphStore,
+      caller,
+      namespace: ns,
+      factsProvider: factsProvider1,
+    });
+
+    // Page 1 — get a cursor.
+    const page1 = await retrieveFromGraphStore({
+      graphStore,
+      caller,
+      namespace: ns,
+      query: "Widget",
+      k: 25,
+      now: FIXED_NOW,
+    });
+    assert.equal(page1.ok, true);
+    assert.ok(page1.nextCursor, "must have a next cursor after page 1");
+    const cursor1 = page1.nextCursor;
+
+    // Republish — new snapshot, compile again (different sourceId so new generation).
+    const snap2 = { ...snapBase, sourceId: "src-shop-v2", tenantScope: "site:test-cursor-stale", sourceType: "ingest" };
+    const products2 = [];
+    for (let i = 0; i < 25; i++) {
+      products2.push({ "@type": "Product", name: `Gadget ${i}`, sku: `G-${String(i).padStart(3, "0")}` });
+    }
+    await graphStore.writeSourceSnapshot(caller, ns, snap2, Buffer.from("<html><head><title>Shop v2</title></head><body>gadgets</body></html>"));
+
+    const factsProvider2 = () => Promise.resolve({
+      title: "Shop v2",
+      description: "Updated shop page",
+      canonical: "https://shop.example.com/cursor-stale",
+      headings: [],
+      links: [],
+      jsonLd: products2,
+    });
+    await compileGraph({
+      graphStore,
+      caller,
+      namespace: ns,
+      factsProvider: factsProvider2,
+    });
+
+    // Page 2 with the old cursor — must return cursor_stale.
+    const page2 = await retrieveFromGraphStore({
+      graphStore,
+      caller,
+      namespace: ns,
+      query: "Widget",
+      k: 25,
+      cursor: cursor1,
+      now: FIXED_NOW,
+    });
+    assert.equal(page2.ok, false);
+    assert.equal(page2.reason, "cursor_stale",
+      "old cursor must be stale after republish");
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("EW06 retrieve-site: 500-product catalog all reachable through retrieveFromGraphStore with no cursor_stale", async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "ew06-paginate-500-"));
+  const storeRoot = path.join(tempRoot, "workspace");
+  try {
+    const consent = createLocalConsent();
+    const graphStore = createGraphStore({ storeRoot, consent });
+    const ns = parseNamespace("site:test-paginate-500");
+    const caller = { id: "test-runner", roles: ["admin"] };
+
+    const { contentHash: _ch, ...snapBase } = VALID_SOURCE_SNAPSHOT;
+    const snap = { ...snapBase, sourceId: "src-shop-500", tenantScope: "site:test-paginate-500", sourceType: "ingest" };
+
+    const products = [];
+    for (let i = 0; i < 500; i++) {
+      products.push({ "@type": "Product", name: `Widget ${i}`, sku: `W-${String(i).padStart(3, "0")}` });
+    }
+    await graphStore.writeSourceSnapshot(caller, ns, snap, Buffer.from("<html><head><title>500 Widgets</title></head><body>widgets</body></html>"));
+
+    const factsProvider = () => Promise.resolve({
+      title: "500 Widgets",
+      description: "Catalog of 500 widgets",
+      canonical: "https://shop.example.com/widgets-500",
+      headings: [],
+      links: [],
+      jsonLd: products,
+    });
+    await compileGraph({
+      graphStore,
+      caller,
+      namespace: ns,
+      factsProvider,
+    });
+
+    const seen = new Set();
+    let pages = 0;
+    let cursor = "";
+
+    while (pages < 50) {
+      const result = await retrieveFromGraphStore({
+        graphStore,
+        caller,
+        namespace: ns,
+        query: "Widget",
+        k: 100,
+        cursor,
+        now: FIXED_NOW,
+      });
+
+      assert.equal(result.ok, true, `page ${pages + 1} must be ok`);
+      if (result.results.length === 0) break;
+
+      pages++;
+      for (const r of result.results) {
+        seen.add(r.entityId);
+      }
+
+      if (!result.nextCursor) break;
+      cursor = result.nextCursor;
+    }
+
+    assert.ok(seen.size >= 500, `all 500 products must be reachable through pagination, got ${seen.size}`);
+    assert.ok(pages > 1, "must span multiple pages");
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("EW06 retrieve-site: 45-product pagination (k=20, 3 pages) with no cursor_stale and all products reached exactly once", async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "ew06-45p-"));
+  const storeRoot = path.join(tempRoot, "workspace");
+  try {
+    const consent = createLocalConsent();
+    const graphStore = createGraphStore({ storeRoot, consent });
+    const ns = parseNamespace("site:test-45p");
+    const caller = { id: "test-runner", roles: ["admin"] };
+
+    const { contentHash: _ch, ...snapBase } = VALID_SOURCE_SNAPSHOT;
+    const snap = { ...snapBase, sourceId: "src-45p", tenantScope: "site:test-45p", sourceType: "ingest" };
+
+    const PRODUCT_COUNT = 45;
+    const products = [];
+    for (let i = 0; i < PRODUCT_COUNT; i++) {
+      products.push({ "@type": "Product", name: `Product ${i}`, sku: `SKU-${String(i).padStart(3, "0")}` });
+    }
+    await graphStore.writeSourceSnapshot(caller, ns, snap, Buffer.from("<html><head><title>45 Products</title></head><body>products</body></html>"));
+
+    const factsProvider = () => Promise.resolve({
+      title: "45 Products",
+      description: "Catalog of 45 products",
+      canonical: "https://shop.example.com/45-products",
+      headings: [],
+      links: [],
+      jsonLd: products,
+    });
+    await compileGraph({
+      graphStore,
+      caller,
+      namespace: ns,
+      factsProvider,
+    });
+
+    const seen = new Set();
+    let pages = 0;
+    let cursor = "";
+
+    while (pages < 10) {
+      const result = await retrieveFromGraphStore({
+        graphStore,
+        caller,
+        namespace: ns,
+        query: "Product",
+        k: 20,
+        cursor,
+        now: FIXED_NOW,
+      });
+
+      assert.equal(result.ok, true, `page ${pages + 1} must be ok (got reason=${result.reason})`);
+      assert.notEqual(result.reason, "cursor_stale", `page ${pages + 1} must not be cursor_stale`);
+
+      if (result.results.length === 0) break;
+
+      pages++;
+
+      for (const r of result.results) {
+        if (r.entityId.includes(":product:")) {
+          seen.add(r.entityId);
+        }
+      }
+
+      if (!result.nextCursor) break;
+      cursor = result.nextCursor;
+    }
+
+    assert.equal(seen.size, PRODUCT_COUNT, `all ${PRODUCT_COUNT} products must be reachable, got ${seen.size}`);
+    assert.ok(pages >= 3, `must span at least 3 pages (k=20, ${PRODUCT_COUNT} products), got ${pages} pages`);
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
