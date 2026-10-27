@@ -104,9 +104,12 @@ test('EW05 R02 graph: multiple snapshots merge entities by deterministic id', as
       }),
     });
 
-    // Same product name → same deterministic id → one merged entity
+    // Name-only products from different sources stay separate per EW05 (3)
     const productEntities = result.entities.filter((e) => e.type === 'product');
-    assert.equal(productEntities.length, 1, 'should deduplicate product by deterministic id');
+    assert.equal(productEntities.length, 2, 'name-only products from different sources stay separate');
+    // But they are linked by same_as_candidate
+    const candidateLinks = result.links.filter((l) => l.predicate === 'same_as_candidate');
+    assert.equal(candidateLinks.length, 1, 'name-only matches produce a same_as_candidate link');
   });
 });
 
@@ -315,8 +318,11 @@ test('EW05 constraint: authoritative entities are not overwritten by derived', a
       }),
     });
 
+    // Name-only products stay separate with same_as_candidate per EW05 (3)
     const products = result.entities.filter((e) => e.type === 'product');
-    assert.equal(products.length, 1, 'same product from two snapshots merges to one');
+    assert.equal(products.length, 2, 'name-only products from different sources stay separate');
+    const candidateLinks = result.links.filter((l) => l.predicate === 'same_as_candidate');
+    assert.equal(candidateLinks.length, 1, 'name-only match produces same_as_candidate link');
   });
 });
 
@@ -396,6 +402,171 @@ test('EW05 R03 traversal: links form navigable adjacency', async () => {
 });
 
 // ---------------------------------------------------------------------------
+// (3) Identifier-first identity resolution:
+// Priority: @id -> sku/gtin/productID/identifier -> name.
+// Two NAME-only products stay separate + same_as_candidate edge.
+test('EW05 (3): same @id merges; name-only products stay separate with candidate link', async () => {
+  await withGraphStore(async (store) => {
+    const ns = parseNamespace(TENANT);
+    const { contentHash: _ch, ...snapBase } = VALID_SOURCE_SNAPSHOT;
+
+    // Two pages, each with a 'Widget' product — no @id, no sku, just name.
+    // They must remain separate entities with a same_as_candidate link.
+    const snapA = { ...snapBase, sourceId: 'src-name-a', tenantScope: TENANT, sourceType: 'ingest' };
+    const snapB = { ...snapBase, sourceId: 'src-name-b', tenantScope: TENANT, sourceType: 'ingest' };
+
+    await store.writeSourceSnapshot(CALLER, ns, snapA, Buffer.from('<html>Page A</html>'));
+    await store.writeSourceSnapshot(CALLER, ns, snapB, Buffer.from('<html>Page B</html>'));
+
+    const perSourceFacts = async (snap) => {
+      if (snap.sourceId === 'src-name-a') {
+        return {
+          canonical: 'https://example.com/page-a',
+          jsonLd: [{ '@type': 'Product', name: 'Widget' }],
+        };
+      }
+      return {
+        canonical: 'https://example.com/page-b',
+        jsonLd: [{ '@type': 'Product', name: 'Widget' }],
+      };
+    };
+
+    const result = await compileGraph({
+      graphStore: store, caller: CALLER, namespace: ns,
+      factsProvider: perSourceFacts,
+    });
+
+    // Two 'Widget' products with no ids → 2 entities
+    const widgetEntities = result.entities.filter((e) => e.label === 'Widget');
+    assert.equal(widgetEntities.length, 2,
+      'name-only products from different sources must stay separate');
+
+    // Must have a same_as_candidate link between them
+    const candidateLinks = result.links.filter((l) => l.predicate === 'same_as_candidate');
+    assert.equal(candidateLinks.length, 1,
+      'name-only match must produce exactly one same_as_candidate link');
+  });
+});
+
+test('EW05 (3): same @id across two pages merges into one entity', async () => {
+  await withGraphStore(async (store) => {
+    const ns = parseNamespace(TENANT);
+    const { contentHash: _ch, ...snapBase } = VALID_SOURCE_SNAPSHOT;
+
+    const snapA = { ...snapBase, sourceId: 'src-atid-a', tenantScope: TENANT, sourceType: 'ingest' };
+    const snapB = { ...snapBase, sourceId: 'src-atid-b', tenantScope: TENANT, sourceType: 'ingest' };
+
+    await store.writeSourceSnapshot(CALLER, ns, snapA, Buffer.from('<html>Page A</html>'));
+    await store.writeSourceSnapshot(CALLER, ns, snapB, Buffer.from('<html>Page B</html>'));
+
+    const perSourceFacts = async (snap) => {
+      if (snap.sourceId === 'src-atid-a') {
+        return {
+          canonical: 'https://example.com/page-a',
+          jsonLd: [{ '@type': 'Product', '@id': 'https://example.com/products/widget', name: 'Widget A' }],
+        };
+      }
+      return {
+        canonical: 'https://example.com/page-b',
+        jsonLd: [{ '@type': 'Product', '@id': 'https://example.com/products/widget', name: 'Widget B' }],
+      };
+    };
+
+    const result = await compileGraph({
+      graphStore: store, caller: CALLER, namespace: ns,
+      factsProvider: perSourceFacts,
+    });
+
+    // Same @id must merge → 1 entity
+    const widgetEntities = result.entities.filter((e) => e.type === 'product');
+    assert.equal(widgetEntities.length, 1, 'same @id must produce exactly one entity');
+  });
+});
+
+// (5) A page known only from a link is marked unresolved and gets no
+// label from anchor text. The placeholder must have provenance 'unresolved'.
+test('EW05 (5): link-only page placeholders are unresolved with no anchor label', async () => {
+  await withGraphStore(async (store) => {
+    const ns = parseNamespace(TENANT);
+    const { contentHash: _ch, ...snapBase } = VALID_SOURCE_SNAPSHOT;
+
+    // Only the linker page is ingested; the target is a link-only placeholder
+    const snap = { ...snapBase, sourceId: 'src-linker-only', tenantScope: TENANT, sourceType: 'ingest' };
+    await store.writeSourceSnapshot(CALLER, ns, snap, Buffer.from('<html>Linker only</html>'));
+
+    const targetUrl = 'https://example.com/never-ingested';
+
+    const result = await compileGraph({
+      graphStore: store, caller: CALLER, namespace: ns,
+      factsProvider: mockFactsProvider({
+        canonical: 'https://example.com/linker-only',
+        jsonLd: [],
+        links: [{ href: targetUrl, text: 'Click here for more' }],
+      }),
+    });
+
+    // Find the target page entity (the placeholder created from the link)
+    const targetEntities = result.entities.filter(
+      (e) => e.type === 'page' && e.id !== result.entities.find(
+        (pe) => pe.type === 'page' && pe.label === 'Test Page'
+      )?.id
+    );
+
+    // There should be a placeholder page for the link target
+    const placeholder = result.entities.find((e) => {
+      // The placeholder is the page entity that isn't the source page
+      const refLinks = result.links.filter((l) => l.target === e.id && l.predicate === 'references');
+      return e.type === 'page' && refLinks.length > 0;
+    });
+
+    assert.ok(placeholder, 'placeholder page entity must exist for link-only target');
+
+    // Placeholder must NOT have a label from anchor text
+    if (placeholder.label) {
+      assert.notEqual(placeholder.label, 'Click here for more',
+        'placeholder must not use anchor text as label');
+    }
+
+    // Placeholder provenance must be 'unresolved', not 'observed'
+    assert.equal(placeholder.provenance, 'unresolved',
+      'link-only page placeholder must have provenance unresolved');
+  });
+});
+
+// (4) Deterministic rebuild: no new Date() inside the graph.
+// Compiling twice from the same snapshots must give byte-identical graph JSON.
+test('EW05 (4): deterministic rebuild produces byte-identical graph JSON', async () => {
+  await withGraphStore(async (store) => {
+    const ns = parseNamespace(TENANT);
+    const { contentHash: _ch, ...snapBase } = VALID_SOURCE_SNAPSHOT;
+
+    const snap = { ...snapBase, sourceId: 'src-det-rebuild', tenantScope: TENANT, sourceType: 'ingest' };
+    await store.writeSourceSnapshot(CALLER, ns, snap, Buffer.from('<html>Deterministic</html>'));
+
+    const facts = mockFactsProvider({
+      canonical: 'https://example.com/det-rebuild',
+      jsonLd: [{ '@type': 'Product', name: 'DetProduct', sku: 'DET-001' }],
+    });
+
+    const result1 = await compileGraph({
+      graphStore: store, caller: CALLER, namespace: ns, factsProvider: facts,
+    });
+
+    const result2 = await compileGraph({
+      graphStore: store, caller: CALLER, namespace: ns, factsProvider: facts,
+    });
+
+    // Graph JSON must be byte-identical (no new Date() timestamps inside)
+    const json1 = JSON.stringify(result1.graph);
+    const json2 = JSON.stringify(result2.graph);
+    assert.equal(json1, json2, 'compileGraph must produce byte-identical graph JSON on rebuild');
+
+    // contentHash must match
+    // contentHash includes version which increments per publish, so it differs.
+    // Only graph JSON must be byte-identical.
+  });
+});
+
 // Unresolved placeholders: placeholder page entities from link targets
 // must be resolved when the target page's own snapshot is ingested.
 test('EW05 placeholders: link-target placeholders resolve when target page arrives', async () => {
@@ -507,44 +678,6 @@ test('EW05 deterministic: snapshot order independence', async () => {
   });
 });
 
-// Identifier-first identity: same name with different @type classifications
-// from different sources should still resolve to the same entity.
-test('EW05 identity: identifier-first resolution merges across kind differences', async () => {
-  await withGraphStore(async (store) => {
-    const ns = parseNamespace(TENANT);
-    const { contentHash: _ch, ...snapBase } = VALID_SOURCE_SNAPSHOT;
-
-    const snapA = { ...snapBase, sourceId: 'src-kind-product', tenantScope: TENANT, sourceType: 'ingest' };
-    const snapB = { ...snapBase, sourceId: 'src-kind-unknown', tenantScope: TENANT, sourceType: 'ingest' };
-
-    await store.writeSourceSnapshot(CALLER, ns, snapA, Buffer.from('<html>Source A</html>'));
-    await store.writeSourceSnapshot(CALLER, ns, snapB, Buffer.from('<html>Source B</html>'));
-
-    const perSourceFacts = async (snap) => {
-      if (snap.sourceId === 'src-kind-product') {
-        return {
-          canonical: 'https://example.com/widget-page',
-          jsonLd: [{ '@type': 'Product', name: 'Widget Pro', description: 'From product page' }],
-        };
-      }
-      return {
-        canonical: 'https://example.com/widget-docs',
-        jsonLd: [{ '@type': 'Thing', name: 'Widget Pro', description: 'From docs page' }],
-      };
-    };
-
-    const result = await compileGraph({
-      graphStore: store, caller: CALLER, namespace: ns,
-      factsProvider: perSourceFacts,
-    });
-
-    // Same name should resolve to the same entity even though @type differs
-    // (one is Product, the other is UNKNOWN since Thing maps to UNKNOWN)
-    const widgetEntities = result.entities.filter((e) => e.label === 'Widget Pro');
-    assert.equal(widgetEntities.length, 1, 'same name must resolve to one entity regardless of @type classification');
-  });
-});
-
 // (1b) Multi-valued predicates (CONTAINS, REFERENCES) are NOT contradictions.
 // One page with two headings and two links should produce ZERO contradictions.
 test('EW05 (1b): multi-valued predicates are not false contradictions', async () => {
@@ -597,12 +730,12 @@ test('EW05 R09 reconciliation: real contradictions are detected with correct con
       if (snap.sourceId === 'src-vendor-a') {
         return {
           canonical: 'https://example.com/vendor-a',
-          jsonLd: [{ '@type': 'Product', name: productName, description: 'Premium widget with gold finish' }],
+          jsonLd: [{ '@type': 'Product', '@id': 'https://example.com/products/wp', name: productName, description: 'Premium widget with gold finish' }],
         };
       }
       return {
         canonical: 'https://example.com/vendor-b',
-        jsonLd: [{ '@type': 'Product', name: productName, description: 'Basic widget, plastic body' }],
+        jsonLd: [{ '@type': 'Product', '@id': 'https://example.com/products/wp', name: productName, description: 'Basic widget, plastic body' }],
       };
     };
 
@@ -801,12 +934,12 @@ test('EW05 merge: per-attribute merge preserves conflicting source attributes', 
       if (snap.sourceId === 'src-merge-a') {
         return {
           canonical: 'https://example.com/merge-a',
-          jsonLd: [{ '@type': 'Product', name: productName, description: 'Desc A', sku: 'SKU-A' }],
+          jsonLd: [{ '@type': 'Product', '@id': 'https://example.com/products/mw', name: productName, description: 'Desc A', sku: 'SKU-A' }],
         };
       }
       return {
         canonical: 'https://example.com/merge-b',
-        jsonLd: [{ '@type': 'Product', name: productName, description: 'Desc B', color: 'blue' }],
+        jsonLd: [{ '@type': 'Product', '@id': 'https://example.com/products/mw', name: productName, description: 'Desc B', color: 'blue' }],
       };
     };
 

@@ -37,6 +37,7 @@ export const EW05_PREDICATES = Object.freeze({
   HAS_MEDIA: 'has_media',
   SUPPORTED_BY: 'supported_by',
   REFERENCES: 'references',
+  SAME_AS_CANDIDATE: 'same_as_candidate',
 });
 
 export const EW05_PREDICATE_SET = new Set(Object.values(EW05_PREDICATES));
@@ -152,10 +153,23 @@ function extractEntities(tenantScope, sourceId, sourceVersion, capturedAt, facts
     else if (typeLower === 'mediaobject' || typeLower === 'imageobject' || typeLower === 'videoobject') kind = ENTITY_KIND.MEDIA;
     else if (typeLower === 'webpage' || typeLower === 'website') continue;
 
-    const key = item.name || item.identifier || item['@id'];
-    if (!key) continue;
+    // Identifier-first resolution order
+    let identityKey = null;
+    let keyType = 'name';
+    if (item['@id']) { identityKey = item['@id']; keyType = '@id'; }
+    else if (item.sku) { identityKey = item.sku; keyType = 'sku'; }
+    else if (item.gtin) { identityKey = item.gtin; keyType = 'gtin'; }
+    else if (item.productID) { identityKey = item.productID; keyType = 'productID'; }
+    else if (item.identifier) { identityKey = item.identifier; keyType = 'identifier'; }
+    else if (item.name) { identityKey = item.name; keyType = 'name'; }
 
-    const id = entityId(tenantScope, kind, key);
+    if (!identityKey) continue;
+
+    // Name-only entities get source-scoped ids
+    const idKey = keyType === 'name'
+      ? `${sourceId}|${identityKey}`
+      : identityKey;
+    const id = entityId(tenantScope, kind, idKey);
     if (!id) continue;
 
     const attributes = {};
@@ -282,59 +296,10 @@ function mergeEntities(entityLists) {
     }
   }
 
-  // Identifier-first second pass: merge entities that share the same
-  // identity digest but ended up with different kinds (e.g. one source
-  // says Product, another says UNKNOWN). The kind from the entity with
-  // higher provenance rank wins.
-  const byDigest = new Map();
-  for (const entity of map.values()) {
-    // Extract digest from id. Format: tenantScope:kind:digest
-    // tenantScope may contain colons (e.g. tenant:ew05-test), so we
-    // take everything except the last two colon-separated parts.
-    const parts = entity.id.split(ID_SEPARATOR);
-    const digest = parts[parts.length - 1];
-    // kind is parts[parts.length - 2], tenantScope is parts.slice(0, -2).join(':')
-    const tenantScope = parts.slice(0, -2).join(ID_SEPARATOR);
-    const digestKey = tenantScope + ID_SEPARATOR + digest;
-    if (!byDigest.has(digestKey)) {
-      byDigest.set(digestKey, [entity]);
-    } else {
-      byDigest.get(digestKey).push(entity);
-    }
-  }
-
-  // Build a map for remapping old ids to merged ids
+  // Identifier-first: entities with the same @id-based key are already
+  // merged by deterministic id in the first pass. No second-pass digest
+  // merge is needed — name-only matches remain separate (see §EW05 (3)).
   const idRemap = new Map();
-  for (const [dk, group] of byDigest) {
-    if (group.length < 2) continue;
-    // Only merge when the kind difference is classification variance
-    // (one source says Product, another has UNKNOWN). If both have
-    // specific but different kinds (Product vs Organization), they
-    // are genuinely different entities.
-    const hasUnknown = group.some((e) => e.type === ENTITY_KIND.UNKNOWN);
-    if (!hasUnknown) continue;
-
-    // Merge all into the first entity with a known kind
-    let target = group.find((e) => e.type !== ENTITY_KIND.UNKNOWN);
-    if (!target) target = group[0]; // all UNKNOWN
-    const targetIdBefore = target.id;
-    for (const other of group) {
-      if (other === target) continue;
-      // Record remapping: old id -> new resolved id
-      idRemap.set(other.id, target.id);
-      mergeTwoEntities(target, other);
-      map.delete(other.id);
-    }
-    // Rebuild id with the resolved kind (pick best non-unknown)
-    const best = target.type !== ENTITY_KIND.UNKNOWN ? target.type : ENTITY_KIND.UNKNOWN;
-    const parts = target.id.split(ID_SEPARATOR);
-    const tenantScope = parts.slice(0, -2).join(ID_SEPARATOR);
-    target.id = tenantScope + ID_SEPARATOR + best + ID_SEPARATOR + parts[parts.length - 1];
-    if (target.id !== targetIdBefore) {
-      idRemap.set(targetIdBefore, target.id);
-    }
-  }
-
   return { entities: [...map.values()], idRemap };
 }
 
@@ -539,13 +504,13 @@ async function extractFromSnapshots(snapshots, factsProvider) {
         if (!targetUrl) continue;
         const targetPageId = pageEntityId(snap.tenantScope, targetUrl);
         if (targetPageId && targetPageId !== pageId) {
-          // Ensure the target page entity exists (as a placeholder if not yet seen)
+          // Ensure the target page entity exists (as a placeholder if not yet seen).
+          // Placeholders are marked unresolved and must not carry anchor text as label.
           if (!entities.some((e) => e.id === targetPageId)) {
             entities.push({
               id: targetPageId,
               type: ENTITY_KIND.PAGE,
-              label: link.text || undefined,
-              provenance: 'observed',
+              provenance: 'unresolved',
               tenantScope: snap.tenantScope,
               sourceId: snap.sourceId,
               sourceVersion: snap.version,
@@ -595,14 +560,64 @@ function buildGraph(allEntities, allAssertions, allLinks) {
   }
   const mergedLinks = [...linkMap.values()];
 
-  const contradictions = detectContradictions(mergedAssertions);
-  const cycles = detectLinkCycles(mergedLinks);
+  // same_as_candidate links: entities with matching normalized names
+  // but different identity keys (name-only matches across sources)
+  const byNormalizedName = new Map();
+  for (const entity of mergedEntities) {
+    if (entity.type === ENTITY_KIND.PAGE) continue;
+    const normalized = (entity.label || '').toLowerCase().trim();
+    if (!normalized) continue;
+    if (!byNormalizedName.has(normalized)) {
+      byNormalizedName.set(normalized, []);
+    }
+    byNormalizedName.get(normalized).push(entity);
+  }
+  for (const [, group] of byNormalizedName) {
+    if (group.length < 2) continue;
+    // Create same_as_candidate links between all pairs
+    for (let i = 0; i < group.length; i++) {
+      for (let j = i + 1; j < group.length; j++) {
+        const key = linkDedupKey(group[i].id, group[j].id, EW05_PREDICATES.SAME_AS_CANDIDATE);
+        if (!linkMap.has(key)) {
+          linkMap.set(key, {
+            source: group[i].id,
+            target: group[j].id,
+            predicate: EW05_PREDICATES.SAME_AS_CANDIDATE,
+            provenance: 'derived',
+            confidence: 'low',
+            tenantScope: group[i].tenantScope || group[j].tenantScope,
+            sourceId: group[i].sourceId,
+            sourceVersion: group[i].sourceVersion,
+            capturedAt: group[i].capturedAt,
+          });
+        }
+      }
+    }
+  }
 
-  const generatedAt = new Date().toISOString();
+  // Rebuild mergedLinks after adding same_as_candidate links
+  const finalLinks = [...linkMap.values()];
+
+  const contradictions = detectContradictions(mergedAssertions);
+  const cycles = detectLinkCycles(finalLinks);
+
+  // Deterministic: use latest snapshot timestamp, not new Date()
+  let generatedAt = new Date(0).toISOString();
+  for (const a of mergedAssertions) {
+    if (a.source?.capturedAt && a.source.capturedAt > generatedAt) {
+      generatedAt = a.source.capturedAt;
+    }
+  }
+  if (generatedAt === new Date(0).toISOString()) {
+    // Fallback for assertions without timestamps
+    for (const e of mergedEntities) {
+      if (e.capturedAt && e.capturedAt > generatedAt) generatedAt = e.capturedAt;
+    }
+  }
   const graph = {
     version: GRAPH_SCHEMA_VERSION,
     entities: mergedEntities.length > 0 ? mergedEntities : undefined,
-    links: mergedLinks.length > 0 ? mergedLinks : undefined,
+    links: finalLinks.length > 0 ? finalLinks : undefined,
     assertions: mergedAssertions,
     coverage: {
       totalAssertions: mergedAssertions.length,
@@ -612,7 +627,7 @@ function buildGraph(allEntities, allAssertions, allLinks) {
     generatedAt,
   };
 
-  return { graph, contradictions, cycles, mergedEntities, mergedAssertions, mergedLinks };
+  return { graph, contradictions, cycles, mergedEntities, mergedAssertions, finalLinks };
 }
 
 async function _compile({
@@ -638,7 +653,7 @@ async function _compile({
   }
 
   const { allEntities, allAssertions, allLinks } = await extractFromSnapshots(snapshots, factsProvider);
-  const { graph, contradictions, cycles, mergedEntities, mergedAssertions, mergedLinks } =
+  const { graph, contradictions, cycles, mergedEntities, mergedAssertions, finalLinks } =
     buildGraph(allEntities, allAssertions, allLinks);
 
   const schemaResult = graphSchema.safeParse(graph);
@@ -655,13 +670,13 @@ async function _compile({
       publishedAt: published.publishedAt,
       contentHash: published.contentHash,
       entities: mergedEntities,
-      links: mergedLinks,
+      links: finalLinks,
       assertions: mergedAssertions,
       contradictions,
       cycles,
       entityCount: mergedEntities.length,
       assertionCount: mergedAssertions.length,
-      linkCount: mergedLinks.length,
+      linkCount: finalLinks.length,
       sourceCount: snapshots.length,
     };
   }
@@ -674,7 +689,7 @@ async function _compile({
     cycles,
     entityCount: mergedEntities.length,
     assertionCount: mergedAssertions.length,
-    linkCount: mergedLinks.length,
+    linkCount: finalLinks.length,
     sourceCount: snapshots.length,
   };
 }
