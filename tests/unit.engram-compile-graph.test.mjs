@@ -965,3 +965,383 @@ test('EW05 merge: per-attribute merge preserves conflicting source attributes', 
     assert.ok(product.attributes.color !== undefined, 'color from source B should be preserved');
   });
 });
+
+// ---------------------------------------------------------------------------
+// EW05 money normalization: schema.org prices → canonical money objects
+// ---------------------------------------------------------------------------
+
+test('EW05 money: Product with price + priceCurrency compiles and publishes as canonical money', async () => {
+  await withGraphStore(async (store) => {
+    const ns = parseNamespace(TENANT);
+    const { contentHash: _ch, ...snapBase } = VALID_SOURCE_SNAPSHOT;
+
+    const snap = { ...snapBase, sourceId: 'src-priced-product', tenantScope: TENANT, sourceType: 'ingest' };
+    await store.writeSourceSnapshot(CALLER, ns, snap, Buffer.from('<html>Priced product</html>'));
+
+    const result = await compileGraph({
+      graphStore: store, caller: CALLER, namespace: ns,
+      factsProvider: mockFactsProvider({
+        canonical: 'https://example.com/product-priced',
+        jsonLd: [{
+          '@type': 'Product',
+          name: 'Widget Pro',
+          sku: 'WP-PRICED',
+          price: '19.99',
+          priceCurrency: 'USD',
+        }],
+      }),
+    });
+
+    const product = result.entities.find((e) => e.type === 'product');
+    assert.ok(product, 'should have a product entity');
+    assert.ok(product.attributes, 'product should have attributes');
+
+    const price = product.attributes.price;
+    assert.ok(price && typeof price === 'object', 'price should be a canonical money object');
+    assert.equal(price.amount, '19.99');
+    assert.equal(price.amountUnit, 'major_decimal');
+    assert.equal(price.currency, 'USD');
+    assert.equal(price.exponent, 2);
+
+    // The describes_price assertion must carry the money object
+    const priceAssertions = result.assertions.filter((a) => a.predicate === 'describes_price');
+    assert.equal(priceAssertions.length, 1, 'should have exactly one describes_price assertion');
+    const priceObject = priceAssertions[0].object;
+    assert.ok(priceObject.amount === '19.99' && priceObject.currency === 'USD',
+      'describes_price assertion should carry the canonical money object');
+
+    assert.ok(result.version > 0, 'priced product should publish');
+  });
+});
+
+test('EW05 money: Product with offers.price + priceCurrency compiles as canonical money', async () => {
+  await withGraphStore(async (store) => {
+    const ns = parseNamespace(TENANT);
+    const { contentHash: _ch, ...snapBase } = VALID_SOURCE_SNAPSHOT;
+
+    const snap = { ...snapBase, sourceId: 'src-offers-product', tenantScope: TENANT, sourceType: 'ingest' };
+    await store.writeSourceSnapshot(CALLER, ns, snap, Buffer.from('<html>Offers product</html>'));
+
+    const result = await compileGraph({
+      graphStore: store, caller: CALLER, namespace: ns,
+      factsProvider: mockFactsProvider({
+        canonical: 'https://example.com/product-offers',
+        jsonLd: [{
+          '@type': 'Product',
+          name: 'Widget Plus',
+          sku: 'WP-OFFERS',
+          offers: {
+            '@type': 'Offer',
+            price: '29.99',
+            priceCurrency: 'USD',
+          },
+        }],
+      }),
+    });
+
+    const product = result.entities.find((e) => e.type === 'product');
+    assert.ok(product, 'should have a product entity');
+    assert.ok(product.attributes, 'product should have attributes');
+
+    const offers = product.attributes.offers;
+    assert.ok(offers && typeof offers === 'object', 'offers should be preserved as an object');
+    const offerPrice = offers.price;
+    assert.ok(offerPrice && typeof offerPrice === 'object', 'offers.price should be canonical money');
+    assert.equal(offerPrice.amount, '29.99');
+    assert.equal(offerPrice.amountUnit, 'major_decimal');
+    assert.equal(offerPrice.currency, 'USD');
+    assert.equal(offerPrice.exponent, 2);
+
+    assert.ok(result.version > 0, 'product with offers should publish');
+  });
+});
+
+test('EW05 money: Product with numeric price normalizes to canonical money', async () => {
+  await withGraphStore(async (store) => {
+    const ns = parseNamespace(TENANT);
+    const { contentHash: _ch, ...snapBase } = VALID_SOURCE_SNAPSHOT;
+
+    const snap = { ...snapBase, sourceId: 'src-numeric-price', tenantScope: TENANT, sourceType: 'ingest' };
+    await store.writeSourceSnapshot(CALLER, ns, snap, Buffer.from('<html>Numeric price</html>'));
+
+    const result = await compileGraph({
+      graphStore: store, caller: CALLER, namespace: ns,
+      factsProvider: mockFactsProvider({
+        canonical: 'https://example.com/product-numeric',
+        jsonLd: [{
+          '@type': 'Product',
+          name: 'Widget Numeric',
+          sku: 'WP-NUM',
+          price: 19.99,
+          priceCurrency: 'USD',
+        }],
+      }),
+    });
+
+    const product = result.entities.find((e) => e.type === 'product');
+    assert.ok(product, 'should have a product entity');
+    const price = product.attributes.price;
+    assert.ok(price && typeof price === 'object', 'numeric price should be normalized to canonical money');
+    assert.equal(price.amount, '19.99');
+    assert.equal(price.amountUnit, 'major_decimal');
+    assert.equal(price.currency, 'USD');
+    assert.ok(result.version > 0, 'product with numeric price should publish');
+  });
+});
+
+test('EW05 money: Product with price but no currency publishes with unresolved fact', async () => {
+  await withGraphStore(async (store) => {
+    const ns = parseNamespace(TENANT);
+    const { contentHash: _ch, ...snapBase } = VALID_SOURCE_SNAPSHOT;
+
+    const snap = { ...snapBase, sourceId: 'src-no-currency', tenantScope: TENANT, sourceType: 'ingest' };
+    await store.writeSourceSnapshot(CALLER, ns, snap, Buffer.from('<html>No currency</html>'));
+
+    // Without currency: page must still publish — currency is never invented,
+    // but one product without currency must not block the whole site.
+    const result = await compileGraph({
+      graphStore: store, caller: CALLER, namespace: ns,
+      factsProvider: mockFactsProvider({
+        canonical: 'https://example.com/product-no-currency',
+        jsonLd: [{
+          '@type': 'Product',
+          name: 'Widget Raw',
+          sku: 'WP-RAW',
+          price: '19.99',
+        }],
+      }),
+    });
+
+    assert.ok(result.version > 0, 'product without currency should still publish');
+
+    // Price field should be stripped from attributes
+    const product = result.entities.find((e) => e.type === 'product');
+    assert.ok(product, 'should have a product entity');
+    assert.ok(!product.attributes?.price, 'price should be stripped when no currency');
+
+    // An unresolved fact should be recorded
+    const uf = result.graph.unresolvedFacts;
+    assert.ok(uf && uf.length > 0, 'should have unresolved facts');
+    const priceUf = uf.find((f) => f.field === 'price');
+    assert.ok(priceUf, 'should have an unresolved fact for price');
+    assert.equal(priceUf.reason, 'currency_missing');
+    assert.equal(priceUf.rawValue, '19.99');
+  });
+});
+
+test('EW05 money: already-canonical money objects pass through unchanged', async () => {
+  await withGraphStore(async (store) => {
+    const ns = parseNamespace(TENANT);
+    const { contentHash: _ch, ...snapBase } = VALID_SOURCE_SNAPSHOT;
+
+    const snap = { ...snapBase, sourceId: 'src-canonical', tenantScope: TENANT, sourceType: 'ingest' };
+    await store.writeSourceSnapshot(CALLER, ns, snap, Buffer.from('<html>Canonical money</html>'));
+
+    const canonicalMoney = {
+      amount: '49.99',
+      amountUnit: 'major_decimal',
+      currency: 'EUR',
+      exponent: 2,
+    };
+
+    const result = await compileGraph({
+      graphStore: store, caller: CALLER, namespace: ns,
+      factsProvider: mockFactsProvider({
+        canonical: 'https://example.com/product-canonical',
+        jsonLd: [{
+          '@type': 'Product',
+          name: 'Widget Canonical',
+          sku: 'WP-CANON',
+          price: canonicalMoney,
+        }],
+      }),
+    });
+
+    const product = result.entities.find((e) => e.type === 'product');
+    assert.ok(product, 'should have a product entity');
+    const price = product.attributes.price;
+    assert.deepStrictEqual(price, canonicalMoney, 'already-canonical money should pass through unchanged');
+    assert.ok(result.version > 0);
+  });
+});
+
+test('EW05 money: offers container structure preserved beyond price normalization', async () => {
+  await withGraphStore(async (store) => {
+    const ns = parseNamespace(TENANT);
+    const { contentHash: _ch, ...snapBase } = VALID_SOURCE_SNAPSHOT;
+
+    const snap = { ...snapBase, sourceId: 'src-offers-structure', tenantScope: TENANT, sourceType: 'ingest' };
+    await store.writeSourceSnapshot(CALLER, ns, snap, Buffer.from('<html>Offers structure</html>'));
+
+    const result = await compileGraph({
+      graphStore: store, caller: CALLER, namespace: ns,
+      factsProvider: mockFactsProvider({
+        canonical: 'https://example.com/product-offers-struct',
+        jsonLd: [{
+          '@type': 'Product',
+          name: 'Widget Offer Full',
+          sku: 'WP-OFFER-FULL',
+          offers: {
+            '@type': 'Offer',
+            price: '39.99',
+            priceCurrency: 'USD',
+            availability: 'https://schema.org/InStock',
+            itemCondition: 'https://schema.org/NewCondition',
+          },
+        }],
+      }),
+    });
+
+    const product = result.entities.find((e) => e.type === 'product');
+    assert.ok(product, 'should have a product entity');
+    const offers = product.attributes.offers;
+    assert.ok(offers && typeof offers === 'object', 'offers container preserved');
+    // price is normalized to canonical money
+    assert.equal(offers.price.amount, '39.99');
+    assert.equal(offers.price.currency, 'USD');
+    // non-price fields in the offers container are preserved unchanged
+    assert.equal(offers.availability, 'https://schema.org/InStock');
+    assert.equal(offers.itemCondition, 'https://schema.org/NewCondition');
+    assert.equal(offers['@type'], 'Offer');
+    assert.ok(result.version > 0);
+  });
+});
+
+test('EW05 money: array offers (Shopify variant shape) normalizes each offer price', async () => {
+  await withGraphStore(async (store) => {
+    const ns = parseNamespace(TENANT);
+    const { contentHash: _ch, ...snapBase } = VALID_SOURCE_SNAPSHOT;
+
+    const snap = { ...snapBase, sourceId: 'src-array-offers', tenantScope: TENANT, sourceType: 'ingest' };
+    await store.writeSourceSnapshot(CALLER, ns, snap, Buffer.from('<html>Array offers</html>'));
+
+    const result = await compileGraph({
+      graphStore: store, caller: CALLER, namespace: ns,
+      factsProvider: mockFactsProvider({
+        canonical: 'https://example.com/product-array-offers',
+        jsonLd: [{
+          '@type': 'Product',
+          name: 'Widget Variants',
+          sku: 'WP-VARIANTS',
+          offers: [
+            {
+              '@type': 'Offer',
+              price: '7.00',
+              priceCurrency: 'USD',
+            },
+            {
+              '@type': 'Offer',
+              price: '12.00',
+              priceCurrency: 'USD',
+            },
+          ],
+        }],
+      }),
+    });
+
+    assert.ok(result.version > 0, 'product with array offers should publish');
+
+    const product = result.entities.find((e) => e.type === 'product');
+    assert.ok(product, 'should have a product entity');
+    const offers = product.attributes.offers;
+    assert.ok(Array.isArray(offers), 'offers should be an array');
+    assert.equal(offers.length, 2, 'should have two offers');
+
+    // First offer price normalized
+    assert.ok(offers[0].price && typeof offers[0].price === 'object', 'offers[0].price should be canonical money');
+    assert.equal(offers[0].price.amount, '7.00');
+    assert.equal(offers[0].price.currency, 'USD');
+
+    // Second offer price normalized
+    assert.ok(offers[1].price && typeof offers[1].price === 'object', 'offers[1].price should be canonical money');
+    assert.equal(offers[1].price.amount, '12.00');
+    assert.equal(offers[1].price.currency, 'USD');
+  });
+});
+
+test('EW05 money: AggregateOffer lowPrice and highPrice normalize to canonical money', async () => {
+  await withGraphStore(async (store) => {
+    const ns = parseNamespace(TENANT);
+    const { contentHash: _ch, ...snapBase } = VALID_SOURCE_SNAPSHOT;
+
+    const snap = { ...snapBase, sourceId: 'src-aggregate-offer', tenantScope: TENANT, sourceType: 'ingest' };
+    await store.writeSourceSnapshot(CALLER, ns, snap, Buffer.from('<html>Aggregate offer</html>'));
+
+    const result = await compileGraph({
+      graphStore: store, caller: CALLER, namespace: ns,
+      factsProvider: mockFactsProvider({
+        canonical: 'https://example.com/product-aggregate',
+        jsonLd: [{
+          '@type': 'Product',
+          name: 'Widget Range',
+          sku: 'WP-RANGE',
+          offers: {
+            '@type': 'AggregateOffer',
+            lowPrice: '9.99',
+            highPrice: '49.99',
+            priceCurrency: 'USD',
+            offerCount: '5',
+          },
+        }],
+      }),
+    });
+
+    assert.ok(result.version > 0, 'product with AggregateOffer should publish');
+
+    const product = result.entities.find((e) => e.type === 'product');
+    assert.ok(product, 'should have a product entity');
+    const offers = product.attributes.offers;
+    assert.ok(offers, 'offers should exist');
+
+    // lowPrice normalized
+    assert.ok(offers.lowPrice && typeof offers.lowPrice === 'object', 'lowPrice should be canonical money');
+    assert.equal(offers.lowPrice.amount, '9.99');
+    assert.equal(offers.lowPrice.currency, 'USD');
+
+    // highPrice normalized
+    assert.ok(offers.highPrice && typeof offers.highPrice === 'object', 'highPrice should be canonical money');
+    assert.equal(offers.highPrice.amount, '49.99');
+    assert.equal(offers.highPrice.currency, 'USD');
+
+    // Non-money fields preserved
+    assert.equal(offers.offerCount, '5');
+  });
+});
+
+test('EW05 money: invalid amount (call for price) publishes with unresolved fact', async () => {
+  await withGraphStore(async (store) => {
+    const ns = parseNamespace(TENANT);
+    const { contentHash: _ch, ...snapBase } = VALID_SOURCE_SNAPSHOT;
+
+    const snap = { ...snapBase, sourceId: 'src-invalid-amount', tenantScope: TENANT, sourceType: 'ingest' };
+    await store.writeSourceSnapshot(CALLER, ns, snap, Buffer.from('<html>Call for price</html>'));
+
+    const result = await compileGraph({
+      graphStore: store, caller: CALLER, namespace: ns,
+      factsProvider: mockFactsProvider({
+        canonical: 'https://example.com/product-call-for-price',
+        jsonLd: [{
+          '@type': 'Product',
+          name: 'Widget Call',
+          sku: 'WP-CALL',
+          price: 'call for price',
+          priceCurrency: 'USD',
+        }],
+      }),
+    });
+
+    assert.ok(result.version > 0, 'product with invalid price amount should still publish');
+
+    const product = result.entities.find((e) => e.type === 'product');
+    assert.ok(product, 'should have a product entity');
+    assert.ok(!product.attributes?.price, 'invalid price should be stripped from attributes');
+
+    // Should record unresolved fact with reason amount_invalid
+    const uf = result.graph.unresolvedFacts;
+    assert.ok(uf && uf.length > 0, 'should have unresolved facts');
+    const priceUf = uf.find((f) => f.field === 'price');
+    assert.ok(priceUf, 'should have an unresolved fact for price');
+    assert.equal(priceUf.reason, 'amount_invalid');
+    assert.equal(priceUf.rawValue, 'call for price');
+  });
+});

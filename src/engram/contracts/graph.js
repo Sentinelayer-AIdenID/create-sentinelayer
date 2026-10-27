@@ -185,6 +185,15 @@ export const assertionSchema = z.object({
  * links, and assertions, plus coverage and freshness metadata.
  */
 export const graphSchema = z.object({
+  unresolvedFacts: z.array(z.object({
+    field: z.string().optional(),
+    rawValue: z.json().optional(),
+    reason: z.string(),
+    entityLabel: z.string().optional(),
+    entityKind: z.string().optional(),
+    sourceId: z.string().optional(),
+    tenantScope: z.string().optional(),
+  })).optional(),
   version: z.literal(GRAPH_SCHEMA_VERSION),
   entities: z.array(entitySchema).optional(),
   links: z.array(linkSchema).optional(),
@@ -295,7 +304,7 @@ export function classifyProvenance(assertion, ctx = {}, { verifyEvidence } = {})
 // Fields whose name exactly matches one of these are expected to carry
 // a canonical money object { amount, currency, exponent }, never a bare float.
 // Non-monetary numeric fields like ratio, temperature, count are not in this set.
-const MONEY_FIELD_NAMES = new Set([
+export const MONEY_FIELD_NAMES = new Set([
   "amount", "Amount",
   "price", "Price",
   "cost", "Cost",
@@ -309,6 +318,8 @@ const MONEY_FIELD_NAMES = new Set([
   "tax_amount", "taxAmount", "TaxAmount",
   "discount_amount", "discountAmount", "DiscountAmount",
   "shipping_cost", "shippingCost", "ShippingCost",
+  "lowPrice", "LowPrice",
+  "highPrice", "HighPrice",
 ]);
 
 // Other predicates may name the same monetary fact in camel/snake case.

@@ -29,7 +29,7 @@ const CURRENCY_MINOR_UNITS = new Map([
 ]);
 
 /** Complete list of known currency codes — used to reject unknown codes. */
-const KNOWN_CURRENCIES = new Set(CURRENCY_MINOR_UNITS.keys());
+export const KNOWN_CURRENCIES = new Set(CURRENCY_MINOR_UNITS.keys());
 
 /**
  * Reject binary floating-point in monetary positions.
