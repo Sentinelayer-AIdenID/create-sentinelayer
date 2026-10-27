@@ -23,7 +23,8 @@
 
 import { createHash } from 'node:crypto';
 
-import { graphSchema } from './contracts/graph.js';
+import { graphSchema, MONEY_FIELD_NAMES } from './contracts/graph.js';
+import { moneySchema, currencyExponent, KNOWN_CURRENCIES } from './contracts/money.js';
 import { GRAPH_SCHEMA_VERSION } from './contracts/versions.js';
 
 // ---------------------------------------------------------------------------
@@ -135,6 +136,7 @@ function pageEntityId(tenantScope, url) {
 // ---------------------------------------------------------------------------
 
 function extractEntities(tenantScope, sourceId, sourceVersion, capturedAt, facts) {
+  const unresolvedFacts = [];
   const entities = [];
   if (!facts) return entities;
 
@@ -178,11 +180,21 @@ function extractEntities(tenantScope, sourceId, sourceVersion, capturedAt, facts
       if (v !== undefined && v !== null) attributes[k] = v;
     }
 
+    const normalized = Object.keys(attributes).length > 0
+      ? normalizeEntityAttributes(attributes)
+      : { attrs: undefined, unresolved: [] };
+    if (normalized.unresolved.length > 0) {
+      for (const uf of normalized.unresolved) {
+        uf.entityLabel = item.name || undefined;
+        uf.entityKind = kind;
+      }
+      unresolvedFacts.push(...normalized.unresolved);
+    }
     entities.push({
       id,
       type: kind,
       label: item.name || undefined,
-      attributes: Object.keys(attributes).length > 0 ? attributes : undefined,
+      attributes: normalized.attrs,
       provenance: 'observed',
       tenantScope,
       sourceId,
@@ -191,7 +203,171 @@ function extractEntities(tenantScope, sourceId, sourceVersion, capturedAt, facts
     });
   }
 
-  return entities;
+  return { entities, unresolvedFacts };
+}
+
+// ---------------------------------------------------------------------------
+// Money normalization — schema.org prices → canonical money objects
+// ---------------------------------------------------------------------------
+
+/**
+ * Container keys whose children may carry money values.
+ * e.g. offers.price, shippingDetails.shippingCost
+ */
+const MONEY_CONTAINER_KEYS = new Set([
+  'offers', 'Offers',
+  'shippingDetails', 'ShippingDetails',
+  'priceSpecification', 'PriceSpecification',
+  'aggregateOffer', 'AggregateOffer',
+]);
+
+/**
+ * Find an ISO 4217 currency code from sibling keys in the same object.
+ * Checks priceCurrency, currency, and their casing variants.
+ */
+function findCurrencyInSiblings(obj) {
+  const candidates = ['priceCurrency', 'currency', 'PriceCurrency', 'Currency'];
+  for (const candidate of candidates) {
+    if (!Object.hasOwn(obj, candidate)) continue;
+    const val = obj[candidate];
+    if (typeof val === 'string' && /^[A-Z]{3}$/.test(val) && KNOWN_CURRENCIES.has(val)) {
+      return val;
+    }
+  }
+  return null;
+}
+
+/**
+ * Recursively walk entity attributes and normalize raw money values
+ * to canonical money objects. Returns { attrs, unresolved } — does not
+ * mutate input.
+ *
+ * Rules:
+ * - Direct money leaf (e.g. price: "19.99") → canonical money if currency
+ *   is available from siblings (priceCurrency). Without currency: strip from
+ *   attributes, record unresolved fact with reason currency_missing.
+ * - Invalid amount (e.g. "call for price"): strip, record reason amount_invalid.
+ * - Nested container (e.g. offers: { price: "19.99", priceCurrency: "USD" })
+ *   → walk into the container and normalize its money leaves.
+ * - Array money container (e.g. offers: [{ price: "7.00", ... }])
+ *   → walk each element as a money sub-container.
+ * - Already-canonical money objects pass through unchanged.
+ */
+function normalizeEntityAttributes(attrs) {
+  const MAX_DEPTH = 10;
+  const unresolved = [];
+
+  function walk(obj, siblingCurrency, depth = 0) {
+    if (obj === null || typeof obj !== 'object') return { value: obj, unresolved: [] };
+    if (depth > MAX_DEPTH) return { value: obj, unresolved: [] };
+
+    if (Array.isArray(obj)) {
+      const results = obj.map((v) => walk(v, siblingCurrency, depth + 1));
+      const value = results.map((r) => r.value);
+      const allUnresolved = results.flatMap((r) => r.unresolved);
+      return { value, unresolved: allUnresolved };
+    }
+
+    // Already a canonical money object — pass through
+    if (moneySchema.safeParse(obj).success) return { value: obj, unresolved: [] };
+
+    const result = {};
+    const localUnresolved = [];
+
+    for (const key of Object.keys(obj)) {
+      if (!Object.hasOwn(obj, key)) continue;
+      const val = obj[key];
+      if (val === undefined || val === null) {
+        result[key] = val;
+        continue;
+      }
+
+      // Money container (single object): walk children, carrying inner currency
+      if (MONEY_CONTAINER_KEYS.has(key) && typeof val === 'object' && val !== null && !Array.isArray(val)) {
+        const innerCurrency = findCurrencyInSiblings(val) || siblingCurrency;
+        const walked = walk(val, innerCurrency, depth + 1);
+        result[key] = walked.value;
+        localUnresolved.push(...walked.unresolved);
+        continue;
+      }
+
+      // Money container (array, e.g. Shopify offers: [{price, priceCurrency}, ...])
+      // TEMPORARILY DISABLED to verify test detection
+      if (MONEY_CONTAINER_KEYS.has(key) && Array.isArray(val)) {
+        const walkedItems = val.map((item) => {
+          if (item === null || typeof item !== 'object') return { value: item, unresolved: [] };
+          const itemCurrency = findCurrencyInSiblings(item) || siblingCurrency;
+          return walk(item, itemCurrency, depth + 1);
+        });
+        result[key] = walkedItems.map((r) => r.value);
+        localUnresolved.push(...walkedItems.flatMap((r) => r.unresolved));
+        continue;
+      }
+
+      // Money leaf with a raw string/number value
+      if (MONEY_FIELD_NAMES.has(key) && (typeof val === 'string' || typeof val === 'number')) {
+        const currency = findCurrencyInSiblings(obj) || siblingCurrency;
+
+        if (currency == null) {
+          localUnresolved.push({ field: key, rawValue: val, reason: 'currency_missing' });
+          continue;
+        }
+
+        // Check if the raw value looks like a valid amount
+        let amountStr;
+        if (typeof val === 'number') {
+          if (!Number.isFinite(val)) {
+            localUnresolved.push({ field: key, rawValue: val, reason: 'amount_invalid' });
+            continue;
+          }
+          amountStr = String(val);
+        } else {
+          if (!/^-?(0|[1-9][0-9]*)(\.[0-9]+)?$/.test(val)) {
+            localUnresolved.push({ field: key, rawValue: val, reason: 'amount_invalid' });
+            continue;
+          }
+          amountStr = val;
+        }
+
+        const exponent = currencyExponent(currency);
+        if (exponent == null) {
+          localUnresolved.push({ field: key, rawValue: val, reason: 'currency_missing' });
+          continue;
+        }
+
+        const candidate = {
+          amount: amountStr,
+          amountUnit: 'major_decimal',
+          currency,
+          exponent,
+        };
+
+        const moneyResult = moneySchema.safeParse(candidate);
+        if (moneyResult.success) {
+          result[key] = moneyResult.data;
+        } else {
+          localUnresolved.push({ field: key, rawValue: val, reason: 'amount_invalid' });
+        }
+        continue;
+      }
+
+      // Recurse into nested objects
+      if (typeof val === 'object' && val !== null && !Array.isArray(val)) {
+        const walked = walk(val, siblingCurrency, depth + 1);
+        result[key] = walked.value;
+        localUnresolved.push(...walked.unresolved);
+        continue;
+      }
+
+      result[key] = val;
+    }
+
+    return { value: result, unresolved: localUnresolved };
+  }
+
+  const walked = walk(attrs, null);
+  unresolved.push(...walked.unresolved);
+  return { attrs: walked.value, unresolved };
 }
 
 function extractAssertions(tenantScope, sourceId, sourceVersion, capturedAt, facts, entities) {
@@ -249,7 +425,11 @@ function extractAssertions(tenantScope, sourceId, sourceVersion, capturedAt, fac
     for (const [attrKey, attrVal] of Object.entries(entity.attributes)) {
       if (attrVal === undefined || attrVal === null) continue;
       const attrPredicate = `${EW05_PREDICATES.DESCRIBES}_${attrKey}`;
-      add(entity.id, attrPredicate, String(attrVal).slice(0, 1000), { provenance: 'observed' });
+      // Canonical money objects pass through as-is; other values are stringified.
+      const assertionObject = (typeof attrVal === 'object' && attrVal !== null && moneySchema.safeParse(attrVal).success)
+        ? attrVal
+        : String(attrVal).slice(0, 1000);
+      add(entity.id, attrPredicate, assertionObject, { provenance: 'observed' });
     }
   }
 
@@ -455,6 +635,7 @@ async function extractFromSnapshots(snapshots, factsProvider) {
   const allEntities = [];
   const allAssertions = [];
   const allLinks = [];
+  const allUnresolvedFacts = [];
 
   for (const snap of snapshots) {
     let facts;
@@ -466,9 +647,16 @@ async function extractFromSnapshots(snapshots, factsProvider) {
       }
     }
 
-    const entities = extractEntities(
+    const { entities, unresolvedFacts: snapUnresolved } = extractEntities(
       snap.tenantScope, snap.sourceId, snap.version, snap.capturedAt, facts,
     );
+    if (snapUnresolved && snapUnresolved.length > 0) {
+      for (const uf of snapUnresolved) {
+        uf.sourceId = snap.sourceId;
+        uf.tenantScope = snap.tenantScope;
+      }
+      allUnresolvedFacts.push(...snapUnresolved);
+    }
     const assertions = extractAssertions(
       snap.tenantScope, snap.sourceId, snap.version, snap.capturedAt, facts, entities,
     );
@@ -536,13 +724,13 @@ async function extractFromSnapshots(snapshots, factsProvider) {
     allAssertions.push(assertions);
   }
 
-  return { allEntities, allAssertions, allLinks };
+  return { allEntities, allAssertions, allLinks, allUnresolvedFacts };
 }
 
 /**
  * Build the final graph from extracted data.
  */
-function buildGraph(allEntities, allAssertions, allLinks) {
+function buildGraph(allEntities, allAssertions, allLinks, allUnresolvedFacts) {
   const { entities: mergedEntities, idRemap } = mergeEntities(allEntities);
   const mergedAssertions = allAssertions.flat();
 
@@ -619,6 +807,7 @@ function buildGraph(allEntities, allAssertions, allLinks) {
     entities: mergedEntities.length > 0 ? mergedEntities : undefined,
     links: finalLinks.length > 0 ? finalLinks : undefined,
     assertions: mergedAssertions,
+    unresolvedFacts: allUnresolvedFacts && allUnresolvedFacts.length > 0 ? allUnresolvedFacts : undefined,
     coverage: {
       totalAssertions: mergedAssertions.length,
       byProvenance: countBy(mergedAssertions, 'provenance'),
@@ -627,7 +816,7 @@ function buildGraph(allEntities, allAssertions, allLinks) {
     generatedAt,
   };
 
-  return { graph, contradictions, cycles, mergedEntities, mergedAssertions, finalLinks };
+  return { graph, contradictions, cycles, mergedEntities, mergedAssertions, finalLinks, allUnresolvedFacts };
 }
 
 async function _compile({
@@ -652,9 +841,9 @@ async function _compile({
     throw new CompileGraphError('no source snapshots to compile');
   }
 
-  const { allEntities, allAssertions, allLinks } = await extractFromSnapshots(snapshots, factsProvider);
+  const { allEntities, allAssertions, allLinks, allUnresolvedFacts } = await extractFromSnapshots(snapshots, factsProvider);
   const { graph, contradictions, cycles, mergedEntities, mergedAssertions, finalLinks } =
-    buildGraph(allEntities, allAssertions, allLinks);
+    buildGraph(allEntities, allAssertions, allLinks, allUnresolvedFacts);
 
   const schemaResult = graphSchema.safeParse(graph);
   if (!schemaResult.success && publish) {
