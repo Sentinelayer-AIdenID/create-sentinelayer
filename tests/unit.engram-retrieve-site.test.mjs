@@ -475,3 +475,46 @@ test("EW06 retrieve-site: ACL recheck at serve time blocks entity that passed in
   // Widget may or may not match "gadget" query — that's fine either way.
   // The key assertion is that Gadget is excluded.
 });
+test("EW06 retrieve-site: digest prefix match (12+ hex chars) finds entity by id suffix", () => {
+  const embedder = createEmbedder();
+  const graph = makeGraph([
+    productEntity("test-tenant:product:a1b2c3d4e5f67890", "Alpha Product"),
+    productEntity("test-tenant:product:bbbbccccddddeeee", "Beta Product"),
+  ]);
+
+  // Query by the 16-hex-char digest suffix.
+  const result = retrieveSiteEntities({
+    graph,
+    query: "a1b2c3d4e5f67890",
+    k: 3,
+    embedder,
+    tenantScope: "test-tenant",
+    now: FIXED_NOW,
+  });
+
+  assert.equal(result.exactMatchFound, true);
+  assert.equal(result.results[0].entityId, "test-tenant:product:a1b2c3d4e5f67890");
+  assert.deepEqual(result.results[0].channels, ["exact_id"]);
+});
+
+test("EW06 retrieve-site: short hex query does not trigger digest prefix match", () => {
+  const embedder = createEmbedder();
+  const graph = makeGraph([
+    productEntity("test-tenant:product:abc123def456", "Target"),
+    pageEntity("test-tenant:page:xyz", "Other"),
+  ]);
+
+  // 8 hex chars is too short for the digest prefix regex (needs 12+).
+  const result = retrieveSiteEntities({
+    graph,
+    query: "abc123de",
+    k: 3,
+    embedder,
+    tenantScope: "test-tenant",
+    now: FIXED_NOW,
+  });
+
+  // Should NOT flag as exact match — too short for digest prefix.
+  assert.equal(result.exactMatchFound, false);
+});
+

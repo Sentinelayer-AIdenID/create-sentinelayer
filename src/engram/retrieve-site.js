@@ -108,7 +108,10 @@ function entitySearchText(entity, assertionsForEntity) {
 
   // Entity attributes (SKUs, prices, etc.)
   if (entity.attributes !== null && entity.attributes !== undefined && typeof entity.attributes === "object") {
-    for (const val of Object.values(entity.attributes)) {
+    // Use Object.entries so we skip prototype-inherited and __proto__ keys.
+    const safeEntries = Object.entries(Object(entity.attributes));
+    for (const [, val] of safeEntries) {
+      if (val === null || typeof val === "function") continue;
       if (typeof val === "string") parts.push(normalizeString(val));
       else if (typeof val === "number" || typeof val === "boolean") parts.push(String(val));
     }
