@@ -425,6 +425,18 @@ describe("mustRevalidate", () => {
     assert.ok(result.reason.includes("unavailable"));
   });
 
+  it("discloses degraded source without blocking revalidation", () => {
+    const m = createFreshnessMarker({
+      freshnessClass: "stale_readable",
+      asOf: "2026-10-27T16:00:00Z",
+      sourceStatus: "degraded",
+    });
+    const result = mustRevalidate(m);
+    assert.strictEqual(result.mustRevalidate, false);
+    assert.strictEqual(result.degraded, true);
+    assert.ok(result.reason.includes("degraded"));
+  });
+
   it("does not require revalidation for fresh stale_readable within deadline", () => {
     const recentDate = new Date(Date.now() - 10000).toISOString(); // 10s ago
     const m = createFreshnessMarker({

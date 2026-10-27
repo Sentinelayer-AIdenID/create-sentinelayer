@@ -329,6 +329,15 @@ export function mustRevalidate(marker, now = new Date()) {
     }
   }
 
+  // Degraded source: allow but disclose reduced confidence
+  if (marker.sourceStatus === "degraded") {
+    return {
+      mustRevalidate: false,
+      degraded: true,
+      reason: "source is degraded — proceed with reduced confidence",
+    };
+  }
+
   // Source outage: cannot revalidate → escalate
   if (marker.sourceStatus === "unavailable") {
     return {
