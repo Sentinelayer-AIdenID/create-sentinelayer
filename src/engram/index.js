@@ -118,3 +118,13 @@ export function createMemoryService(options = {}) {
     ingestDocumentIntoNamespace({ ...opts, deps: { store, buildState } });
   return { tools, store, buildState, ingestDocument };
 }
+
+// Capability Index (EW08)
+export {
+  buildCapabilityIndex,
+  verifyCapabilityIndex,
+  toMcpTool,
+  renderSkillText,
+  checkRevocation,
+  findSkill,
+} from "./capability-index.js";
