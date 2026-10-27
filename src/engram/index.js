@@ -9,6 +9,15 @@
 
 export { createStore, itemId, LegacyStorageError } from "./store.js";
 export {
+  compileGraph,
+  compileCandidate,
+  CompileGraphError,
+  EW05_PREDICATES,
+  EW05_PREDICATE_SET,
+  ENTITY_KIND,
+  GENERATION_STATUS,
+} from "./compile-graph.js";
+export {
   parseNamespace,
   authorize,
   createLocalConsent,

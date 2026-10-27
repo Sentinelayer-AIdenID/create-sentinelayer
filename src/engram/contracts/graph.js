@@ -47,7 +47,7 @@ export const MODEL_CONFIDENCE = Object.freeze([
   "unavailable",
 ]);
 
-export const provenanceClassSchema = z.enum(["observed", "authoritative", "derived", "unknown"]);
+export const provenanceClassSchema = z.enum(["observed", "authoritative", "derived", "unknown", "unresolved"]);
 export const schemaValiditySchema = z.enum(["valid", "invalid", "unvalidated"]);
 export const modelConfidenceSchema = z.enum(["high", "medium", "low", "unavailable"]);
 
