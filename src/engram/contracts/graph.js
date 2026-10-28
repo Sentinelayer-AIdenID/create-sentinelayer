@@ -187,6 +187,7 @@ export const assertionSchema = z.object({
 export const graphSchema = z.object({
   unresolvedFacts: z.array(z.object({
     field: z.string().optional(),
+    path: z.string().optional(),
     rawValue: z.json().optional(),
     reason: z.string(),
     entityLabel: z.string().optional(),
@@ -347,6 +348,7 @@ const NON_MONETARY_METADATA_TERMINALS = new Set([
   "id", "label", "name", "status", "type", "currency", "code",
   "reference", "number", "timestamp", "method", "description", "source", "version",
   "center", "tier", "schedule", "policy", "owner", "term", "url", "exempt", "window",
+  "specification",
 ]);
 
 // A quantity is explicitly non-monetary. Currency codes and unambiguous
@@ -399,13 +401,22 @@ function singularWord(word) {
   return word;
 }
 
-function isPluralMoneyFieldName(key) {
+export function isPluralMoneyFieldName(key) {
   const terminal = key.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase()
     .split(/[^a-z0-9]+/).at(-1);
   return terminal.endsWith("s") && terminal !== singularWord(terminal);
 }
 
-function isMoneyFieldName(key, value) {
+// A price specification holds prices: an object, or a list of objects (or
+// nulls). A bare value, or a list holding one, is a price itself.
+function holdsPriceSpecifications(value) {
+  // An explicit quantity is not a container: a price cannot hide in it as a count.
+  const isObject = (item) => item !== null && typeof item === "object" && !Array.isArray(item) && item.kind !== "quantity";
+  return value == null || isObject(value) ||
+    (Array.isArray(value) && value.every((item) => item === null || isObject(item)));
+}
+
+export function isMoneyFieldName(key, value) {
   if (MONEY_FIELD_NAMES.has(key)) return true;
   const words = key.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase()
     .split(/[^a-z0-9]+/).filter(Boolean).map(singularWord);
@@ -415,11 +426,13 @@ function isMoneyFieldName(key, value) {
   // disguise a price as a count. A typed refundWindow, paymentTerms or
   // costCenter instead describes a duration or count, not an amount.
   // Nested facts still pass through validateFactNumbers individually.
+  // A priceSpecification holds prices; a bare value under that name is one.
   if (NON_MONETARY_METADATA_TERMINALS.has(suffix)) {
     const moneyModifier = words.slice(0, -1).some((word) =>
       STRONG_MONEY_FIELD_TOKENS.has(word) || word === "total" || word === "tax");
     return moneyModifier && (suffix === "number" ||
-      (suffix === "tier" && value?.kind === "quantity"));
+      (suffix === "tier" && value?.kind === "quantity") ||
+      (suffix === "specification" && !holdsPriceSpecifications(value)));
   }
   if (words.length === 1 && suffix.endsWith("number") &&
       [...STRONG_MONEY_FIELD_TOKENS, "total", "tax"].some((word) => suffix.startsWith(word))) {

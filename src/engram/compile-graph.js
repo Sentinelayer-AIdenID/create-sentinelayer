@@ -23,8 +23,8 @@
 
 import { createHash } from 'node:crypto';
 
-import { graphSchema, MONEY_FIELD_NAMES } from './contracts/graph.js';
-import { moneySchema, currencyExponent, KNOWN_CURRENCIES } from './contracts/money.js';
+import { graphSchema, isMoneyFieldName, isPluralMoneyFieldName, quantitySchema } from './contracts/graph.js';
+import { moneySchema, currencyExponent, KNOWN_CURRENCIES, toMinorUnits } from './contracts/money.js';
 import { GRAPH_SCHEMA_VERSION } from './contracts/versions.js';
 
 // ---------------------------------------------------------------------------
@@ -221,153 +221,266 @@ const MONEY_CONTAINER_KEYS = new Set([
   'aggregateOffer', 'AggregateOffer',
 ]);
 
-/**
- * Find an ISO 4217 currency code from sibling keys in the same object.
- * Checks priceCurrency, currency, and their casing variants.
- */
-function findCurrencyInSiblings(obj) {
-  const candidates = ['priceCurrency', 'currency', 'PriceCurrency', 'Currency'];
-  for (const candidate of candidates) {
-    if (!Object.hasOwn(obj, candidate)) continue;
-    const val = obj[candidate];
-    if (typeof val === 'string' && /^[A-Z]{3}$/.test(val) && KNOWN_CURRENCIES.has(val)) {
-      return val;
-    }
-  }
-  return null;
+/** Keys that declare the currency of the amounts in the same object. */
+const CURRENCY_KEYS = ['priceCurrency', 'currency', 'PriceCurrency', 'Currency'];
+
+/** The amounts of a schema.org MonetaryAmount. */
+const MONETARY_AMOUNT_KEYS = new Set(['value', 'minValue', 'maxValue']);
+
+/** schema.org prices. A price is never negative. */
+const PRICE_KEYS = new Set([
+  'price', 'lowPrice', 'highPrice', 'minPrice', 'maxPrice',
+  'Price', 'LowPrice', 'HighPrice', 'MinPrice', 'MaxPrice',
+]);
+
+/** Amount ranges, from the low end to the high end. */
+const AMOUNT_RANGES = [
+  ['lowPrice', 'highPrice'], ['minPrice', 'maxPrice'],
+  ['LowPrice', 'HighPrice'], ['MinPrice', 'MaxPrice'],
+  ['minValue', 'maxValue'],
+];
+
+/** schema.org counts. A whole, non-negative value is an explicit count quantity. */
+const COUNT_KEYS = new Set([
+  'offerCount', 'reviewCount', 'ratingCount',
+  'OfferCount', 'ReviewCount', 'RatingCount',
+]);
+
+const DECIMAL_AMOUNT = /^-?(0|[1-9][0-9]*)(\.[0-9]+)?$/;
+
+const isPlainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+const isMoney = (value) => moneySchema.safeParse(value).success;
+
+/** Canonical money or an explicit quantity: a value already typed for the graph contract. */
+function isTyped(value) {
+  return isMoney(value) || quantitySchema.safeParse(value).success;
 }
 
 /**
- * Recursively walk entity attributes and normalize raw money values
- * to canonical money objects. Returns { attrs, unresolved } — does not
- * mutate input.
+ * True when the graph contract accepts `value` under the money name `key`:
+ * canonical money, or a list of it under a plural name such as prices.
+ */
+function isMoneyFieldValue(key, value) {
+  return isMoney(value) ||
+    (Array.isArray(value) && isPluralMoneyFieldName(key) && value.every(isMoney));
+}
+
+/**
+ * A schema.org MonetaryAmount: typed so, or untyped with a currency and an
+ * amount, e.g. shippingRate: { value: "3.49", currency: "USD" }.
+ */
+function isMonetaryAmount(value) {
+  if (!isPlainObject(value)) return false;
+  const types = [].concat(value['@type'] ?? []);
+  if (types.length > 0) return types.includes('MonetaryAmount');
+  return Object.hasOwn(value, 'currency') &&
+    [...MONETARY_AMOUNT_KEYS].some((key) => Object.hasOwn(value, key));
+}
+
+/** A MonetaryAmount that is one amount and its currency: canonical money once typed. */
+function isSingleMonetaryAmount(value) {
+  return isMonetaryAmount(value) && Object.hasOwn(value, 'value') &&
+    (typeof value.value === 'string' || typeof value.value === 'number') &&
+    Object.keys(value).every((key) => key === '@type' || key === 'value' || key === 'currency');
+}
+
+/**
+ * True when `obj[key]` is an amount: a value under a name the graph contract
+ * treats as money, a MonetaryAmount { value, currency }, or a string or
+ * number amount of a larger MonetaryAmount.
+ */
+function isAmount(obj, key, value) {
+  return isMoneyFieldName(key, value) || isSingleMonetaryAmount(value) ||
+    (MONETARY_AMOUNT_KEYS.has(key) && isMonetaryAmount(obj) &&
+      (typeof value === 'string' || typeof value === 'number'));
+}
+
+/**
+ * True when a value holds a number outside canonical money or an explicit
+ * quantity, i.e. a number the graph contract rejects as untyped.
+ */
+function holdsBareNumber(value) {
+  if (typeof value === 'number') return true;
+  if (value === null || typeof value !== 'object') return false;
+  if (isTyped(value)) return false;
+  return Object.values(value).some(holdsBareNumber);
+}
+
+/** True when a value holds something under a money name that the graph contract rejects. */
+function holdsUntypedMoney(value) {
+  if (value === null || typeof value !== 'object' || isTyped(value)) return false;
+  if (Array.isArray(value)) return value.some(holdsUntypedMoney);
+  return Object.entries(value).some(([key, item]) =>
+    (isMoneyFieldName(key, item) && !isMoneyFieldValue(key, item)) || holdsUntypedMoney(item));
+}
+
+/** True when a value holds NaN or an infinite number, which JSON cannot represent. */
+function holdsNonFiniteNumber(value) {
+  if (typeof value === 'number') return !Number.isFinite(value);
+  return value !== null && typeof value === 'object' && Object.values(value).some(holdsNonFiniteNumber);
+}
+
+/**
+ * The currency of the amounts in `obj`: its own declared ISO 4217 code, else
+ * the enclosing object's. A declared code the money registry does not know
+ * ("points", "HKD", "eur"), or two codes that disagree, leave the amounts
+ * without a currency; an outer currency never takes their place.
+ */
+function currencyInScope(obj, outer) {
+  const declared = CURRENCY_KEYS.filter((key) => Object.hasOwn(obj, key) && obj[key] != null)
+    .map((key) => obj[key]);
+  if (declared.length === 0) return outer;
+  const [code] = declared;
+  return declared.every((other) => other === code) && KNOWN_CURRENCIES.has(code) ? code : null;
+}
+
+/**
+ * Type the amount `raw` under `key` as canonical money in `currency`.
+ * Returns { value } or the reason it cannot be typed: amount_invalid when
+ * `raw` is not a decimal amount (text, a date, a flag, an object, a
+ * non-finite number) or is a negative price, else currency_missing.
+ */
+function typeAmount(key, raw, currency) {
+  const amount = typeof raw === 'number' ? String(raw) : raw;
+  if (typeof amount !== 'string' || !DECIMAL_AMOUNT.test(amount)) return { reason: 'amount_invalid' };
+  if (PRICE_KEYS.has(key) && amount.startsWith('-')) return { reason: 'amount_invalid' };
+  if (currency == null) return { reason: 'currency_missing' };
+  const money = moneySchema.safeParse({
+    amount, amountUnit: 'major_decimal', currency, exponent: currencyExponent(currency),
+  });
+  return money.success ? { value: money.data } : { reason: 'amount_invalid' };
+}
+
+/**
+ * The value the graph contract accepts under the amount `key`, as { value },
+ * or the reason it cannot be typed. Canonical money passes through; a
+ * MonetaryAmount { value, currency } and a decimal string or number become
+ * canonical money.
+ */
+function typeMoney(key, raw, currency) {
+  if (isMoneyFieldValue(key, raw)) return { value: raw };
+  if (isSingleMonetaryAmount(raw)) return typeAmount(key, raw.value, currencyInScope(raw, currency));
+  return typeAmount(key, raw, currency);
+}
+
+/**
+ * Walk entity attributes, typing amounts as canonical money and counts as
+ * explicit quantities. Returns { attrs, unresolved } and does not mutate the
+ * input. Field names decide money exactly as the graph contract does
+ * (isMoneyFieldName). A value that cannot be typed honestly is left out of
+ * the attributes and recorded as an unresolved fact with its attribute path,
+ * e.g. offers[0].priceSpecification[1].price, so the rest of the graph still
+ * publishes.
  *
- * Rules:
- * - Direct money leaf (e.g. price: "19.99") → canonical money if currency
- *   is available from siblings (priceCurrency). Without currency: strip from
- *   attributes, record unresolved fact with reason currency_missing.
- * - Invalid amount (e.g. "call for price"): strip, record reason amount_invalid.
- * - Nested container (e.g. offers: { price: "19.99", priceCurrency: "USD" })
- *   → walk into the container and normalize its money leaves.
- * - Array money container (e.g. offers: [{ price: "7.00", ... }])
- *   → walk each element as a money sub-container.
- * - Already-canonical money objects pass through unchanged.
+ * - Amounts (price, lowPrice, minPrice, salePrice, returnShippingFeesAmount,
+ *   ...; a MonetaryAmount { value, currency }; the amounts of a larger
+ *   MonetaryAmount) become canonical money in the currency in scope: the
+ *   object's own priceCurrency or currency, else the enclosing object's.
+ *   Without a known one: currency_missing. Anything that is not a decimal
+ *   amount, such as a date (priceValidUntil), a flag (valueAddedTaxIncluded)
+ *   or a negative price: amount_invalid.
+ * - offers, priceSpecification, shippingDetails and aggregateOffer hold
+ *   objects or lists of them. A bare value there, or in such a list (where
+ *   it is nulled so later items keep their paths): not_an_object.
+ * - offerCount, reviewCount or ratingCount holding a whole, non-negative
+ *   safe integer becomes an explicit count quantity.
+ * - Any other bare number (ratingValue: 4.6): untyped_number. A list outside
+ *   the money containers that holds one is recorded whole, never spliced:
+ *   untyped_money when it also holds a price, else untyped_number.
+ * - A range whose low end exceeds its high end publishes neither end:
+ *   range_inverted.
+ * - Canonical money and explicit quantities pass through unchanged.
  */
 function normalizeEntityAttributes(attrs) {
   const MAX_DEPTH = 10;
   const unresolved = [];
+  const record = (field, path, rawValue, reason) => unresolved.push({ field, path, rawValue, reason });
+  const pathOf = (parent, key) => (parent ? `${parent}.${key}` : key);
 
-  function walk(obj, siblingCurrency, depth = 0) {
-    if (obj === null || typeof obj !== 'object') return { value: obj, unresolved: [] };
-    if (depth > MAX_DEPTH) return { value: obj, unresolved: [] };
+  // A list under a money container holds objects. Any other item is recorded
+  // and nulled, so later items keep their index and path.
+  function walkContainerList(list, key, currency, path, depth) {
+    return list.map((item, i) => {
+      if (item === null) return item;
+      if (isPlainObject(item)) return walk(item, currency, `${path}[${i}]`, depth + 1);
+      record(key, `${path}[${i}]`, item, 'not_an_object');
+      return null;
+    });
+  }
 
-    if (Array.isArray(obj)) {
-      const results = obj.map((v) => walk(v, siblingCurrency, depth + 1));
-      const value = results.map((r) => r.value);
-      const allUnresolved = results.flatMap((r) => r.unresolved);
-      return { value, unresolved: allUnresolved };
-    }
-
-    // Already a canonical money object — pass through
-    if (moneySchema.safeParse(obj).success) return { value: obj, unresolved: [] };
-
+  function walk(obj, outerCurrency, attrPath, depth) {
+    if (depth > MAX_DEPTH || isTyped(obj)) return obj;
+    const currency = currencyInScope(obj, outerCurrency);
     const result = {};
-    const localUnresolved = [];
 
     for (const key of Object.keys(obj)) {
-      if (!Object.hasOwn(obj, key)) continue;
       const val = obj[key];
-      if (val === undefined || val === null) {
+      const path = pathOf(attrPath, key);
+      if (val === undefined) {
         result[key] = val;
         continue;
       }
 
-      // Money container (single object): walk children, carrying inner currency
-      if (MONEY_CONTAINER_KEYS.has(key) && typeof val === 'object' && val !== null && !Array.isArray(val)) {
-        const innerCurrency = findCurrencyInSiblings(val) || siblingCurrency;
-        const walked = walk(val, innerCurrency, depth + 1);
-        result[key] = walked.value;
-        localUnresolved.push(...walked.unresolved);
+      if (MONEY_CONTAINER_KEYS.has(key)) {
+        if (val === null) result[key] = val;
+        else if (isPlainObject(val)) result[key] = walk(val, currency, path, depth + 1);
+        else if (Array.isArray(val)) result[key] = walkContainerList(val, key, currency, path, depth);
+        else record(key, path, val, 'not_an_object');
         continue;
       }
 
-      // Money container (array, e.g. Shopify offers: [{price, priceCurrency}, ...])
-      // TEMPORARILY DISABLED to verify test detection
-      if (MONEY_CONTAINER_KEYS.has(key) && Array.isArray(val)) {
-        const walkedItems = val.map((item) => {
-          if (item === null || typeof item !== 'object') return { value: item, unresolved: [] };
-          const itemCurrency = findCurrencyInSiblings(item) || siblingCurrency;
-          return walk(item, itemCurrency, depth + 1);
-        });
-        result[key] = walkedItems.map((r) => r.value);
-        localUnresolved.push(...walkedItems.flatMap((r) => r.unresolved));
+      if (isAmount(obj, key, val)) {
+        const typed = typeMoney(key, val, currency);
+        if (typed.reason) record(key, path, val, typed.reason);
+        else result[key] = typed.value;
         continue;
       }
 
-      // Money leaf with a raw string/number value
-      if (MONEY_FIELD_NAMES.has(key) && (typeof val === 'string' || typeof val === 'number')) {
-        const currency = findCurrencyInSiblings(obj) || siblingCurrency;
-
-        if (currency == null) {
-          localUnresolved.push({ field: key, rawValue: val, reason: 'currency_missing' });
-          continue;
-        }
-
-        // Check if the raw value looks like a valid amount
-        let amountStr;
-        if (typeof val === 'number') {
-          if (!Number.isFinite(val)) {
-            localUnresolved.push({ field: key, rawValue: val, reason: 'amount_invalid' });
-            continue;
-          }
-          amountStr = String(val);
-        } else {
-          if (!/^-?(0|[1-9][0-9]*)(\.[0-9]+)?$/.test(val)) {
-            localUnresolved.push({ field: key, rawValue: val, reason: 'amount_invalid' });
-            continue;
-          }
-          amountStr = val;
-        }
-
-        const exponent = currencyExponent(currency);
-        if (exponent == null) {
-          localUnresolved.push({ field: key, rawValue: val, reason: 'currency_missing' });
-          continue;
-        }
-
-        const candidate = {
-          amount: amountStr,
-          amountUnit: 'major_decimal',
-          currency,
-          exponent,
-        };
-
-        const moneyResult = moneySchema.safeParse(candidate);
-        if (moneyResult.success) {
-          result[key] = moneyResult.data;
-        } else {
-          localUnresolved.push({ field: key, rawValue: val, reason: 'amount_invalid' });
-        }
+      if (COUNT_KEYS.has(key) && Number.isSafeInteger(val) && val >= 0) {
+        result[key] = { kind: 'quantity', value: val, unit: 'count' };
         continue;
       }
 
-      // Recurse into nested objects
-      if (typeof val === 'object' && val !== null && !Array.isArray(val)) {
-        const walked = walk(val, siblingCurrency, depth + 1);
-        result[key] = walked.value;
-        localUnresolved.push(...walked.unresolved);
+      // Any other bare number is ambiguous to the graph contract: leave it
+      // out of the attributes so the rest of the graph still publishes.
+      if (typeof val === 'number') {
+        record(key, path, val, 'untyped_number');
         continue;
       }
 
-      result[key] = val;
+      // Arrays outside the money containers are not walked: one holding a
+      // bare number is recorded whole rather than spliced.
+      if (Array.isArray(val) && (holdsBareNumber(val) || holdsUntypedMoney(val))) {
+        record(key, path, val, holdsUntypedMoney(val) ? 'untyped_money' : 'untyped_number');
+        continue;
+      }
+
+      result[key] = isPlainObject(val) ? walk(val, currency, path, depth + 1) : val;
     }
 
-    return { value: result, unresolved: localUnresolved };
+    // A range whose low end exceeds its high end publishes neither end.
+    for (const [low, high] of AMOUNT_RANGES) {
+      const lowMinor = toMinorUnits(result[low]);
+      const highMinor = toMinorUnits(result[high]);
+      if (lowMinor == null || highMinor == null || lowMinor <= highMinor ||
+          result[low].currency !== result[high].currency) continue;
+      for (const key of [low, high]) {
+        delete result[key];
+        record(key, pathOf(attrPath, key), obj[key], 'range_inverted');
+      }
+    }
+
+    return result;
   }
 
-  const walked = walk(attrs, null);
-  unresolved.push(...walked.unresolved);
-  return { attrs: walked.value, unresolved };
+  const normalized = walk(attrs, null, '', 0);
+  // Unresolved facts are published in the JSON graph, which cannot carry NaN
+  // or Infinity (JSON.parse reads 1e999 as Infinity). Such a fact keeps its
+  // field, path and reason; only the unrepresentable raw value is left out.
+  for (const fact of unresolved) {
+    if (holdsNonFiniteNumber(fact.rawValue)) delete fact.rawValue;
+  }
+  return { attrs: normalized, unresolved };
 }
 
 function extractAssertions(tenantScope, sourceId, sourceVersion, capturedAt, facts, entities) {
@@ -425,10 +538,14 @@ function extractAssertions(tenantScope, sourceId, sourceVersion, capturedAt, fac
     for (const [attrKey, attrVal] of Object.entries(entity.attributes)) {
       if (attrVal === undefined || attrVal === null) continue;
       const attrPredicate = `${EW05_PREDICATES.DESCRIBES}_${attrKey}`;
-      // Canonical money objects pass through as-is; other values are stringified.
-      const assertionObject = (typeof attrVal === 'object' && attrVal !== null && moneySchema.safeParse(attrVal).success)
+      // Canonical money objects pass through as-is; other values are
+      // stringified, unless the graph contract would read the string as an
+      // untyped price: a price specification or a list of money stays JSON.
+      const text = String(attrVal).slice(0, 1000);
+      const assertionObject = isMoney(attrVal) ||
+        (typeof attrVal === 'object' && isMoneyFieldName(attrPredicate, text))
         ? attrVal
-        : String(attrVal).slice(0, 1000);
+        : text;
       add(entity.id, attrPredicate, assertionObject, { provenance: 'observed' });
     }
   }
@@ -863,6 +980,7 @@ async function _compile({
       assertions: mergedAssertions,
       contradictions,
       cycles,
+      unresolvedFacts: allUnresolvedFacts,
       entityCount: mergedEntities.length,
       assertionCount: mergedAssertions.length,
       linkCount: finalLinks.length,
@@ -876,6 +994,7 @@ async function _compile({
     schemaErrors: schemaResult.success ? [] : schemaResult.error.issues,
     contradictions,
     cycles,
+    unresolvedFacts: allUnresolvedFacts,
     entityCount: mergedEntities.length,
     assertionCount: mergedAssertions.length,
     linkCount: finalLinks.length,
