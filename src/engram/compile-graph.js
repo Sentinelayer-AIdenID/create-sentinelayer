@@ -163,7 +163,7 @@ function extractEntities(tenantScope, sourceId, sourceVersion, capturedAt, facts
     else if (item.gtin) { identityKey = item.gtin; keyType = 'gtin'; }
     else if (item.productID) { identityKey = item.productID; keyType = 'productID'; }
     else if (item.identifier) { identityKey = item.identifier; keyType = 'identifier'; }
-    else if (item.name) { identityKey = item.name; keyType = 'name'; }
+    else if (typeof item.name === 'string' || (typeof item.name === 'number' && Number.isFinite(item.name))) { identityKey = String(item.name); keyType = 'name'; }
 
     if (!identityKey) continue;
 
@@ -185,7 +185,7 @@ function extractEntities(tenantScope, sourceId, sourceVersion, capturedAt, facts
       : { attrs: undefined, unresolved: [] };
     if (normalized.unresolved.length > 0) {
       for (const uf of normalized.unresolved) {
-        uf.entityLabel = item.name || undefined;
+        uf.entityLabel = (typeof item.name === 'string' || (typeof item.name === 'number' && Number.isFinite(item.name))) ? String(item.name) : undefined;
         uf.entityKind = kind;
       }
       unresolvedFacts.push(...normalized.unresolved);
@@ -193,7 +193,7 @@ function extractEntities(tenantScope, sourceId, sourceVersion, capturedAt, facts
     entities.push({
       id,
       type: kind,
-      label: item.name || undefined,
+      label: (typeof item.name === 'string' || (typeof item.name === 'number' && Number.isFinite(item.name))) ? String(item.name) : undefined,
       attributes: normalized.attrs,
       provenance: 'observed',
       tenantScope,
@@ -219,6 +219,7 @@ const MONEY_CONTAINER_KEYS = new Set([
   'shippingDetails', 'ShippingDetails',
   'priceSpecification', 'PriceSpecification',
   'aggregateOffer', 'AggregateOffer',
+  'hasVariant', 'HasVariant',
 ]);
 
 /** Keys that declare the currency of the amounts in the same object. */
@@ -227,18 +228,18 @@ const CURRENCY_KEYS = ['priceCurrency', 'currency', 'PriceCurrency', 'Currency']
 /** The amounts of a schema.org MonetaryAmount. */
 const MONETARY_AMOUNT_KEYS = new Set(['value', 'minValue', 'maxValue']);
 
-/** schema.org prices. A price is never negative. */
-const PRICE_KEYS = new Set([
-  'price', 'lowPrice', 'highPrice', 'minPrice', 'maxPrice',
-  'Price', 'LowPrice', 'HighPrice', 'MinPrice', 'MaxPrice',
-]);
-
 /** Amount ranges, from the low end to the high end. */
 const AMOUNT_RANGES = [
   ['lowPrice', 'highPrice'], ['minPrice', 'maxPrice'],
   ['LowPrice', 'HighPrice'], ['MinPrice', 'MaxPrice'],
   ['minValue', 'maxValue'],
 ];
+
+/** Identifier fields: numeric values here are stringified, not dropped. */
+const IDENTIFIER_KEYS = new Set([
+  'sku', 'gtin', 'gtin8', 'gtin12', 'gtin13', 'gtin14',
+  'mpn', 'isbn', 'productID', 'productGroupID', 'identifier', 'id',
+]);
 
 /** schema.org counts. A whole, non-negative value is an explicit count quantity. */
 const COUNT_KEYS = new Set([
@@ -325,10 +326,13 @@ function holdsNonFiniteNumber(value) {
  * the enclosing object's. A declared code the money registry does not know
  * ("points", "HKD", "eur"), or two codes that disagree, leave the amounts
  * without a currency; an outer currency never takes their place.
+ * An exchange rate takes no currency from its specification or from any
+ * enclosing object.
  */
 function currencyInScope(obj, outer) {
   const declared = CURRENCY_KEYS.filter((key) => Object.hasOwn(obj, key) && obj[key] != null)
     .map((key) => obj[key]);
+  if (Object.hasOwn(obj, 'currentExchangeRate')) return null;
   if (declared.length === 0) return outer;
   const [code] = declared;
   return declared.every((other) => other === code) && KNOWN_CURRENCIES.has(code) ? code : null;
@@ -338,12 +342,12 @@ function currencyInScope(obj, outer) {
  * Type the amount `raw` under `key` as canonical money in `currency`.
  * Returns { value } or the reason it cannot be typed: amount_invalid when
  * `raw` is not a decimal amount (text, a date, a flag, an object, a
- * non-finite number) or is a negative price, else currency_missing.
+ * non-finite number) or is a negative amount, else currency_missing.
  */
 function typeAmount(key, raw, currency) {
   const amount = typeof raw === 'number' ? String(raw) : raw;
   if (typeof amount !== 'string' || !DECIMAL_AMOUNT.test(amount)) return { reason: 'amount_invalid' };
-  if (PRICE_KEYS.has(key) && amount.startsWith('-')) return { reason: 'amount_invalid' };
+  if (amount.startsWith('-')) return { reason: 'amount_invalid' };
   if (currency == null) return { reason: 'currency_missing' };
   const money = moneySchema.safeParse({
     amount, amountUnit: 'major_decimal', currency, exponent: currencyExponent(currency),
@@ -358,8 +362,15 @@ function typeAmount(key, raw, currency) {
  * canonical money.
  */
 function typeMoney(key, raw, currency) {
-  if (isMoneyFieldValue(key, raw)) return { value: raw };
-  if (isSingleMonetaryAmount(raw)) return typeAmount(key, raw.value, currencyInScope(raw, currency));
+  if (isMoneyFieldValue(key, raw)) {
+    if ([].concat(raw).some((money) => String(money.amount).startsWith('-'))) {
+      return { reason: 'amount_invalid' };
+    }
+    return { value: raw };
+  }
+  if (isSingleMonetaryAmount(raw)) {
+    return typeAmount(key, raw.value, currencyInScope(raw, currency));
+  }
   return typeAmount(key, raw, currency);
 }
 
@@ -378,18 +389,23 @@ function typeMoney(key, raw, currency) {
  *   object's own priceCurrency or currency, else the enclosing object's.
  *   Without a known one: currency_missing. Anything that is not a decimal
  *   amount, such as a date (priceValidUntil), a flag (valueAddedTaxIncluded)
- *   or a negative price: amount_invalid.
- * - offers, priceSpecification, shippingDetails and aggregateOffer hold
- *   objects or lists of them. A bare value there, or in such a list (where
- *   it is nulled so later items keep their paths): not_an_object.
+ *   or a negative amount: amount_invalid.
+ * - offers, priceSpecification, shippingDetails, aggregateOffer and hasVariant
+ *   hold objects or lists of them. A bare value there, or in such a list
+ *   (where it is nulled so later items keep their paths): not_an_object.
  * - offerCount, reviewCount or ratingCount holding a whole, non-negative
  *   safe integer becomes an explicit count quantity.
- * - Any other bare number (ratingValue: 4.6): untyped_number. A list outside
- *   the money containers that holds one is recorded whole, never spliced:
- *   untyped_money when it also holds a price, else untyped_number.
+ * - Numeric identifiers (sku, gtin, gtin8, gtin12, gtin13, gtin14, mpn,
+ *   isbn, productID, productGroupID, identifier, id) that are safe,
+ *   non-negative integers are stringified in place; any other bare number
+ *   (ratingValue: 4.6): untyped_number.
+ * - A list outside the money containers that holds a bare number or untyped
+ *   money is recorded whole, never spliced:
+ *   untyped_money when it holds untyped money, else untyped_number.
  * - A range whose low end exceeds its high end publishes neither end:
  *   range_inverted.
- * - Canonical money and explicit quantities pass through unchanged.
+ * - Canonical money and explicit quantities pass through unchanged,
+ *   except negative canonical money (amount_invalid).
  */
 function normalizeEntityAttributes(attrs) {
   const MAX_DEPTH = 10;
@@ -441,15 +457,25 @@ function normalizeEntityAttributes(attrs) {
         continue;
       }
 
-      // Any other bare number is ambiguous to the graph contract: leave it
-      // out of the attributes so the rest of the graph still publishes.
+      // Any other bare number (or an untrusted numeric identifier) is
+      // ambiguous to the graph contract: leave it out of the attributes
+      // so the rest of the graph still publishes.
       if (typeof val === 'number') {
+        if (IDENTIFIER_KEYS.has(key)) {
+          // Only safe, non-negative integers are trustworthy identifiers.
+          if (Number.isSafeInteger(val) && val >= 0) {
+            result[key] = String(val);
+            continue;
+          }
+          record(key, path, val, 'untyped_number');
+          continue;
+        }
         record(key, path, val, 'untyped_number');
         continue;
       }
 
       // Arrays outside the money containers are not walked: one holding a
-      // bare number is recorded whole rather than spliced.
+      // bare number or untyped money is recorded whole rather than spliced.
       if (Array.isArray(val) && (holdsBareNumber(val) || holdsUntypedMoney(val))) {
         record(key, path, val, holdsUntypedMoney(val) ? 'untyped_money' : 'untyped_number');
         continue;
@@ -870,7 +896,7 @@ function buildGraph(allEntities, allAssertions, allLinks, allUnresolvedFacts) {
   const byNormalizedName = new Map();
   for (const entity of mergedEntities) {
     if (entity.type === ENTITY_KIND.PAGE) continue;
-    const normalized = (entity.label || '').toLowerCase().trim();
+    const normalized = String(entity.label ?? '').toLowerCase().trim();
     if (!normalized) continue;
     if (!byNormalizedName.has(normalized)) {
       byNormalizedName.set(normalized, []);
