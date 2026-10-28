@@ -470,6 +470,26 @@ test('EW05 markup: explicit quantities and canonical money pass through unchange
   });
 });
 
+test('EW05 markup: negative canonical money is rejected in the pass-through', async () => {
+  await withGraphStore(async (store) => {
+    const result = await compileProduct(store, {
+      '@type': 'Product',
+      name: 'Widget Negative Canonical',
+      sku: 'WNC-1',
+      offers: {
+        '@type': 'Offer',
+        priceCurrency: 'USD',
+        price: usd('-5.00'),
+      },
+    });
+
+    assert.ok(result.version > 0, 'graph should publish');
+    assert.deepEqual(unresolved(result), {
+      'offers.price': ['amount_invalid', usd('-5.00')],
+    });
+  });
+});
+
 test('EW05 markup: the graph contract still rejects a hand-built bare number', async () => {
   await withGraphStore(async (store) => {
     const ns = parseNamespace(TENANT);
@@ -862,13 +882,13 @@ test('EW05 markup: every value under a money name is typed as money or recorded'
       '@type': 'Offer',
       priceCurrency: 'USD',
       salePrice: usd('9.99'),
-      balance: usd('-5.00'),
       priceType: 'https://schema.org/SalePrice',
       shippingCostSpecification: usd('4.99'),
       handlingPriceSpecification: { price: usd('2.00') },
     });
     assert.deepEqual(unresolved(result), {
       'offers.price': ['amount_invalid', '-5.00'],
+      'offers.balance': ['amount_invalid', '-5.00'],
       'offers.listPrice': ['amount_invalid', notMoney],
       'offers.priceValidUntil': ['amount_invalid', '2026-11-30'],
       'offers.valueAddedTaxIncluded': ['amount_invalid', true],
@@ -1024,7 +1044,6 @@ test('EW05 markup: a WooCommerce variable product (AggregateOffer with a sale pr
       validThrough: '2026-11-30',
     }]);
     assert.deepEqual(unresolved(result), {
-      sku: ['untyped_number', 1234],
       'offers[0].priceSpecification[0].valueAddedTaxIncluded': ['amount_invalid', true],
       'offers[0].priceValidUntil': ['amount_invalid', '2026-11-30'],
     });
@@ -1186,7 +1205,7 @@ test('EW05 markup: a list outside the money containers publishes when typed, els
       "sizes": [{ "kind": "quantity", "value": 8, "unit": "count" }],
       "deposits": [{ "amount": "5.00", "amountUnit": "major_decimal", "currency": "USD", "exponent": 2 }],
       "size": [8, 1e999],
-      "hasVariant": [{ "@type": "Product", "sku": "WL-3-S", "offers": { "price": 17.5, "priceCurrency": "USD" } }],
+      "isRelatedTo": [{ "@type": "Product", "sku": "WL-3-S", "offers": { "price": 17.5, "priceCurrency": "USD" } }],
       "history": [{ "price": { "amount": "1.00", "amountUnit": "major_decimal", "currency": "USD", "exponent": 2 }, "views": 3 }]
     }`));
 
@@ -1194,10 +1213,10 @@ test('EW05 markup: a list outside the money containers publishes when typed, els
     const attributes = productAttributes(result);
     assert.deepEqual(attributes.sizes, [count(8)]);
     assert.deepEqual(attributes.deposits, [usd('5.00')]);
-    for (const key of ['size', 'hasVariant', 'history']) assert.equal(Object.hasOwn(attributes, key), false, key);
+    for (const key of ['size', 'isRelatedTo', 'history']) assert.equal(Object.hasOwn(attributes, key), false, key);
     assert.deepEqual(
       result.unresolvedFacts.map((f) => [f.path, f.reason, Object.hasOwn(f, 'rawValue')]),
-      [['size', 'untyped_number', false], ['hasVariant', 'untyped_money', true], ['history', 'untyped_number', true]],
+      [['size', 'untyped_number', false], ['isRelatedTo', 'untyped_money', true], ['history', 'untyped_number', true]],
     );
   });
 });
@@ -1305,21 +1324,37 @@ test('EW05 markup: the contract refuses a quantity under a price-specification n
   // ...while a real container of prices is still accepted
   const container = handBuiltGraph({ attributes: { offers: { price: usd('5.00'), priceSpecification: { price: usd('4.00') } } } });
   assert.equal(validateGraphIntegrity(container).valid, true);
+  // List form: priceSpecification: [count(19.99)] is also invalid
+  const listForm = handBuiltGraph({ attributes: { offers: { price: usd('5.00'), priceSpecification: [count(19.99)] } } });
+  assert.equal(validateGraphIntegrity(listForm).valid, false);
+  // Assertion list form: [count(19.99)] under describes_priceSpecification is also invalid
+  const assertionList = handBuiltGraph({ assertion: ['describes_priceSpecification', [count(19.99)]] });
+  assert.equal(validateGraphIntegrity(assertionList).valid, false);
 });
 
-test('EW05 markup: a quantity-shaped priceSpecification in markup never publishes as a count', async () => {
+test('EW05 markup: a quantity-shaped priceSpecification is rejected by the contract', async () => {
   await withGraphStore(async (store) => {
-    let result = null;
-    try {
-      result = await compileProduct(store, {
+    await assert.rejects(
+      () => compileProduct(store, {
         '@type': 'Product', name: 'W', sku: 'W-1',
         offers: { priceCurrency: 'USD', price: '5.00', priceSpecification: { kind: 'quantity', value: 19.99, unit: 'count' } },
-      });
-    } catch {
-      return; // failing closed is acceptable
-    }
-    const offers = productAttributes(result).offers;
-    assert.notDeepEqual(offers?.priceSpecification, count(19.99), 'a count must not stand where a price belongs');
+      }),
+      (err) => err.name === 'GraphValidationError' && /offers\.priceSpecification/.test(err.message),
+      'quantity-shaped priceSpecification must be rejected',
+    );
+  });
+});
+
+test('EW05 markup: a list holding a quantity under priceSpecification is rejected by the contract', async () => {
+  await withGraphStore(async (store) => {
+    await assert.rejects(
+      () => compileProduct(store, {
+        '@type': 'Product', name: 'W', sku: 'W-2',
+        offers: { priceCurrency: 'USD', price: '5.00', priceSpecification: [{ kind: 'quantity', value: 19.99, unit: 'count' }] },
+      }),
+      (err) => err.name === 'GraphValidationError' && /offers\.priceSpecification/.test(err.message),
+      'list with quantity under priceSpecification must be rejected',
+    );
   });
 });
 
@@ -1335,5 +1370,602 @@ test('EW05 markup: a list outside the money containers that holds untyped money 
     assert.equal(Object.hasOwn(attributes, 'isRelatedTo'), false);
     assert.deepEqual(unresolvedByPath(result, 'untyped_money'), { isRelatedTo });
     assert.deepEqual(attributes.offers.price, usd('19.99'));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Numeric name crash guard
+// ---------------------------------------------------------------------------
+
+test('EW05 markup: a numeric name does not crash the compile', async () => {
+  await withGraphStore(async (store) => {
+    const result = await compileProduct(store, {
+      '@type': 'Product',
+      name: 2024,
+      sku: 'N-2024',
+      offers: { '@type': 'Offer', price: '19.99', priceCurrency: 'USD' },
+    });
+
+    assert.ok(result.version > 0, 'graph should publish');
+    const product = result.entities.find((e) => e.type === 'product');
+    assert.ok(product, 'should have a product entity');
+    assert.equal(product.label, '2024', 'numeric name is stringified');
+  });
+});
+
+test('EW05 markup: a language-tagged name object does not become "[object Object]"', async () => {
+  await withGraphStore(async (store) => {
+    const result = await compileProduct(store, {
+      '@type': 'Product',
+      name: { '@value': 'Wool coat', '@language': 'en' },
+      sku: 'WC-1',
+      offers: { '@type': 'Offer', price: '49.99', priceCurrency: 'USD' },
+    });
+
+    assert.ok(result.version > 0, 'graph should publish');
+    // The entity must have NO label, since the name is an object, not a string.
+    // A name that is an object should not produce a label at all.
+    const product = result.entities.find((e) => e.type === 'product');
+    assert.equal(product.label, undefined, 'object name produces no label');
+  });
+});
+
+test('EW05 markup: two products with language-tagged names and distinct skus are separate entities', async () => {
+  await withGraphStore(async (store) => {
+    // Compile both products in one call by passing them as separate jsonLd entries.
+    const ns = parseNamespace(TENANT);
+    const { contentHash: _ch, ...snapBase } = VALID_SOURCE_SNAPSHOT;
+    const snap = { ...snapBase, sourceId: 'src-product-page', tenantScope: TENANT, sourceType: 'ingest' };
+    await store.writeSourceSnapshot(CALLER, ns, snap, Buffer.from('<html>Product page</html>'));
+    const result = await compileGraph({
+      graphStore: store,
+      caller: CALLER,
+      namespace: ns,
+      factsProvider: async () => ({
+        title: 'Product page',
+        description: 'A product page',
+        canonical: 'https://example.com/product',
+        headings: [],
+        links: [],
+        jsonLd: [
+          { '@type': 'Product', name: { '@value': 'Wool coat', '@language': 'en' }, sku: 'WC-EN', offers: { '@type': 'Offer', price: '49.99', priceCurrency: 'USD' } },
+          { '@type': 'Product', name: { '@value': 'Wool coat', '@language': 'fr' }, sku: 'WC-FR', offers: { '@type': 'Offer', price: '44.99', priceCurrency: 'EUR' } },
+        ],
+      }),
+    });
+
+    assert.ok(result.version > 0, 'graph should publish');
+    // Two distinct products identified by sku, not merged by any label.
+    const products = result.entities.filter((e) => e.type === 'product');
+    assert.equal(products.length, 2, 'two distinct products');
+    // No same_as_candidate links should exist between sku-identified entities.
+    const sameAsCandidates = result.graph.links.filter((l) => l.predicate === 'same_as_candidate');
+    assert.equal(sameAsCandidates.length, 0, 'no same_as_candidate links for distinct skus');
+  });
+});
+
+test('EW05 markup: two products with language-tagged names and no identifiers do not merge', async () => {
+  await withGraphStore(async (store) => {
+    const ns = parseNamespace(TENANT);
+    const { contentHash: _ch, ...snapBase } = VALID_SOURCE_SNAPSHOT;
+    const snap = { ...snapBase, sourceId: 'src-product-page', tenantScope: TENANT, sourceType: 'ingest' };
+    await store.writeSourceSnapshot(CALLER, ns, snap, Buffer.from('<html>Product page</html>'));
+    const result = await compileGraph({
+      graphStore: store,
+      caller: CALLER,
+      namespace: ns,
+      factsProvider: async () => ({
+        title: 'Product page',
+        description: 'A product page',
+        canonical: 'https://example.com/product',
+        headings: [],
+        links: [],
+        jsonLd: [
+          { '@type': 'Product', name: { '@value': 'Wool coat', '@language': 'en' }, offers: { '@type': 'Offer', price: '49.99', priceCurrency: 'USD' } },
+          { '@type': 'Product', name: { '@value': 'Wool coat', '@language': 'fr' }, offers: { '@type': 'Offer', price: '44.99', priceCurrency: 'EUR' } },
+        ],
+      }),
+    });
+
+    assert.ok(result.version > 0, 'graph should publish');
+    // Neither item has a usable identity: the name is an object and no
+    // identifier (sku/gtin/etc) is present. The extractor skips items
+    // with no identity key, so no product entities are created.
+    const products = result.entities.filter((e) => e.type === 'product');
+    assert.equal(products.length, 0, 'items with no usable identity are skipped');
+  });
+});
+
+test('EW05 markup: @value name object gives no entityLabel on unresolved facts', async () => {
+  await withGraphStore(async (store) => {
+    const result = await compileProduct(store, {
+      '@type': 'Product',
+      name: { '@value': 'Coat', '@language': 'en' },
+      sku: 'COAT-1',
+      aggregateRating: { '@type': 'AggregateRating', ratingValue: 4.6 },
+    });
+
+    assert.ok(result.version > 0, 'graph should publish');
+    const fact = result.unresolvedFacts.find((f) => f.path === 'aggregateRating.ratingValue');
+    assert.ok(fact, 'ratingValue should be an unresolved fact');
+    assert.equal(fact.entityLabel, undefined, 'entityLabel undefined for @value name object');
+  });
+});
+
+test('EW05 markup: Infinity name with sku identity does not crash and has no label', async () => {
+  await withGraphStore(async (store) => {
+    const result = await compileProduct(store, JSON.parse('{"@type":"Product","name":1e999,"sku":"PL-2","offers":{"price":"1.00","priceCurrency":"USD"}}'));
+
+    assert.ok(result.version > 0, 'graph should publish');
+    const product = result.entities.find((e) => e.type === 'product');
+    assert.ok(product, 'product entity should exist');
+    assert.equal(product.label, undefined, 'Infinity name produces no label');
+    // Verify the entity still has its sku-based identity
+    const attributes = productAttributes(result);
+    assert.equal(attributes.sku, 'PL-2', 'sku identity is preserved');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Numeric identifier guard
+// ---------------------------------------------------------------------------
+
+test('EW05 markup: numeric identifiers that are safe non-negative integers are stringified; unsafe are untyped_number', async () => {
+  // Table-driven over every IDENTIFIER_KEYS key. Safe, non-negative integers are stringified; any other number
+  // (unsafe, float, negative) is recorded as untyped_number.
+  const cases = [
+    // [attrKey, rawValue, expected]
+    // Safe non-negative integers — stringified in place.
+    ['sku', 12345, '12345'],
+    ['gtin', 45678901234567, '45678901234567'],
+    ['gtin8', 12345678, '12345678'],
+    ['gtin12', 123456789012, '123456789012'],
+    ['gtin13', 9876543210123, '9876543210123'],
+    ['gtin14', 12345678901234, '12345678901234'],
+    ['mpn', 5551212, '5551212'],
+    ['isbn', 9783161484100, '9783161484100'],
+    ['productID', 42, '42'],
+    ['productGroupID', 999, '999'],
+    ['identifier', 77001, '77001'],
+    ['id', 1, '1'],
+    // Unsafe / float — untyped_number, absent from attributes.
+    ['gtin13', 12345678901234567890, 'untyped_number'],
+    // Negative — untyped_number.
+    ['sku', -5, 'untyped_number'],
+    ['sku', 12.50, 'untyped_number'],
+  ];
+  for (const [key, value, expected] of cases) {
+    await withGraphStore(async (store) => {
+      // Round-trip through JSON to match what real ingest does.
+      const jsonLd = JSON.parse(JSON.stringify({
+        '@type': 'Product',
+        name: `Widget id-${key}`,
+        [key]: value,
+        offers: { '@type': 'Offer', price: '19.99', priceCurrency: 'USD' },
+      }));
+      const result = await compileProduct(store, jsonLd);
+      assert.ok(result.version > 0, `graph should publish for ${key}=${value}`);
+      const attributes = productAttributes(result);
+      if (expected === 'untyped_number') {
+        assert.equal(Object.hasOwn(attributes, key), false,
+          `${key} ${value} must not be in attributes`);
+        assert.ok(result.unresolvedFacts.some((f) => f.field === key && f.reason === 'untyped_number'),
+          `${key} ${value} must be recorded as untyped_number`);
+      } else {
+        assert.equal(attributes[key], expected,
+          `safe integer ${key} ${value} must stringify to "${expected}"`);
+      }
+    });
+  }
+});
+
+test('EW05 markup: a string identifier stays unchanged even when it looks numeric', async () => {
+  await withGraphStore(async (store) => {
+    const result = await compileProduct(store, JSON.parse(JSON.stringify({
+      '@type': 'Product',
+      name: 'Widget Str IDs',
+      sku: '00012345600012',
+      offers: { '@type': 'Offer', price: '19.99', priceCurrency: 'USD' },
+    })));
+    assert.ok(result.version > 0, 'graph should publish');
+    const attributes = productAttributes(result);
+    assert.equal(attributes.sku, '00012345600012', 'leading-zero string is unchanged');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Negative amount guard (any money name)
+// ---------------------------------------------------------------------------
+
+test('EW05 markup: a negative salePrice is rejected like any negative price', async () => {
+  await withGraphStore(async (store) => {
+    const result = await compileProduct(store, {
+      '@type': 'Product',
+      name: 'Widget Sale Neg',
+      sku: 'WSN-1',
+      offers: {
+        '@type': 'Offer',
+        price: '19.99',
+        priceCurrency: 'USD',
+        salePrice: '-5.00',
+      },
+    });
+
+    assert.ok(result.version > 0, 'graph should publish');
+    assert.deepEqual(unresolved(result)['offers.salePrice'], ['amount_invalid', '-5.00'],
+      'negative salePrice in Offer should be amount_invalid');
+  });
+});
+
+test('EW05 markup: a negative shippingRate value is rejected', async () => {
+  await withGraphStore(async (store) => {
+    const result = await compileProduct(store, {
+      '@type': 'Product',
+      name: 'Widget Ship Neg',
+      sku: 'WSN-2',
+      offers: {
+        '@type': 'Offer',
+        price: '19.99',
+        priceCurrency: 'USD',
+        shippingDetails: {
+          '@type': 'OfferShippingDetails',
+          shippingRate: {
+            '@type': 'MonetaryAmount',
+            value: '-3.49',
+            currency: 'USD',
+          },
+        },
+      },
+    });
+
+    assert.ok(result.version > 0, 'graph should publish');
+    const rateObj = { '@type': 'MonetaryAmount', value: '-3.49', currency: 'USD' };
+    assert.deepEqual(unresolved(result)['offers.shippingDetails.shippingRate'],
+      ['amount_invalid', rateObj],
+      'negative shipping rate should be amount_invalid');
+  });
+});
+
+test('EW05 markup: a negative shippingRate MonetaryAmount with a number value is rejected', async () => {
+  await withGraphStore(async (store) => {
+    const result = await compileProduct(store, {
+      '@type': 'Product',
+      name: 'Widget Ship Num Neg',
+      sku: 'WSN-3',
+      offers: {
+        '@type': 'Offer',
+        price: '19.99',
+        priceCurrency: 'USD',
+        shippingDetails: {
+          '@type': 'OfferShippingDetails',
+          shippingRate: {
+            '@type': 'MonetaryAmount',
+            value: -3.49,
+            currency: 'USD',
+          },
+        },
+      },
+    });
+
+    assert.ok(result.version > 0, 'graph should publish');
+    const rateObj = { '@type': 'MonetaryAmount', value: -3.49, currency: 'USD' };
+    assert.deepEqual(unresolved(result)['offers.shippingDetails.shippingRate'],
+      ['amount_invalid', rateObj],
+      'negative shipping rate number value should be amount_invalid');
+  });
+});
+
+test('EW05 markup: a negative shippingRate MonetaryAmount minValue is rejected', async () => {
+  await withGraphStore(async (store) => {
+    const result = await compileProduct(store, {
+      '@type': 'Product',
+      name: 'Widget Ship Min Neg',
+      sku: 'WSN-4',
+      offers: {
+        '@type': 'Offer',
+        price: '19.99',
+        priceCurrency: 'USD',
+        shippingDetails: {
+          '@type': 'OfferShippingDetails',
+          shippingRate: {
+            '@type': 'MonetaryAmount',
+            minValue: '-1.00',
+            currency: 'USD',
+          },
+        },
+      },
+    });
+
+    assert.ok(result.version > 0, 'graph should publish');
+    assert.deepEqual(unresolved(result)['offers.shippingDetails.shippingRate.minValue'],
+      ['amount_invalid', '-1.00'],
+      'negative minValue should be amount_invalid');
+  });
+});
+
+test('EW05 markup: a negative offers.listPrice is rejected', async () => {
+  await withGraphStore(async (store) => {
+    const result = await compileProduct(store, {
+      '@type': 'Product',
+      name: 'Widget List Neg',
+      sku: 'WLN-1',
+      offers: {
+        '@type': 'Offer',
+        price: '19.99',
+        priceCurrency: 'USD',
+        listPrice: '-5.00',
+      },
+    });
+
+    assert.ok(result.version > 0, 'graph should publish');
+    assert.deepEqual(unresolved(result)['offers.listPrice'], ['amount_invalid', '-5.00'],
+      'negative listPrice should be amount_invalid');
+  });
+});
+
+test('EW05 markup: a negative hasMerchantReturnPolicy.restockingFee is rejected', async () => {
+  await withGraphStore(async (store) => {
+    const result = await compileProduct(store, {
+      '@type': 'Product',
+      name: 'Widget Restock Neg',
+      sku: 'WRN-1',
+      offers: {
+        '@type': 'Offer',
+        price: '19.99',
+        priceCurrency: 'USD',
+        hasMerchantReturnPolicy: {
+          '@type': 'MerchantReturnPolicy',
+          restockingFee: -1,
+        },
+      },
+    });
+
+    assert.ok(result.version > 0, 'graph should publish');
+    assert.deepEqual(unresolved(result)['offers.hasMerchantReturnPolicy.restockingFee'],
+      ['amount_invalid', -1],
+      'negative restockingFee should be amount_invalid');
+  });
+});
+
+// Canonical money pass-through (negative)
+// ---------------------------------------------------------------------------
+
+test('EW05 markup: negative canonical money (minor_units) is rejected in the pass-through', async () => {
+  await withGraphStore(async (store) => {
+    const result = await compileProduct(store, {
+      '@type': 'Product',
+      name: 'Widget Neg Canon',
+      sku: 'WNC-2',
+      offers: {
+        '@type': 'Offer',
+        priceCurrency: 'USD',
+        price: { amount: -500, amountUnit: 'minor_units', currency: 'USD', exponent: 2 },
+      },
+    });
+
+    assert.ok(result.version > 0, 'graph should publish');
+    assert.deepEqual(unresolved(result)['offers.price'],
+      ['amount_invalid', { amount: -500, amountUnit: 'minor_units', currency: 'USD', exponent: 2 }],
+      'negative canonical money should be amount_invalid');
+  });
+});
+
+
+test('EW05 markup: negative canonical money inside a list is rejected', async () => {
+  await withGraphStore(async (store) => {
+    const result = await compileProduct(store, {
+      '@type': 'Product',
+      name: 'Widget Prices List Neg',
+      sku: 'WPLN-1',
+      offers: {
+        '@type': 'Offer',
+        priceCurrency: 'USD',
+        prices: [usd('-1.00'), usd('2.00')],
+      },
+    });
+
+    assert.ok(result.version > 0, 'graph should publish');
+    assert.deepEqual(unresolved(result), {
+      'offers.prices': ['amount_invalid', [usd('-1.00'), usd('2.00')]],
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// hasVariant typed per variant
+// ---------------------------------------------------------------------------
+
+test('EW05 markup: hasVariant with string prices is typed per variant, not recorded whole', async () => {
+  await withGraphStore(async (store) => {
+    const result = await compileProduct(store, {
+      '@type': 'ProductGroup',
+      name: 'T-Shirt',
+      productGroupID: 'TS-1',
+      hasVariant: [
+        { '@type': 'Product', name: 'T-Shirt Small', sku: 'TS-S', offers: { '@type': 'Offer', price: '10.00', priceCurrency: 'USD' } },
+        { '@type': 'Product', name: 'T-Shirt Large', sku: 'TS-L', offers: { '@type': 'Offer', price: '15.00', priceCurrency: 'USD' } },
+      ],
+    });
+
+    assert.ok(result.version > 0, 'graph should publish');
+    const pg = result.entities.find((e) => e.type === 'unknown' && e.label === 'T-Shirt');
+    assert.ok(pg, 'should have a ProductGroup entity');
+    // hasVariant should be walked as a money container: each variant is
+    // processed individually rather than the whole list being recorded as untyped_money.
+    const attributes = pg.attributes;
+    assert.ok(attributes.hasVariant, 'hasVariant should be in attributes');
+    assert.equal(attributes.hasVariant.length, 2, 'both variants should be preserved');
+    assert.deepEqual(attributes.hasVariant[0].offers.price, usd('10.00'));
+    assert.deepEqual(attributes.hasVariant[1].offers.price, usd('15.00'));
+    assert.equal(result.unresolvedFacts.some((f) => f.reason === 'untyped_money' && f.path === 'hasVariant'), false,
+      'hasVariant should not be recorded as untyped_money');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Inverted MonetaryAmount minValue/maxValue
+// ---------------------------------------------------------------------------
+
+test('EW05 markup: an inverted shippingRate MonetaryAmount range is caught', async () => {
+  await withGraphStore(async (store) => {
+    const result = await compileProduct(store, {
+      '@type': 'Product',
+      name: 'Widget Range',
+      sku: 'WR-1',
+      offers: {
+        '@type': 'Offer',
+        price: '19.99',
+        priceCurrency: 'USD',
+        shippingDetails: {
+          '@type': 'OfferShippingDetails',
+          shippingRate: {
+            '@type': 'MonetaryAmount',
+            minValue: '10.00',
+            maxValue: '5.00',
+            currency: 'USD',
+          },
+        },
+      },
+    });
+
+    assert.ok(result.version > 0, 'graph should publish');
+    assert.deepEqual(unresolved(result)['offers.shippingDetails.shippingRate.minValue'],
+      ['range_inverted', '10.00']);
+    assert.deepEqual(unresolved(result)['offers.shippingDetails.shippingRate.maxValue'],
+      ['range_inverted', '5.00']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// not_an_object for containers beyond priceSpecification
+// ---------------------------------------------------------------------------
+
+test('EW05 markup: a bare value under offers is recorded as not_an_object', async () => {
+  await withGraphStore(async (store) => {
+    const result = await compileProduct(store, {
+      '@type': 'Product',
+      name: 'Widget Bare Offer',
+      sku: 'WB-1',
+      offers: '19.99',
+    });
+
+    assert.ok(result.version > 0, 'graph should publish');
+    assert.deepEqual(unresolved(result)['offers'], ['not_an_object', '19.99']);
+  });
+});
+
+test('EW05 markup: a bare value under shippingDetails is recorded as not_an_object', async () => {
+  await withGraphStore(async (store) => {
+    const result = await compileProduct(store, {
+      '@type': 'Product',
+      name: 'Widget Bare Ship',
+      sku: 'WB-2',
+      offers: {
+        '@type': 'Offer',
+        price: '19.99',
+        priceCurrency: 'USD',
+        shippingDetails: 'free',
+      },
+    });
+
+    assert.ok(result.version > 0, 'graph should publish');
+    assert.deepEqual(unresolved(result)['offers.shippingDetails'], ['not_an_object', 'free']);
+  });
+});
+
+test('EW05 markup: a bare value under aggregateOffer is recorded as not_an_object', async () => {
+  await withGraphStore(async (store) => {
+    const result = await compileProduct(store, {
+      '@type': 'Product',
+      name: 'Widget Bare Agg',
+      sku: 'WB-3',
+      aggregateOffer: 'cheap',
+    });
+
+    assert.ok(result.version > 0, 'graph should publish');
+    assert.deepEqual(unresolved(result)['aggregateOffer'], ['not_an_object', 'cheap']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ExchangeRateSpecification currency guard
+// ---------------------------------------------------------------------------
+
+test('EW05 markup: ExchangeRateSpecification (top-level, no enclosing currency) blocks its own currency', async () => {
+  await withGraphStore(async (store) => {
+    const result = await compileProduct(store, {
+      '@type': 'ExchangeRateSpecification',
+      name: 'EUR Rate',
+      currency: 'EUR',
+      currentExchangeRate: { '@type': 'UnitPriceSpecification', price: '1.08' },
+    });
+
+    assert.ok(result.version > 0, 'graph should publish');
+    const entity = result.entities.find((e) => e.type === 'unknown' && e.label === 'EUR Rate');
+    assert.ok(entity, 'should have an entity');
+    const rate = entity.attributes.currentExchangeRate;
+    assert.ok(rate, 'currentExchangeRate should be in attributes');
+    // The price 1.08 must be recorded as currency_missing (no currency in scope
+    // because currentExchangeRate blocks cascading) and absent from attributes.
+    assert.equal(Object.hasOwn(rate, 'price'), false, 'price must not be in attributes');
+    assert.deepEqual(unresolved(result)['currentExchangeRate.price'],
+      ['currency_missing', '1.08'],
+      'price records currency_missing with raw "1.08"');
+  });
+});
+
+test('EW05 markup: ExchangeRateSpecification with enclosing priceCurrency is still blocked', async () => {
+  await withGraphStore(async (store) => {
+    const result = await compileProduct(store, {
+      '@type': 'Product',
+      name: 'EUR Rate Product',
+      sku: 'ERP-1',
+      offers: {
+        '@type': 'ExchangeRateSpecification',
+        currency: 'EUR',
+        currentExchangeRate: { '@type': 'UnitPriceSpecification', price: '1.08', priceCurrency: 'USD' },
+      },
+    });
+
+    assert.ok(result.version > 0, 'graph should publish');
+    // The currentExchangeRate has its own priceCurrency, which should be used
+    // since the ExchangeRateSpecification currency is blocked.
+    const entity = result.entities.find((e) => e.type === 'product');
+    const rateSpec = entity.attributes.offers;
+    assert.ok(rateSpec, 'ExchangeRateSpecification should be in attributes');
+    const rate = rateSpec.currentExchangeRate;
+    assert.ok(rate, 'currentExchangeRate should be in attributes');
+    assert.deepEqual(rate.price, usd('1.08'), 'price should use inner priceCurrency USD');
+  });
+});
+
+test('EW05 markup: exchange rate inside an Offer with enclosing priceCurrency blocks outer currency', async () => {
+  await withGraphStore(async (store) => {
+    const result = await compileProduct(store, {
+      '@type': 'Product',
+      name: 'EUR Rate Offer',
+      sku: 'ERO-1',
+      offers: {
+        '@type': 'Offer',
+        priceCurrency: 'USD',
+        price: '19.99',
+        exchangeRate: {
+          '@type': 'ExchangeRateSpecification',
+          currentExchangeRate: { '@type': 'UnitPriceSpecification', price: '1.08' },
+        },
+      },
+    });
+
+    assert.ok(result.version > 0, 'graph should publish');
+    const entity = result.entities.find((e) => e.type === 'product');
+    const offer = entity.attributes.offers;
+    assert.ok(offer, 'Offer should be in attributes');
+    assert.deepEqual(offer.price, usd('19.99'), 'Offer price uses its own USD');
+    const rate = offer.exchangeRate?.currentExchangeRate;
+    assert.ok(rate, 'currentExchangeRate should be in attributes');
+    assert.equal(Object.hasOwn(rate, 'price'), false, 'price must not be in attributes');
+    assert.deepEqual(unresolved(result)['offers.exchangeRate.currentExchangeRate.price'],
+      ['currency_missing', '1.08'],
+      'price records currency_missing; outer USD must not leak');
   });
 });
