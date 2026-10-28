@@ -127,3 +127,23 @@ export {
   originMismatch,
   capabilityRevoked,
 } from "./capability-index.js";
+
+// Live-state contract (EW14)
+export {
+  FRESHNESS_CLASSES,
+  classifyFreshness,
+  isValidFreshnessClass,
+  createFreshnessMarker,
+  isFreshnessStale,
+  FreshnessClassError,
+  SOURCE_STATUSES,
+  createSourceVersion,
+  resolveAuthoritativeSource,
+  SourceVersionError,
+  mustRevalidate,
+  RevalidationRequiredError,
+  disabledByOutage,
+  SourceOutageError,
+  createCommerceContext,
+  CommerceContextError,
+} from "../live-state.js";

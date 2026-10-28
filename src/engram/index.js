@@ -60,6 +60,33 @@ export {
 } from "./retrieve-site.js";
 
 
+
+export {
+  FRESHNESS_CLASSES,
+  classifyFreshness,
+  isValidFreshnessClass,
+  createFreshnessMarker,
+  isFreshnessStale,
+  FreshnessClassError,
+  SOURCE_STATUSES,
+  createSourceVersion,
+  resolveAuthoritativeSource,
+  SourceVersionError,
+  mustRevalidate,
+  RevalidationRequiredError,
+  disabledByOutage,
+  SourceOutageError,
+  createCommerceContext,
+  CommerceContextError,
+} from "./live-state.js";
+export {
+  validateAdapterShape,
+  hydrate,
+  revalidateForAction,
+  LiveStateError,
+  VOLATILE_FIELD_NAMES,
+  isVolatileField,
+} from "./live-state.js";
 import { createStore } from "./store.js";
 import { createLocalConsent } from "./namespace.js";
 import { createGovernance } from "./governance.js";
