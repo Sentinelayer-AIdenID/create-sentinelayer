@@ -53,10 +53,14 @@ QUOTA_RETRY_STEP_ORDER = (
     "Run Omar Gate (quota retry)",
     "Select Omar Gate result",
 )
-CLASSIFY_ROUTE_LINE = "          ROUTE: ${{ vars.OMAR_ROUTE || '' }}"
+# The classifier reads the route from GitHub's own comparison, the same case-insensitive one the first attempt's if:
+# makes, and takes it only on that exact value.
+CLASSIFY_ROUTE_LINE = "          ROUTE: ${{ vars.OMAR_ROUTE == 'azure' && 'azure' || '' }}"
+CLASSIFY_ROUTE_TEST_LINE = '          if [ "${ROUTE}" = "azure" ]; then'
 CLASSIFY_REQUIRED_LINES = (
     "        id: classify",
     CLASSIFY_ROUTE_LINE,
+    CLASSIFY_ROUTE_TEST_LINE,
     "            reason=azure_route",
     "          DRILL: ${{ github.event_name == 'workflow_dispatch' && inputs.quota_retry_drill && 'true' || 'false' }}",
     '          elif [ "${FIRST_OUTCOME}" = "failure" ] && [ "${FIRST_FAILURE_CLASS}" = "provider_failure" ]; then',
@@ -489,6 +493,18 @@ def _run_quota_retry_self_tests(valid: str) -> None:
         ),
         "an org route the classifier does not read": _replace_in_step(
             valid, "Classify Omar provider failure", CLASSIFY_ROUTE_LINE + "\n", ""
+        ),
+        "an org route the classifier compares case-sensitively": _replace_in_step(
+            valid, "Classify Omar provider failure", CLASSIFY_ROUTE_LINE, "          ROUTE: ${{ vars.OMAR_ROUTE || '' }}"
+        ),
+        "a route the classifier reads from the pull request": _replace_in_step(
+            valid,
+            "Classify Omar provider failure",
+            CLASSIFY_ROUTE_LINE + "\n",
+            "          # " + CLASSIFY_ROUTE_LINE.strip() + "\n          ROUTE: ${{ github.head_ref }}\n",
+        ),
+        "a classifier that takes any org route value": _replace_in_step(
+            valid, "Classify Omar provider failure", CLASSIFY_ROUTE_TEST_LINE, '          if [ -n "${ROUTE}" ]; then'
         ),
         "a first attempt that fails the job by itself": _replace_in_step(
             valid, "Run Omar Gate", "        continue-on-error: true\n", ""
