@@ -338,21 +338,25 @@ export async function uploadAttachment(sessionId, filePath, {
   const mimeType = guessMimeType(resolvedName);
 
   const initResult = await initAttachment(sessionId, resolvedName, mimeType, fileStat.size, { targetPath, sha256 });
-  const uploadUrl = initResult.upload ? initResult.upload.url : initResult.uploadUrl;
-  if (!initResult || !initResult.attachmentId || !uploadUrl) {
+  const attachmentId = initResult.attachment ? initResult.attachment.attachmentId : null;
+  if (!initResult || !attachmentId) {
     throw new SentinelayerApiError("Attachment init returned incomplete data.", {
       status: 502,
       code: "INCOMPLETE_INIT",
     });
   }
 
-  await uploadStreamToUrl(uploadUrl, filePath, { headers: initResult.upload ? initResult.upload.headers : undefined });
+  // upload may be null when duplicate is true (same file already uploaded)
+  const upload = initResult.upload;
+  if (upload && upload.url) {
+    await uploadStreamToUrl(upload.url, filePath, { headers: upload.headers });
+  }
 
-  const completeResult = await completeAttachment(sessionId, initResult.attachmentId, sha256, { targetPath });
+  const completeResult = await completeAttachment(sessionId, attachmentId, sha256, { targetPath });
 
-  await pollAttachmentUntilReady(sessionId, initResult.attachmentId, { targetPath });
+  await pollAttachmentUntilReady(sessionId, attachmentId, { targetPath });
 
-  return { attachmentId: initResult.attachmentId, sha256, fileName: resolvedName, mimeType, completeResult };
+  return { attachmentId, sha256, fileName: resolvedName, mimeType, completeResult };
 }
 
 export async function fetchAndReturnAttachment(sessionId, attachmentId, {

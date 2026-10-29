@@ -48,10 +48,13 @@ async function startAttachmentMockApi({ mimeType = "image/png", fileName = "test
       if (pathname.match(/\/attachments\/init$/) && req.method === "POST") {
         const body = await readJsonBody(req);
         return jsonResponse(res, 200, {
-          attachmentId: "att_mcp_42",
+          ok: true,
+          duplicate: false,
+          attachment: { attachmentId: "att_mcp_42" },
           upload: {
             url: `http://127.0.0.1:${server.address().port}/_upload/mcp`,
             method: "PUT",
+            expiresIn: 3600,
             headers: {
               "content-type": body.contentType || "application/octet-stream",
               "content-length": String(body.sizeBytes || 0),

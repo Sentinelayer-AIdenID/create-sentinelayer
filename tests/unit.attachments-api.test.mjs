@@ -81,10 +81,13 @@ async function startAttachmentMockApi() {
           "x-amz-meta-sha256": body.sha256 || "",
         };
         return jsonResponse(res, 200, {
-          attachmentId: `att_${state.nextAttachmentId}`,
+          ok: true,
+          duplicate: false,
+          attachment: { attachmentId: `att_${state.nextAttachmentId}` },
           upload: {
             url: `http://127.0.0.1:${server.address().port}${uploadPath}`,
             method: "PUT",
+            expiresIn: 3600,
             headers: uploadHeaders,
           },
         });
@@ -286,13 +289,14 @@ test("initAttachment + completeAttachment: full contract", async () => {
   const prev = setApiEnv(mock.apiUrl);
   try {
     const init = await initAttachment("sess-1", "photo.png", "image/png", 12345, { sha256: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2" });
-    assert.ok(init.attachmentId);
+    assert.ok(init.attachment);
+    assert.ok(init.attachment.attachmentId);
     assert.ok(init.upload.url);
     assert.equal(mock.state.initCalls[0].body.filename, "photo.png");
     assert.equal(mock.state.initCalls[0].body.contentType, "image/png");
     assert.ok(mock.state.initCalls[0].body.sha256);
 
-    const comp = await completeAttachment("sess-1", init.attachmentId, "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2");
+    const comp = await completeAttachment("sess-1", init.attachment.attachmentId, "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2");
     assert.equal(comp.ok, true);
     assert.equal(mock.state.completeCalls[0].body, undefined);
   } finally { restoreApiEnv(prev); await mock.close(); }
@@ -431,7 +435,8 @@ test("initAttachment sends valid sha256 through to API", async () => {
   try {
     const validSha = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2";
     const init = await initAttachment("sess-1", "file.png", "image/png", 100, { sha256: validSha });
-    assert.ok(init.attachmentId);
+    assert.ok(init.attachment);
+    assert.ok(init.attachment.attachmentId);
     const callBody = mock.state.initCalls[0].body;
     assert.ok(callBody.sha256);
     assert.notEqual(callBody.sha256, "");
@@ -488,4 +493,99 @@ test("pollAttachmentUntilReady: returns when status=ready, throws on status=fail
     const result = await pollAttachmentUntilReady("sess-1", "att_1");
     assert.equal(result.status, "ready");
   } finally { restoreApiEnv(prev); await mock.close(); }
+});
+
+test("uploadAttachment: duplicate upload skips PUT", async () => {
+  // Server that returns duplicate:true with upload:null
+  const server = http.createServer(async (req, res) => {
+    const { pathname: pn } = parseUrl(req);
+    if (pn.match(/\/attachments\/init$/) && req.method === "POST") {
+      const body = await readJsonBody(req);
+      return jsonResponse(res, 200, {
+        ok: true,
+        duplicate: true,
+        attachment: { attachmentId: "att_dup_1" },
+        upload: null,
+      });
+    }
+    if (pn.match(/\/attachments\/[^/]+\/complete$/) && req.method === "POST") {
+      return jsonResponse(res, 200, { ok: true });
+    }
+    if (pn.match(/\/attachments\/[^/]+$/) && req.method === "GET") {
+      return jsonResponse(res, 200, { status: "ready" });
+    }
+    res.writeHead(404); res.end();
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const addr = server.address();
+  const prev = setApiEnv(`http://127.0.0.1:${addr.port}`);
+
+  const tmpDir = await mkdtemp(path.join(os.tmpdir(), "att-"));
+  try {
+    const filePath = path.join(tmpDir, "dup.bin");
+    await writeFile(filePath, Buffer.from("already-uploaded"));
+    const result = await uploadAttachment("sess-1", filePath);
+    assert.equal(result.attachmentId, "att_dup_1");
+  } finally {
+    restoreApiEnv(prev);
+    server.close();
+    await once(server, "close");
+    await rm(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("uploadAttachment: attachmentId read from nested shape, not flat", async () => {
+  // Init returns the real nested shape {attachment: {attachmentId: ...}, upload: {...}}
+  const server = http.createServer(async (req, res) => {
+    const { pathname: pn } = parseUrl(req);
+    if (pn.match(/\/attachments\/init$/) && req.method === "POST") {
+      const body = await readJsonBody(req);
+      const uploadPath = "/_upload/test";
+      return jsonResponse(res, 200, {
+        ok: true,
+        duplicate: false,
+        attachment: { attachmentId: "att_nested_99" },
+        upload: {
+          url: `http://127.0.0.1:${server.address().port}${uploadPath}`,
+          method: "PUT",
+          expiresIn: 3600,
+          headers: {
+            "content-type": body.contentType || "application/octet-stream",
+            "content-length": String(body.sizeBytes),
+            "x-amz-checksum-sha256": body.sha256 || "",
+          },
+        },
+      });
+    }
+    if (pn === "/_upload/test" && req.method === "PUT") {
+      for await (const _ of req) { /* consume */ }
+      return jsonResponse(res, 200, { ok: true });
+    }
+    if (pn.match(/\/attachments\/[^/]+\/complete$/) && req.method === "POST") {
+      return jsonResponse(res, 200, { ok: true });
+    }
+    if (pn.match(/\/attachments\/[^/]+$/) && req.method === "GET") {
+      return jsonResponse(res, 200, { status: "ready" });
+    }
+    res.writeHead(404); res.end();
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const addr = server.address();
+  const prev = setApiEnv(`http://127.0.0.1:${addr.port}`);
+
+  const tmpDir = await mkdtemp(path.join(os.tmpdir(), "att-"));
+  try {
+    const filePath = path.join(tmpDir, "nested.bin");
+    await writeFile(filePath, Buffer.from("nested-shape-test-data"));
+    const result = await uploadAttachment("sess-1", filePath);
+    // The critical assertion: attachmentId came from attachment.attachmentId, not a flat field
+    assert.equal(result.attachmentId, "att_nested_99");
+  } finally {
+    restoreApiEnv(prev);
+    server.close();
+    await once(server, "close");
+    await rm(tmpDir, { recursive: true, force: true });
+  }
 });
