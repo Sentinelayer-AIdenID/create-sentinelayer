@@ -4696,7 +4696,7 @@ test("CLI mcp server run excludes sensitive commands and refuses CLI tools for a
     // it is asserted where it acts, on the real generated handler, in
     // tests/unit.mcp-bridge-kill-switch.test.mjs.
     const nativeTools = SESSION_MCP_TOOLS.map((tool) => tool.name).sort();
-    assert.equal(nativeTools.length, 13);
+    assert.equal(nativeTools.length, 15);
     for (const run of [switchOff, switchOn]) {
       // exactly the 13 native session tools are listed, and no CLI tool
       assert.deepEqual([...run.listedNames].sort(), nativeTools);
