@@ -9,6 +9,10 @@ const JWT_REGEX = /eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10
 const CANDIDATE_REGEX = /[A-Za-z0-9/+_.-]{32,}/g;
 
 const DEFAULT_MAX_BYTES = 512 * 1024;
+// Refused verbatim in every staged file, whatever its size: the review key, and the quota retry's key and endpoint.
+// A finding names the variable, never its value.
+const CONFIGURED_SECRET_ENV_NAMES = ["OPENAI_API_KEY", "AZURE_SOL61_API_KEY", "AZURE_SOL61_BASE_URL"];
+const MIN_CONFIGURED_SECRET_LENGTH = 8;
 
 function parseArgs() {
   const args = process.argv.slice(2);
@@ -67,6 +71,12 @@ function shannonEntropy(value) {
   return entropy;
 }
 
+function configuredSecrets(env) {
+  return CONFIGURED_SECRET_ENV_NAMES.map((name) => ({ name, value: String(env[name] || "").trim() }))
+    .filter(({ value }) => value.length >= MIN_CONFIGURED_SECRET_LENGTH)
+    .map(({ name, value }) => ({ name, bytes: Buffer.from(value, "utf8") }));
+}
+
 function scanContent(content, filePath) {
   const findings = [];
   const lines = content.split(/\r?\n/);
@@ -100,15 +110,21 @@ function main() {
     process.exit(0);
   }
   const files = listFiles(dir);
+  const secrets = configuredSecrets(process.env);
   const findings = [];
   for (const filePath of files) {
     const stats = fs.statSync(filePath);
     if (!stats.isFile()) continue;
+    const bytes = fs.readFileSync(filePath);
+    for (const secret of secrets) {
+      if (bytes.includes(secret.bytes)) {
+        findings.push({ file: filePath, type: "configured_secret", name: secret.name });
+      }
+    }
     if (stats.size > maxBytes) {
       continue;
     }
-    const content = fs.readFileSync(filePath, "utf8");
-    findings.push(...scanContent(content, filePath));
+    findings.push(...scanContent(bytes.toString("utf8"), filePath));
   }
   fs.mkdirSync(path.dirname(report), { recursive: true });
   fs.writeFileSync(report, JSON.stringify(findings, null, 2));
