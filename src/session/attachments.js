@@ -61,7 +61,7 @@ export async function initAttachment(sessionId, fileName, mimeType, fileSize, {
 
   const session = await resolveSessionAuth({ targetPath });
   const apiBaseUrl = resolveApiBaseUrl(session);
-  const endpoint = apiBaseUrl + "/api/v1/sessions/" + urlPathSegment(normalizedSessionId, { label: "sessionId" }) + "/attachments/init";
+  const endpoint = `${apiBaseUrl}/api/v1/sessions/${urlPathSegment(normalizedSessionId, { label: "sessionId" })}/attachments/init`;
 
   const body = {
     fileName: normalizeFileName(fileName),
@@ -86,7 +86,7 @@ export async function completeAttachment(sessionId, attachmentId, sha256, {
 
   const session = await resolveSessionAuth({ targetPath });
   const apiBaseUrl = resolveApiBaseUrl(session);
-  const endpoint = apiBaseUrl + "/api/v1/sessions/" + urlPathSegment(normalizedSessionId, { label: "sessionId" }) + "/attachments/" + urlPathSegment(String(attachmentId), { label: "attachmentId" }) + "/complete";
+  const endpoint = `${apiBaseUrl}/api/v1/sessions/${urlPathSegment(normalizedSessionId, { label: "sessionId" })}/attachments/${urlPathSegment(String(attachmentId), { label: "attachmentId" })}/complete`;
 
   const body = { sha256 };
   const credential = await credentialFor(session);
@@ -153,7 +153,7 @@ export async function getAttachmentDownload(sessionId, attachmentId, {
   const session = await resolveSessionAuth({ targetPath });
   const apiBaseUrl = resolveApiBaseUrl(session);
   const qs = thumbnail ? "?thumbnail=1" : "";
-  const endpoint = apiBaseUrl + "/api/v1/sessions/" + urlPathSegment(normalizedSessionId, { label: "sessionId" }) + "/attachments/" + urlPathSegment(String(attachmentId), { label: "attachmentId" }) + qs;
+  const endpoint = `${apiBaseUrl}/api/v1/sessions/${urlPathSegment(normalizedSessionId, { label: "sessionId" })}/attachments/${urlPathSegment(String(attachmentId), { label: "attachmentId" })}${qs}`;
 
   const credential = await credentialFor(session);
   return requestJson(endpoint, {

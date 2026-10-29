@@ -101,7 +101,7 @@ export const SESSION_ROUTE_CLASSES = Object.freeze({
   "cli:session access list": "owner",
   "cli:session access status": "owner",
   "cli:session actions": "exempt-local",
-  "cli:session attachment-get": "legacy-data-plane",
+  "cli:session attachment-get": "exempt-local",
   "cli:session templates": "exempt-local",
 });
 
