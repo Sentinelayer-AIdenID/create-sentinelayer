@@ -33,6 +33,11 @@ on:
         required: false
         default: "5"
         type: string
+      quota_retry_drill:
+        description: Review on the backup route that a billing or quota 429 is retried on (proves that route; pull_request and push runs cannot set it)
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -423,6 +428,7 @@ jobs:
           set -euo pipefail
           python3 scripts/ci/check_omar_workflow_contract.py --self-test
           python3 scripts/ci/check_omar_workflow_contract.py
+          python3 .github/scripts/omar_quota_failure.py --self-test
           python3 scripts/ci/check_forbidden_omar_surface.py --self-test
           python3 scripts/ci/check_forbidden_omar_surface.py
       - name: Verify managed Omar token secret
@@ -445,13 +451,92 @@ jobs:
           set -euo pipefail
           bash .github/scripts/require-secret.sh "OPENAI_API_KEY" "${OPENAI_API_KEY}"
       - name: Run Omar Gate
-        if: steps.trust_boundary.outputs.trusted_context == 'true'
+        # Skipped only by the dispatch drill. A failure here does not end the job by itself: a billing or quota 429 is
+        # retried once below, on the same model's backup endpoint, and any other failure fails at "Select Omar Gate result".
+        if: steps.trust_boundary.outputs.trusted_context == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.quota_retry_drill)
         id: omar
         continue-on-error: true
         uses: mrrCarter/sentinelayer-v1-action@2d5a8edd485595148254926c9fb318e0adae416a
         with:
           github_token: ${{ github.token }}
           openai_api_key: ${{ secrets.OPENAI_API_KEY }}
+          llm_provider: openai
+          sentinelayer_token: ${{ steps.resolve_omar_credentials.outputs.sentinelayer_token }}
+          sentinelayer_spec_id: ${{ env.OMAR_SPEC_ID }}
+          sentinelayer_managed_llm: "false"
+          review_routing: legacy
+          scan_mode: ${{ github.event_name == 'workflow_dispatch' && inputs.scan_mode || 'deep' }}
+          severity_gate: ${{ github.event_name == 'workflow_dispatch' && inputs.severity_gate || 'P1' }}
+          model: gpt-6.1-sol
+          codex_model: gpt-6.1-sol
+          model_fallback: gpt-6.1-sol
+          use_codex: "false"
+          codex_only: "false"
+          llm_failure_policy: block
+          max_daily_scans: ${{ vars.OMAR_MAX_DAILY_SCANS || '200' }}
+          min_scan_interval_minutes: ${{ vars.OMAR_MIN_SCAN_INTERVAL_MINUTES || '0' }}
+          rate_limit_fail_mode: closed
+      - name: Classify Omar provider failure
+        id: classify
+        if: steps.trust_boundary.outputs.trusted_context == 'true'
+        shell: bash
+        env:
+          DRILL: ${{ github.event_name == 'workflow_dispatch' && inputs.quota_retry_drill && 'true' || 'false' }}
+          FIRST_OUTCOME: ${{ steps.omar.outcome }}
+          FIRST_FAILURE_CLASS: ${{ steps.omar.outputs.llm_failure_class || '' }}
+          FIRST_RUN_ID: ${{ steps.omar.outputs.run_id || '' }}
+        run: |
+          set -euo pipefail
+          # Retry once on the backup endpoint only when the first attempt failed with a billing or quota 429 on every LLM
+          # attempt (or for the dispatch drill). Any other failure stands.
+          retry=false
+          reason=none
+          if [ "${DRILL}" = "true" ]; then
+            retry=true
+            reason=dispatch_drill
+          elif [ "${FIRST_OUTCOME}" = "failure" ] && [ "${FIRST_FAILURE_CLASS}" = "provider_failure" ]; then
+            run_id="$(echo "${FIRST_RUN_ID}" | tr -d '\r' | xargs)"
+            findings=".sentinelayer/runs/${run_id}/FINDINGS.jsonl"
+            if echo "${run_id}" | grep -Eq '^[A-Za-z0-9._-]+$' && [ -f "${findings}" ] \
+              && python3 .github/scripts/omar_quota_failure.py "${findings}"; then
+              retry=true
+              reason=billing_quota_429
+            fi
+          fi
+          echo "retry=${retry}" >> "${GITHUB_OUTPUT}"
+          echo "reason=${reason}" >> "${GITHUB_OUTPUT}"
+          echo "Omar quota retry: ${retry} (${reason})"
+      - name: Validate the quota retry route
+        if: steps.trust_boundary.outputs.trusted_context == 'true' && steps.classify.outputs.retry == 'true'
+        shell: bash
+        env:
+          AZURE_SOL61_API_KEY: ${{ secrets.AZURE_SOL61_API_KEY }}
+          AZURE_SOL61_BASE_URL: ${{ secrets.AZURE_SOL61_BASE_URL }}
+        run: |
+          set -euo pipefail
+          # Both are secrets, so neither the key nor the endpoint is ever printed.
+          if [ -z "${AZURE_SOL61_API_KEY:-}" ] || [ -z "${AZURE_SOL61_BASE_URL:-}" ]; then
+            echo "::error::The quota retry route is not configured (AZURE_SOL61_API_KEY, AZURE_SOL61_BASE_URL). Blocking merge."
+            exit 1
+          fi
+          case "${AZURE_SOL61_BASE_URL}" in
+            https://*/openai/v1 | https://*/openai/v1/) ;;
+            *)
+              echo "::error::The quota retry endpoint is not an https .../openai/v1 URL. Blocking merge."
+              exit 1
+              ;;
+          esac
+      - name: Run Omar Gate (quota retry)
+        # The same action, model and inputs as the first attempt; only the endpoint and key differ. A failure here
+        # fails the job: there is no second retry and no other route.
+        if: steps.trust_boundary.outputs.trusted_context == 'true' && steps.classify.outputs.retry == 'true'
+        id: omar_retry
+        uses: mrrCarter/sentinelayer-v1-action@2d5a8edd485595148254926c9fb318e0adae416a
+        env:
+          OPENAI_BASE_URL: ${{ secrets.AZURE_SOL61_BASE_URL }}
+        with:
+          github_token: ${{ github.token }}
+          openai_api_key: ${{ secrets.AZURE_SOL61_API_KEY }}
           llm_provider: openai
           sentinelayer_token: ${{ steps.resolve_omar_credentials.outputs.sentinelayer_token }}
           sentinelayer_spec_id: ${{ env.OMAR_SPEC_ID }}
@@ -480,19 +565,49 @@ jobs:
           OPENAI_P1_COUNT: ${{ steps.omar.outputs.p1_count || '0' }}
           OPENAI_P2_COUNT: ${{ steps.omar.outputs.p2_count || '0' }}
           OPENAI_P3_COUNT: ${{ steps.omar.outputs.p3_count || '0' }}
+          QUOTA_RETRIED: ${{ steps.classify.outputs.retry || 'false' }}
+          QUOTA_REASON: ${{ steps.classify.outputs.reason || 'none' }}
+          QUOTA_OUTCOME: ${{ steps.omar_retry.outcome || '' }}
+          QUOTA_RUN_ID: ${{ steps.omar_retry.outputs.run_id || '' }}
+          QUOTA_GATE_STATUS: ${{ steps.omar_retry.outputs.gate_status || '' }}
+          QUOTA_P0_COUNT: ${{ steps.omar_retry.outputs.p0_count || '0' }}
+          QUOTA_P1_COUNT: ${{ steps.omar_retry.outputs.p1_count || '0' }}
+          QUOTA_P2_COUNT: ${{ steps.omar_retry.outputs.p2_count || '0' }}
+          QUOTA_P3_COUNT: ${{ steps.omar_retry.outputs.p3_count || '0' }}
         run: |
           set -euo pipefail
-          if [ "${OPENAI_OUTCOME}" != "success" ]; then
-            echo "::error::Direct OpenAI Omar scan did not succeed (outcome='${OPENAI_OUTCOME}')."
+          route=primary
+          outcome="${OPENAI_OUTCOME}"
+          run_id="${OPENAI_RUN_ID}"
+          gate_status="${OPENAI_GATE_STATUS}"
+          p0_count="${OPENAI_P0_COUNT}"
+          p1_count="${OPENAI_P1_COUNT}"
+          p2_count="${OPENAI_P2_COUNT}"
+          p3_count="${OPENAI_P3_COUNT}"
+          # After a quota retry only the retry counts. Any failure of the first attempt that was not retried stays a failure.
+          if [ "${QUOTA_RETRIED}" = "true" ]; then
+            route=quota_retry
+            outcome="${QUOTA_OUTCOME}"
+            run_id="${QUOTA_RUN_ID}"
+            gate_status="${QUOTA_GATE_STATUS}"
+            p0_count="${QUOTA_P0_COUNT}"
+            p1_count="${QUOTA_P1_COUNT}"
+            p2_count="${QUOTA_P2_COUNT}"
+            p3_count="${QUOTA_P3_COUNT}"
+          fi
+          echo "Omar result from: ${route} (${QUOTA_REASON})"
+          if [ "${outcome}" != "success" ]; then
+            echo "::error::Direct OpenAI Omar scan did not succeed (route=${route}, outcome='${outcome}')."
             exit 1
           fi
           printf 'selected_source=openai\n' >> "${GITHUB_OUTPUT}"
-          printf 'run_id=%s\n' "${OPENAI_RUN_ID}" >> "${GITHUB_OUTPUT}"
-          printf 'gate_status=%s\n' "${OPENAI_GATE_STATUS}" >> "${GITHUB_OUTPUT}"
-          printf 'p0_count=%s\n' "${OPENAI_P0_COUNT}" >> "${GITHUB_OUTPUT}"
-          printf 'p1_count=%s\n' "${OPENAI_P1_COUNT}" >> "${GITHUB_OUTPUT}"
-          printf 'p2_count=%s\n' "${OPENAI_P2_COUNT}" >> "${GITHUB_OUTPUT}"
-          printf 'p3_count=%s\n' "${OPENAI_P3_COUNT}" >> "${GITHUB_OUTPUT}"
+          printf 'route=%s\n' "${route}" >> "${GITHUB_OUTPUT}"
+          printf 'run_id=%s\n' "${run_id}" >> "${GITHUB_OUTPUT}"
+          printf 'gate_status=%s\n' "${gate_status}" >> "${GITHUB_OUTPUT}"
+          printf 'p0_count=%s\n' "${p0_count}" >> "${GITHUB_OUTPUT}"
+          printf 'p1_count=%s\n' "${p1_count}" >> "${GITHUB_OUTPUT}"
+          printf 'p2_count=%s\n' "${p2_count}" >> "${GITHUB_OUTPUT}"
+          printf 'p3_count=%s\n' "${p3_count}" >> "${GITHUB_OUTPUT}"
       - name: Assert Omar LLM contract is active
         if: steps.trust_boundary.outputs.trusted_context == 'true'
         shell: bash
@@ -544,6 +659,7 @@ jobs:
           OMAR_P2: ${{ steps.omar_result.outputs.p2_count || '0' }}
           OMAR_P3: ${{ steps.omar_result.outputs.p3_count || '0' }}
           OMAR_SELECTED_SOURCE: ${{ steps.omar_result.outputs.selected_source || '' }}
+          OMAR_ROUTE: ${{ steps.omar_result.outputs.route || '' }}
           OMAR_SCAN_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.scan_mode || 'deep' }}
           OMAR_SEVERITY_GATE: ${{ github.event_name == 'workflow_dispatch' && inputs.severity_gate || 'P1' }}
           OMAR_P2_MAX_ALLOWED: ${{ github.event_name == 'workflow_dispatch' && inputs.p2_max_allowed || '5' }}
@@ -613,6 +729,7 @@ jobs:
                   "managed_llm": False,
                   "llm_failure_policy": "block",
                   "selected_source": env("OMAR_SELECTED_SOURCE"),
+                  "route": env("OMAR_ROUTE"),
               },
               "github": {
                   "repository": repository,
@@ -633,6 +750,10 @@ jobs:
       - name: Scan staged artifacts for secrets
         if: steps.trust_boundary.outputs.trusted_context == 'true'
         shell: bash
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          AZURE_SOL61_API_KEY: ${{ secrets.AZURE_SOL61_API_KEY }}
+          AZURE_SOL61_BASE_URL: ${{ secrets.AZURE_SOL61_BASE_URL }}
         run: |
           set -euo pipefail
           if [ ! -d "omar-artifacts" ]; then
