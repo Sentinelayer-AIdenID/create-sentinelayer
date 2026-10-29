@@ -4,6 +4,12 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 import { createAgentEvent } from "../events/schema.js";
 import {
+  uploadAttachment,
+  fetchAndReturnAttachment,
+  isImageMimeType,
+  isPdfMimeType,
+} from "../session/attachments.js";
+import {
   approvedSelfProvisioningMcpCall,
   buildCliCommandMcpTools,
   createCliCommandMcpToolHandlers,
