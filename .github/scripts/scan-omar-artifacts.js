@@ -4,8 +4,8 @@ import path from "node:path";
 const KEYWORD_REGEX =
   /(token|secret|api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|authorization)/i;
 const KEY_VALUE_REGEX =
-  /(token|secret|api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|authorization)[^\\n]{0,40}[:=]\\s*['"]?([A-Za-z0-9/+_.-]{16,})/i;
-const JWT_REGEX = /eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}/;
+  /(token|secret|api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|authorization)[^\n]{0,40}[:=]\s*['"]?([A-Za-z0-9/+_.-]{16,})/i;
+const JWT_REGEX = /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/;
 const CANDIDATE_REGEX = /[A-Za-z0-9/+_.-]{32,}/g;
 
 const DEFAULT_MAX_BYTES = 512 * 1024;

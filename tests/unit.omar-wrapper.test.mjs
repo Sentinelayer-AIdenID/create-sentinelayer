@@ -80,3 +80,41 @@ test("Unit Omar artifacts: a configured secret is refused verbatim in a staged f
   // Without the configured value the same tree passes, so the finding came from the configured secret.
   assert.equal(scan({}, path.join(root, "clean.json")).status, 0);
 });
+
+test("Unit Omar artifacts: the pattern checks catch a real-shaped token and key assignments, not malformed controls", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "omar-artifacts-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const inherited = { ...process.env };
+  for (const name of ["OPENAI_API_KEY", "AZURE_SOL61_API_KEY", "AZURE_SOL61_BASE_URL"]) {
+    delete inherited[name];
+  }
+  // Every value is assembled at runtime, so no token-shaped literal sits in this file.
+  const segment = (char) => char.repeat(12);
+  const value = "q".repeat(20);
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  const highEntropy = Array.from({ length: 40 }, (_, index) => alphabet[(index * 7) % alphabet.length]).join("");
+  const backslash = String.fromCharCode(92);
+  const cases = [
+    ["a three-part token", ["eyJ" + segment("a"), segment("b"), segment("c")].join("."), ["jwt"]],
+    ["an api_key assignment", `api_key=${value}`, ["key_value"]],
+    ["a spaced assignment", `secret = ${value}`, ["key_value"]],
+    ["a quoted JSON field with an n before its colon", `"token_name": "${value}"`, ["key_value"]],
+    // Controls: the shapes only the doubled escapes matched. Neither is a credential, and neither may block an upload.
+    ["a token split by backslashes", ["eyJ" + segment("a"), segment("b"), segment("c")].join(backslash + "x"), []],
+    ["an assignment followed by a backslash", `api_key=${backslash}s${value}`, []],
+    // The entropy check is unchanged and still fires.
+    ["a high-entropy value beside a keyword", `token ${highEntropy}`, ["entropy"]],
+  ];
+  for (const [label, line, expected] of cases) {
+    const staged = await mkdtemp(path.join(root, "staged-"));
+    await writeFile(path.join(staged, "report.txt"), `${line}\n`, "utf8");
+    const report = path.join(root, `${path.basename(staged)}.json`);
+    const result = spawnSync(process.execPath, [scannerPath, "--path", staged, "--report", report], {
+      env: inherited,
+      encoding: "utf8",
+    });
+    const findings = JSON.parse(await readFile(report, "utf8"));
+    assert.deepEqual(findings.map(({ type }) => type), expected, label);
+    assert.equal(result.status, expected.length ? 2 : 0, label);
+  }
+});
