@@ -64,3 +64,25 @@ test("CLI: session attachment-get requires both arguments", () => {
     "should throw for missing required arguments",
   );
 });
+
+test("CLI: session say --attach: localOnly is declared before attachment loop", async () => {
+  // Regression: localOnly was used at line 3945 before its let declaration at 3994,
+  // causing a TDZ ReferenceError. The fix moves 'let localOnly' above the loop.
+  // This test verifies the source ordering directly.
+  const fs = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const path = await import("node:path");
+
+  const srcPath = fileURLToPath(new URL("../src/commands/session.js", import.meta.url));
+  const src = fs.readFileSync(srcPath, "utf-8");
+
+  const localOnlyDeclIdx = src.search(/let localOnly/);
+  const forLoopIdx = src.search(/for \(const attachPath/);
+
+  assert.ok(localOnlyDeclIdx >= 0, "let localOnly declaration must exist");
+  assert.ok(forLoopIdx >= 0, "for (const attachPath loop must exist");
+  assert.ok(
+    localOnlyDeclIdx < forLoopIdx,
+    "let localOnly must be declared before the attachment processing loop (was TDZ bug)",
+  );
+});

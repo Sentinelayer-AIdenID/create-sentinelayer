@@ -3939,6 +3939,7 @@ export function registerSessionCommand(program) {
       const replyToSequenceId = parseOptionalPositiveInteger(options.replyTo, "reply-to");
       const replyToCursor = normalizeString(options.replyCursor);
       const clientMessageId = `cli-${randomUUID()}`;
+      let localOnly = Boolean(options.localOnly) || remoteSessionLookupDisabled();
       const attachmentPaths = options.attach || [];
       const uploadedAttachments = [];
       for (const attachPath of attachmentPaths) {
@@ -3991,7 +3992,6 @@ export function registerSessionCommand(program) {
       let remoteSync = null;
       let remoteConfirmation = null;
       let remoteConfirmationAnchor = null;
-      let localOnly = Boolean(options.localOnly) || remoteSessionLookupDisabled();
       if (!localOnly) {
         remoteConfirmationAnchor = await readSessionConfirmationAnchor(normalizedSessionId, { targetPath });
         if (!remoteConfirmationAnchor?.ok) {
