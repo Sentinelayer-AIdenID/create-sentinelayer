@@ -27,9 +27,10 @@ EXPECTED_ACTION_INPUTS = {
     "codex_only": '"false"',
     "llm_failure_policy": "block",
 }
-# One retry, and only this shape: after a billing or quota 429 on every LLM attempt of the first attempt (or the
-# dispatch drill), the same Action, model and inputs run once more on the backup endpoint. Only the key and the
-# endpoint differ, and both are secrets.
+# One retry, and only this shape: after a billing or quota 429 on every LLM attempt of the first attempt, the same
+# Action, model and inputs run once more on the backup endpoint. The dispatch drill and the org's Azure route
+# (vars.OMAR_ROUTE is azure) skip the first attempt and run only that one. Only the key and the endpoint differ, and
+# both are secrets.
 QUOTA_RETRY_KEY = "${{ secrets.AZURE_SOL61_API_KEY }}"
 QUOTA_RETRY_SECRET_LINES = (
     "          AZURE_SOL61_API_KEY: ${{ secrets.AZURE_SOL61_API_KEY }}",
@@ -39,6 +40,7 @@ QUOTA_RETRY_ENDPOINT_LINE = "          OPENAI_BASE_URL: ${{ secrets.AZURE_SOL61_
 FIRST_ATTEMPT_IF_LINE = (
     "        if: steps.trust_boundary.outputs.trusted_context == 'true'"
     " && !(github.event_name == 'workflow_dispatch' && inputs.quota_retry_drill)"
+    " && vars.OMAR_ROUTE != 'azure'"
 )
 QUOTA_RETRY_IF_LINE = (
     "        if: steps.trust_boundary.outputs.trusted_context == 'true'"
@@ -51,8 +53,15 @@ QUOTA_RETRY_STEP_ORDER = (
     "Run Omar Gate (quota retry)",
     "Select Omar Gate result",
 )
+# The classifier reads the route from GitHub's own comparison, the same case-insensitive one the first attempt's if:
+# makes, and takes it only on that exact value.
+CLASSIFY_ROUTE_LINE = "          ROUTE: ${{ vars.OMAR_ROUTE == 'azure' && 'azure' || '' }}"
+CLASSIFY_ROUTE_TEST_LINE = '          if [ "${ROUTE}" = "azure" ]; then'
 CLASSIFY_REQUIRED_LINES = (
     "        id: classify",
+    CLASSIFY_ROUTE_LINE,
+    CLASSIFY_ROUTE_TEST_LINE,
+    "            reason=azure_route",
     "          DRILL: ${{ github.event_name == 'workflow_dispatch' && inputs.quota_retry_drill && 'true' || 'false' }}",
     '          elif [ "${FIRST_OUTCOME}" = "failure" ] && [ "${FIRST_FAILURE_CLASS}" = "provider_failure" ]; then',
     '              && python3 .github/scripts/omar_quota_failure.py "${findings}"; then',
@@ -191,7 +200,7 @@ def _validate_quota_retry(
     _require_lines(
         steps["Classify Omar provider failure"],
         CLASSIFY_REQUIRED_LINES,
-        "only a billing or quota 429 on the first attempt, or the dispatch drill, may be retried",
+        "only a billing or quota 429 on the first attempt, the dispatch drill, or the org's Azure route may take the quota retry",
     )
     _require_lines(
         steps["Validate the quota retry route"],
@@ -310,7 +319,9 @@ def validate_omar_contract(workflow_text: str) -> None:
     if "        continue-on-error: true" not in run_step:
         raise OmarWorkflowContractError("Omar result selection must observe action outcome")
     if FIRST_ATTEMPT_IF_LINE not in run_step:
-        raise OmarWorkflowContractError("Run Omar Gate may be skipped only by the dispatch quota retry drill")
+        raise OmarWorkflowContractError(
+            "Run Omar Gate may be skipped only by the dispatch quota retry drill or the org's Azure route"
+        )
     if any("OPENAI_BASE_URL" in line for line in run_step):
         raise OmarWorkflowContractError("the first Omar attempt must use the primary endpoint")
     if sum(line.strip().startswith("continue-on-error") for line in trusted) != 1:
@@ -476,6 +487,24 @@ def _run_quota_retry_self_tests(valid: str) -> None:
         ),
         "a first attempt the drill does not skip": _replace_once(
             valid, FIRST_ATTEMPT_IF_LINE, "        if: steps.trust_boundary.outputs.trusted_context == 'true'"
+        ),
+        "a first attempt the org route does not skip": _replace_once(
+            valid, FIRST_ATTEMPT_IF_LINE, FIRST_ATTEMPT_IF_LINE.replace(" && vars.OMAR_ROUTE != 'azure'", "")
+        ),
+        "an org route the classifier does not read": _replace_in_step(
+            valid, "Classify Omar provider failure", CLASSIFY_ROUTE_LINE + "\n", ""
+        ),
+        "an org route the classifier compares case-sensitively": _replace_in_step(
+            valid, "Classify Omar provider failure", CLASSIFY_ROUTE_LINE, "          ROUTE: ${{ vars.OMAR_ROUTE || '' }}"
+        ),
+        "a route the classifier reads from the pull request": _replace_in_step(
+            valid,
+            "Classify Omar provider failure",
+            CLASSIFY_ROUTE_LINE + "\n",
+            "          # " + CLASSIFY_ROUTE_LINE.strip() + "\n          ROUTE: ${{ github.head_ref }}\n",
+        ),
+        "a classifier that takes any org route value": _replace_in_step(
+            valid, "Classify Omar provider failure", CLASSIFY_ROUTE_TEST_LINE, '          if [ -n "${ROUTE}" ]; then'
         ),
         "a first attempt that fails the job by itself": _replace_in_step(
             valid, "Run Omar Gate", "        continue-on-error: true\n", ""

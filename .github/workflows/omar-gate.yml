@@ -451,9 +451,10 @@ jobs:
           set -euo pipefail
           bash .github/scripts/require-secret.sh "OPENAI_API_KEY" "${OPENAI_API_KEY}"
       - name: Run Omar Gate
-        # Skipped only by the dispatch drill. A failure here does not end the job by itself: a billing or quota 429 is
+        # Skipped by the dispatch drill, or when the org routes Omar to Azure (vars.OMAR_ROUTE is azure): the review on
+        # the backup endpoint below then counts. A failure here does not end the job by itself: a billing or quota 429 is
         # retried once below, on the same model's backup endpoint, and any other failure fails at "Select Omar Gate result".
-        if: steps.trust_boundary.outputs.trusted_context == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.quota_retry_drill)
+        if: steps.trust_boundary.outputs.trusted_context == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.quota_retry_drill) && vars.OMAR_ROUTE != 'azure'
         id: omar
         continue-on-error: true
         uses: mrrCarter/sentinelayer-v1-action@2d5a8edd485595148254926c9fb318e0adae416a
@@ -481,17 +482,23 @@ jobs:
         if: steps.trust_boundary.outputs.trusted_context == 'true'
         shell: bash
         env:
+          ROUTE: ${{ vars.OMAR_ROUTE == 'azure' && 'azure' || '' }}
           DRILL: ${{ github.event_name == 'workflow_dispatch' && inputs.quota_retry_drill && 'true' || 'false' }}
           FIRST_OUTCOME: ${{ steps.omar.outcome }}
           FIRST_FAILURE_CLASS: ${{ steps.omar.outputs.llm_failure_class || '' }}
           FIRST_RUN_ID: ${{ steps.omar.outputs.run_id || '' }}
         run: |
           set -euo pipefail
-          # Retry once on the backup endpoint only when the first attempt failed with a billing or quota 429 on every LLM
-          # attempt (or for the dispatch drill). Any other failure stands.
+          # Review on the backup endpoint when the org routes Omar to Azure, or for the dispatch drill: both skip the
+          # first attempt. Otherwise retry there once only when the first attempt failed with a billing or quota 429
+          # on every LLM attempt. Any other failure stands.
+          # ROUTE is the same case-insensitive comparison as the first attempt's if:, so the two always agree.
           retry=false
           reason=none
-          if [ "${DRILL}" = "true" ]; then
+          if [ "${ROUTE}" = "azure" ]; then
+            retry=true
+            reason=azure_route
+          elif [ "${DRILL}" = "true" ]; then
             retry=true
             reason=dispatch_drill
           elif [ "${FIRST_OUTCOME}" = "failure" ] && [ "${FIRST_FAILURE_CLASS}" = "provider_failure" ]; then
