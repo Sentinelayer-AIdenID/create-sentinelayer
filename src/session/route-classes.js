@@ -39,7 +39,7 @@ export const SESSION_ROUTE_CLASSES = Object.freeze({
   "mcp:memory.write": "exempt-local",
   "mcp:memory.recall": "exempt-local",
   "mcp:memory.summarize": "exempt-local",
-  "mcp:session.send_attachment": "exempt-local",
+  "mcp:session.send_attachment": "legacy-data-plane",
   "mcp:session.get_attachment": "exempt-local",
 
   // ---- `sl session` commands invokable through the MCP CLI bridge

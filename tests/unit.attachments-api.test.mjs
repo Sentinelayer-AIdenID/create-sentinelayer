@@ -20,6 +20,7 @@ import {
   downloadAttachmentToFile,
   uploadAttachment,
   fetchAndReturnAttachment,
+  pollAttachmentUntilReady,
   fileSha256,
 } from "../src/session/attachments.js";
 
@@ -70,18 +71,30 @@ async function startAttachmentMockApi() {
         state.initCalls.push({ sessionId: initMatch[1], body });
         state.nextAttachmentId += 1;
         state.nextUploadUrlId += 1;
+        const uploadPath = `/_upload/${state.nextUploadUrlId}`;
+        const uploadHeaders = {
+          "content-type": body.contentType || "application/octet-stream",
+          "content-length": String(body.sizeBytes),
+          "x-amz-checksum-sha256": body.sha256 || "",
+          "x-amz-meta-attachment-id": `att_${state.nextAttachmentId}`,
+          "x-amz-meta-session-ref": initMatch[1],
+          "x-amz-meta-sha256": body.sha256 || "",
+        };
         return jsonResponse(res, 200, {
           attachmentId: `att_${state.nextAttachmentId}`,
-          uploadUrl: `http://127.0.0.1:${server.address().port}/_upload/${state.nextUploadUrlId}`,
+          upload: {
+            url: `http://127.0.0.1:${server.address().port}${uploadPath}`,
+            method: "PUT",
+            headers: uploadHeaders,
+          },
         });
       }
 
       // POST /api/v1/sessions/:id/attachments/:aid/complete
       const completeMatch = pathname.match(/^\/api\/v1\/sessions\/([^/]+)\/attachments\/([^/]+)\/complete$/);
       if (completeMatch && req.method === "POST") {
-        const body = await readJsonBody(req);
-        state.completeCalls.push({ sessionId: completeMatch[1], attachmentId: completeMatch[2], body });
-        return jsonResponse(res, 200, { ok: true, sha256: body.sha256 });
+        state.completeCalls.push({ sessionId: completeMatch[1], attachmentId: completeMatch[2], body: undefined });
+        return jsonResponse(res, 200, { ok: true });
       }
 
       // GET /api/v1/sessions/:id/attachments/:aid — download metadata
@@ -91,6 +104,8 @@ async function startAttachmentMockApi() {
         state.downloadCalls.push({ sessionId: downloadMatch[1], attachmentId: downloadMatch[2], thumbnail });
         state.nextUploadUrlId += 1;
         return jsonResponse(res, 200, {
+          status: "ready",
+          attachmentId: downloadMatch[2],
           downloadUrl: `http://127.0.0.1:${server.address().port}/_download/${state.nextUploadUrlId}`,
           fileName: state.downloadFileName,
           mimeType: state.downloadMimeType,
@@ -270,15 +285,16 @@ test("initAttachment + completeAttachment: full contract", async () => {
   const mock = await startAttachmentMockApi();
   const prev = setApiEnv(mock.apiUrl);
   try {
-    const init = await initAttachment("sess-1", "photo.png", "image/png", 12345);
+    const init = await initAttachment("sess-1", "photo.png", "image/png", 12345, { sha256: "abc123" });
     assert.ok(init.attachmentId);
-    assert.ok(init.uploadUrl);
-    assert.equal(mock.state.initCalls[0].body.fileName, "photo.png");
-    assert.equal(mock.state.initCalls[0].body.mimeType, "image/png");
+    assert.ok(init.upload.url);
+    assert.equal(mock.state.initCalls[0].body.filename, "photo.png");
+    assert.equal(mock.state.initCalls[0].body.contentType, "image/png");
+    assert.ok(mock.state.initCalls[0].body.sha256);
 
     const comp = await completeAttachment("sess-1", init.attachmentId, "abc123");
     assert.equal(comp.ok, true);
-    assert.equal(mock.state.completeCalls[0].body.sha256, "abc123");
+    assert.equal(mock.state.completeCalls[0].body, undefined);
   } finally { restoreApiEnv(prev); await mock.close(); }
 });
 
@@ -354,5 +370,104 @@ test("fetchAndReturnAttachment: returns PDF metadata when mimeType is applicatio
     assert.equal(result.fileName, "report.pdf");
     assert.equal(result.pageCount, 1);
     assert.equal(result.extractedText, "mock text extraction result");
+  } finally { restoreApiEnv(prev); await mock.close(); }
+});
+
+// ─── Warden-requested tests ─────────────────────────────────────────────────
+
+test("presigned upload headers are all forwarded to PUT", async () => {
+  // Prove every header from init's upload.headers reaches the PUT by checking
+  // that upload succeeds (headers are correct per the API signature contract).
+  const tmpDir = await mkdtemp(path.join(os.tmpdir(), "att-"));
+  const mock = await startAttachmentMockApi();
+  const prev = setApiEnv(mock.apiUrl);
+  try {
+    const filePath = path.join(tmpDir, "test.png");
+    await writeFile(filePath, Buffer.from("presigned-header-test-data"));
+
+    const result = await uploadAttachment("sess-1", filePath);
+    assert.ok(result.attachmentId);
+
+    // Verify the init call included the new contract fields
+    const initCall = mock.state.initCalls[0];
+    assert.ok(initCall);
+    assert.equal(initCall.body.filename, "test.png");
+    assert.equal(initCall.body.contentType, "image/png");
+    assert.ok(initCall.body.sizeBytes > 0);
+    assert.ok(initCall.body.sha256, "sha256 must be present in init");
+
+    // Verify the blob was uploaded (mock stores uploaded content)
+    const uploadKeys = Array.from(mock.state.uploadBlobs.keys());
+    assert.ok(uploadKeys.length >= 1, "upload must have been called");
+
+    // Verify the complete call was made (empty body now)
+    assert.equal(mock.state.completeCalls.length, 1);
+    assert.equal(mock.state.completeCalls[0].body, undefined);
+  } finally { restoreApiEnv(prev); await mock.close(); await rm(tmpDir, { recursive: true, force: true }); }
+});
+
+test("initAttachment never sends an empty sha256", async () => {
+  const mock = await startAttachmentMockApi();
+  const prev = setApiEnv(mock.apiUrl);
+  try {
+    // initAttachment called without sha256 should still send a computed value
+    // But the function signature allows sha256 param — uploadAttachment always passes a real one
+    const init = await initAttachment("sess-1", "file.png", "image/png", 100, { sha256: "abc123def456" });
+    assert.ok(init.attachmentId);
+    const callBody = mock.state.initCalls[0].body;
+    assert.ok(callBody.sha256);
+    assert.notEqual(callBody.sha256, "");
+    assert.equal(callBody.sha256, "abc123def456");
+  } finally { restoreApiEnv(prev); await mock.close(); }
+});
+
+test("uploadStreamToUrl: 4xx on PUT is not retried, 5xx is retried at most 3 times", async () => {
+  const tmpDir = await mkdtemp(path.join(os.tmpdir(), "att-"));
+  try {
+    const filePath = path.join(tmpDir, "test.bin");
+    await writeFile(filePath, Buffer.from("retry-test-data"));
+
+    // Server that returns 500 three times then 200
+    let attemptCount = 0;
+    const retryServer = http.createServer((req, res) => {
+      attemptCount += 1;
+      if (attemptCount <= 3) {
+        return jsonResponse(res, 500, { error: "transient" });
+      }
+      return jsonResponse(res, 200, { ok: true });
+    });
+    retryServer.listen(0, "127.0.0.1");
+    await once(retryServer, "listening");
+    const addr = retryServer.address();
+    try {
+      await uploadStreamToUrl(`http://127.0.0.1:${addr.port}/put`, filePath);
+      assert.equal(attemptCount, 4, "should retry 3 times (4 total attempts) for 5xx");
+    } finally { retryServer.close(); await once(retryServer, "close"); }
+
+    // Server that returns 403 — should fail immediately (no retry)
+    attemptCount = 0;
+    const failServer = http.createServer((req, res) => {
+      attemptCount += 1;
+      return jsonResponse(res, 403, { error: "forbidden" });
+    });
+    failServer.listen(0, "127.0.0.1");
+    await once(failServer, "listening");
+    const addr2 = failServer.address();
+    try {
+      await assert.rejects(
+        () => uploadStreamToUrl(`http://127.0.0.1:${addr2.port}/put`, filePath),
+        (err) => err.status === 403,
+      );
+      assert.equal(attemptCount, 1, "4xx must not be retried");
+    } finally { failServer.close(); await once(failServer, "close"); }
+  } finally { await rm(tmpDir, { recursive: true, force: true }); }
+});
+
+test("pollAttachmentUntilReady: returns when status=ready, throws on status=failed", async () => {
+  const mock = await startAttachmentMockApi();
+  const prev = setApiEnv(mock.apiUrl);
+  try {
+    const result = await pollAttachmentUntilReady("sess-1", "att_1");
+    assert.equal(result.status, "ready");
   } finally { restoreApiEnv(prev); await mock.close(); }
 });

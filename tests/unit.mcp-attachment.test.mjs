@@ -46,22 +46,35 @@ async function startAttachmentMockApi({ mimeType = "image/png", fileName = "test
 
       // POST /api/v1/sessions/:id/attachments/init
       if (pathname.match(/\/attachments\/init$/) && req.method === "POST") {
+        const body = await readJsonBody(req);
         return jsonResponse(res, 200, {
           attachmentId: "att_mcp_42",
-          uploadUrl: `http://127.0.0.1:${server.address().port}/_upload/mcp`,
+          upload: {
+            url: `http://127.0.0.1:${server.address().port}/_upload/mcp`,
+            method: "PUT",
+            headers: {
+              "content-type": body.contentType || "application/octet-stream",
+              "content-length": String(body.sizeBytes || 0),
+              "x-amz-checksum-sha256": body.sha256 || "",
+              "x-amz-meta-attachment-id": "att_mcp_42",
+              "x-amz-meta-session-ref": "mcp-test",
+              "x-amz-meta-sha256": body.sha256 || "",
+            },
+          },
         });
       }
 
       // POST /api/v1/sessions/:id/attachments/:aid/complete
       if (pathname.match(/\/attachments\/[^/]+\/complete$/) && req.method === "POST") {
-        const body = await readJsonBody(req);
-        return jsonResponse(res, 200, { ok: true, sha256: body.sha256 });
+        return jsonResponse(res, 200, { ok: true });
       }
 
       // GET /api/v1/sessions/:id/attachments/:aid
       if (pathname.match(/\/attachments\/[^/]+$/) && req.method === "GET") {
         const thumbnail = searchParams.get("thumbnail") === "1";
         return jsonResponse(res, 200, {
+          status: "ready",
+          attachmentId: "att_mcp_42",
           downloadUrl: `http://127.0.0.1:${server.address().port}/_download/mcp`,
           fileName,
           mimeType,

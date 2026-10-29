@@ -10,9 +10,12 @@ import { resolveActiveAuthSession } from "../auth/service.js";
 
 const ATTACHMENT_INIT_OP = "session-attachment-init";
 const ATTACHMENT_COMPLETE_OP = "session-attachment-complete";
-const MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024;
+const ATTACHMENT_POLL_OP = "session-attachment-poll";
+const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024;
 const UPLOAD_RETRY_MAX = 3;
 const UPLOAD_RETRY_DELAY_MS = 500;
+const COMPLETE_POLL_MAX = 30;
+const COMPLETE_POLL_DELAY_MS = 1000;
 const MAX_ATTACHMENT_FILENAME_LENGTH = 255;
 
 function normalizeString(value) {
@@ -55,6 +58,7 @@ async function resolveSessionAuth({ targetPath = process.cwd() } = {}) {
 
 export async function initAttachment(sessionId, fileName, mimeType, fileSize, {
   targetPath = process.cwd(),
+  sha256,
 } = {}) {
   const normalizedSessionId = normalizeString(sessionId);
   if (!normalizedSessionId) throw new Error("session id is required.");
@@ -64,9 +68,10 @@ export async function initAttachment(sessionId, fileName, mimeType, fileSize, {
   const endpoint = `${apiBaseUrl}/api/v1/sessions/${urlPathSegment(normalizedSessionId, { label: "sessionId" })}/attachments/init`;
 
   const body = {
-    fileName: normalizeFileName(fileName),
-    mimeType: String(mimeType || "application/octet-stream"),
-    fileSize: Number(fileSize),
+    filename: normalizeFileName(fileName),
+    contentType: String(mimeType || "application/octet-stream"),
+    sizeBytes: Number(fileSize),
+    sha256: String(sha256 || ""),
   };
 
   const credential = await credentialFor(session);
@@ -88,17 +93,15 @@ export async function completeAttachment(sessionId, attachmentId, sha256, {
   const apiBaseUrl = resolveApiBaseUrl(session);
   const endpoint = `${apiBaseUrl}/api/v1/sessions/${urlPathSegment(normalizedSessionId, { label: "sessionId" })}/attachments/${urlPathSegment(String(attachmentId), { label: "attachmentId" })}/complete`;
 
-  const body = { sha256 };
   const credential = await credentialFor(session);
   return requestJsonMutation(endpoint, {
     method: "POST",
     credential,
-    body,
     operationName: ATTACHMENT_COMPLETE_OP,
   });
 }
 
-export async function uploadStreamToUrl(uploadUrl, filePath, { maxRetries = UPLOAD_RETRY_MAX } = {}) {
+export async function uploadStreamToUrl(uploadUrl, filePath, { maxRetries = UPLOAD_RETRY_MAX, headers } = {}) {
   const fileStat = await stat(filePath);
   const fileSize = fileStat.size;
   if (fileSize > MAX_FILE_SIZE_BYTES) {
@@ -108,16 +111,18 @@ export async function uploadStreamToUrl(uploadUrl, filePath, { maxRetries = UPLO
     });
   }
 
+  const putHeaders = headers && typeof headers === "object" ? { ...headers } : {};
+  if (!putHeaders["content-length"] && !putHeaders["Content-Length"]) {
+    putHeaders["Content-Length"] = String(fileSize);
+  }
+
   let lastError = null;
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
     try {
       const readStream = createReadStream(filePath, { highWaterMark: 64 * 1024 });
       const response = await fetch(uploadUrl, {
         method: "PUT",
-        headers: {
-          "Content-Length": String(fileSize),
-          "Content-Type": "application/octet-stream",
-        },
+        headers: putHeaders,
         body: readStream,
         duplex: "half",
       });
@@ -266,26 +271,82 @@ export function isPdfMimeType(mimeType) {
   return String(mimeType || "") === "application/pdf";
 }
 
+export async function pollAttachmentUntilReady(sessionId, attachmentId, {
+  targetPath = process.cwd(),
+  maxAttempts = COMPLETE_POLL_MAX,
+  delayMs = COMPLETE_POLL_DELAY_MS,
+} = {}) {
+  const normalizedSessionId = normalizeString(sessionId);
+  if (!normalizedSessionId) throw new Error("session id is required.");
+
+  const session = await resolveSessionAuth({ targetPath });
+  const apiBaseUrl = resolveApiBaseUrl(session);
+  const endpoint = `${apiBaseUrl}/api/v1/sessions/${urlPathSegment(normalizedSessionId, { label: "sessionId" })}/attachments/${urlPathSegment(String(attachmentId), { label: "attachmentId" })}`;
+  const credential = await credentialFor(session);
+
+  let lastError = null;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      const result = await requestJson(endpoint, {
+        credential,
+        operationName: ATTACHMENT_POLL_OP,
+      });
+      if (result && result.status === "ready") return result;
+      if (result && result.status === "failed") {
+        throw new SentinelayerApiError("Attachment processing failed.", {
+          status: 422,
+          code: "ATTACHMENT_PROCESSING_FAILED",
+        });
+      }
+    } catch (error) {
+      if (error instanceof SentinelayerApiError && error.code === "ATTACHMENT_PROCESSING_FAILED") {
+        throw error;
+      }
+      lastError = error;
+      if (error instanceof SentinelayerApiError && error.status && error.status < 500) {
+        throw error;
+      }
+    }
+    if (attempt < maxAttempts - 1) {
+      await new Promise(function(resolve) { return setTimeout(resolve, delayMs * (attempt + 1)); });
+    }
+  }
+  throw lastError || new SentinelayerApiError("Attachment processing timed out.", {
+    status: 504,
+    code: "ATTACHMENT_PROCESSING_TIMEOUT",
+  });
+}
+
 export async function uploadAttachment(sessionId, filePath, {
   targetPath = process.cwd(),
   fileName: explicitFileName,
 } = {}) {
   const fileStat = await stat(filePath);
+  if (fileStat.size > MAX_FILE_SIZE_BYTES) {
+    throw new SentinelayerApiError("File exceeds maximum upload size (50 MiB).", {
+      status: 413,
+      code: "FILE_TOO_LARGE",
+    });
+  }
+
+  const sha256 = await fileSha256(filePath);
   const resolvedName = explicitFileName || path.basename(filePath);
   const mimeType = guessMimeType(resolvedName);
 
-  const initResult = await initAttachment(sessionId, resolvedName, mimeType, fileStat.size, { targetPath });
-  if (!initResult || !initResult.attachmentId || !initResult.uploadUrl) {
+  const initResult = await initAttachment(sessionId, resolvedName, mimeType, fileStat.size, { targetPath, sha256 });
+  const uploadUrl = initResult.upload ? initResult.upload.url : initResult.uploadUrl;
+  if (!initResult || !initResult.attachmentId || !uploadUrl) {
     throw new SentinelayerApiError("Attachment init returned incomplete data.", {
       status: 502,
       code: "INCOMPLETE_INIT",
     });
   }
 
-  await uploadStreamToUrl(initResult.uploadUrl, filePath);
+  await uploadStreamToUrl(uploadUrl, filePath, { headers: initResult.upload ? initResult.upload.headers : undefined });
 
-  const sha256 = await fileSha256(filePath);
   const completeResult = await completeAttachment(sessionId, initResult.attachmentId, sha256, { targetPath });
+
+  await pollAttachmentUntilReady(sessionId, initResult.attachmentId, { targetPath });
 
   return { attachmentId: initResult.attachmentId, sha256, fileName: resolvedName, mimeType, completeResult };
 }
