@@ -40,7 +40,7 @@ export const SESSION_ROUTE_CLASSES = Object.freeze({
   "mcp:memory.recall": "exempt-local",
   "mcp:memory.summarize": "exempt-local",
   "mcp:session.send_attachment": "legacy-data-plane",
-  "mcp:session.get_attachment": "exempt-local",
+  "mcp:session.get_attachment": "legacy-data-plane",
 
   // ---- `sl session` commands invokable through the MCP CLI bridge
   "cli:session say": "legacy-data-plane",
@@ -101,7 +101,7 @@ export const SESSION_ROUTE_CLASSES = Object.freeze({
   "cli:session access list": "owner",
   "cli:session access status": "owner",
   "cli:session actions": "exempt-local",
-  "cli:session attachment-get": "exempt-local",
+  "cli:session attachment-get": "legacy-data-plane",
   "cli:session templates": "exempt-local",
 });
 
