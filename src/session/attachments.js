@@ -16,7 +16,7 @@ const UPLOAD_RETRY_MAX = 3;
 const UPLOAD_RETRY_DELAY_MS = 500;
 const COMPLETE_POLL_MAX = 30;
 const COMPLETE_POLL_DELAY_MS = 1000;
-const MAX_ATTACHMENT_FILENAME_LENGTH = 255;
+const MAX_ATTACHMENT_FILENAME_LENGTH = 180;
 
 function normalizeString(value) {
   return String(value == null ? "" : value).trim();
@@ -60,6 +60,7 @@ export async function initAttachment(sessionId, fileName, mimeType, fileSize, {
   targetPath = process.cwd(),
   sha256,
 } = {}) {
+  if (!sha256 || !/^[0-9a-f]{64}$/.test(String(sha256))) { throw new Error("sha256 is required (64 lowercase hex chars)."); }
   const normalizedSessionId = normalizeString(sessionId);
   if (!normalizedSessionId) throw new Error("session id is required.");
 
@@ -71,7 +72,7 @@ export async function initAttachment(sessionId, fileName, mimeType, fileSize, {
     filename: normalizeFileName(fileName),
     contentType: String(mimeType || "application/octet-stream"),
     sizeBytes: Number(fileSize),
-    sha256: String(sha256 || ""),
+    sha256: String(sha256),
   };
 
   const credential = await credentialFor(session);
@@ -86,6 +87,7 @@ export async function initAttachment(sessionId, fileName, mimeType, fileSize, {
 export async function completeAttachment(sessionId, attachmentId, sha256, {
   targetPath = process.cwd(),
 } = {}) {
+  if (!sha256 || !/^[0-9a-f]{64}$/.test(String(sha256))) { throw new Error("sha256 is required (64 lowercase hex chars)."); }
   const normalizedSessionId = normalizeString(sessionId);
   if (!normalizedSessionId) throw new Error("session id is required.");
 
@@ -98,6 +100,7 @@ export async function completeAttachment(sessionId, attachmentId, sha256, {
     method: "POST",
     credential,
     operationName: ATTACHMENT_COMPLETE_OP,
+    allowEmptyBody: true,
   });
 }
 
@@ -152,6 +155,7 @@ export async function getAttachmentDownload(sessionId, attachmentId, {
   targetPath = process.cwd(),
   thumbnail = false,
 } = {}) {
+
   const normalizedSessionId = normalizeString(sessionId);
   if (!normalizedSessionId) throw new Error("session id is required.");
 

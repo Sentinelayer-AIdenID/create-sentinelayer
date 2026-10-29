@@ -285,14 +285,14 @@ test("initAttachment + completeAttachment: full contract", async () => {
   const mock = await startAttachmentMockApi();
   const prev = setApiEnv(mock.apiUrl);
   try {
-    const init = await initAttachment("sess-1", "photo.png", "image/png", 12345, { sha256: "abc123" });
+    const init = await initAttachment("sess-1", "photo.png", "image/png", 12345, { sha256: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2" });
     assert.ok(init.attachmentId);
     assert.ok(init.upload.url);
     assert.equal(mock.state.initCalls[0].body.filename, "photo.png");
     assert.equal(mock.state.initCalls[0].body.contentType, "image/png");
     assert.ok(mock.state.initCalls[0].body.sha256);
 
-    const comp = await completeAttachment("sess-1", init.attachmentId, "abc123");
+    const comp = await completeAttachment("sess-1", init.attachmentId, "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2");
     assert.equal(comp.ok, true);
     assert.equal(mock.state.completeCalls[0].body, undefined);
   } finally { restoreApiEnv(prev); await mock.close(); }
@@ -406,18 +406,36 @@ test("presigned upload headers are all forwarded to PUT", async () => {
   } finally { restoreApiEnv(prev); await mock.close(); await rm(tmpDir, { recursive: true, force: true }); }
 });
 
-test("initAttachment never sends an empty sha256", async () => {
+test("initAttachment throws when sha256 is missing or invalid", async () => {
   const mock = await startAttachmentMockApi();
   const prev = setApiEnv(mock.apiUrl);
   try {
-    // initAttachment called without sha256 should still send a computed value
-    // But the function signature allows sha256 param — uploadAttachment always passes a real one
-    const init = await initAttachment("sess-1", "file.png", "image/png", 100, { sha256: "abc123def456" });
+    // Missing sha256 must throw BEFORE any API call
+    await assert.rejects(
+      () => initAttachment("sess-1", "file.png", "image/png", 100, {}),
+      /sha256 is required/,
+    );
+    // Short sha256 must throw
+    await assert.rejects(
+      () => initAttachment("sess-1", "file.png", "image/png", 100, { sha256: "abc123" }),
+      /sha256 is required/,
+    );
+    // Verify no API call was made
+    assert.equal(mock.state.initCalls.length, 0);
+  } finally { restoreApiEnv(prev); await mock.close(); }
+});
+
+test("initAttachment sends valid sha256 through to API", async () => {
+  const mock = await startAttachmentMockApi();
+  const prev = setApiEnv(mock.apiUrl);
+  try {
+    const validSha = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2";
+    const init = await initAttachment("sess-1", "file.png", "image/png", 100, { sha256: validSha });
     assert.ok(init.attachmentId);
     const callBody = mock.state.initCalls[0].body;
     assert.ok(callBody.sha256);
     assert.notEqual(callBody.sha256, "");
-    assert.equal(callBody.sha256, "abc123def456");
+    assert.equal(callBody.sha256, validSha);
   } finally { restoreApiEnv(prev); await mock.close(); }
 });
 
