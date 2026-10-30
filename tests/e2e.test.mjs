@@ -855,6 +855,7 @@ test("CLI end-to-end: generates artifacts and, when asked, sets the project toke
 
     assert.match(envText, new RegExp(`SENTINELAYER_TOKEN=${BOOTSTRAP_VALUE_FROM_GENERATE}`));
     assert.match(gitignoreText, /(^|\r?\n)\.env(\r?\n|$)/);
+    assert.match(gitignoreText, /(^|\r?\n)\.sentinelayer\/(\r?\n|$)/);
     assert.match(cursorRulesText, /Sentinelayer Cursor Profile/);
     assert.match(cursorRulesText, /Find the recent Senti session for this codebase/);
     assert.match(result.stdout, /Falling back to SENTINELAYER_TOKEN/);
@@ -878,7 +879,7 @@ test("CLI end-to-end: generates artifacts and, when asked, sets the project toke
     assert.match(sessionGuideText, /sl review --diff/);
     assert.match(workflowText, new RegExp(`sentinelayer_spec_id:\\s*${SPEC_ID_FROM_GENERATE}`));
     assert.equal(lockfile.spec_id, SPEC_ID_FROM_GENERATE);
-    assert.equal(lockfile.sentinelayer_token, BOOTSTRAP_VALUE_FROM_GENERATE);
+    assert.equal(lockfile.sentinelayer_token, undefined, "token must NOT be written to config.json — stays in .env only");
     assert.equal(lockfile.required_secret_name, "SENTINELAYER_TOKEN");
     assert.match(String(lockfile.workflow_path || ""), /^\.github\/workflows\/omar-gate\.yml$/);
     assert.equal(lockfile.repo_slug, "acme/demo-repo");
@@ -909,6 +910,73 @@ test("CLI end-to-end: generates artifacts and, when asked, sets the project toke
     await rm(tempRoot, { recursive: true, force: true });
   }
 });
+
+test("init in existing repo with pre-existing .gitignore appends .sentinelayer/ via CLI path", async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-e2e-"));
+  const mock = await startMockApi({ includeBootstrapInGenerate: true });
+
+  try {
+    // Pre-create the project directory as an existing git repo with a
+    // .gitignore that contains only node_modules/ (no .sentinelayer/ yet).
+    const projectDir = path.join(tempRoot, "existing-app");
+    await mkdir(projectDir, { recursive: true });
+    spawnSync("git", ["init", "-q"], { cwd: projectDir, encoding: "utf-8" });
+    spawnSync("git", ["-C", projectDir, "config", "user.name", "E2E Test"], { encoding: "utf-8" });
+    spawnSync("git", ["-C", projectDir, "config", "user.email", "e2e@test.local"], { encoding: "utf-8" });
+    await writeFile(path.join(projectDir, ".gitignore"), "node_modules/\n", "utf-8");
+
+    const env = {
+      ...process.env,
+      SENTINELAYER_API_URL: mock.apiUrl,
+      SENTINELAYER_WEB_URL: "http://127.0.0.1",
+      SENTINELAYER_CLI_NON_INTERACTIVE: "1",
+      SENTINELAYER_CLI_SKIP_BROWSER_OPEN: "1",
+      SENTINELAYER_CLI_INTERVIEW_JSON: JSON.stringify(
+        baseInterview({ projectName: "existing-app" })
+      ),
+    };
+
+    const result = await runCli({ cwd: tempRoot, env, args: ["existing-app", "--non-interactive"] });
+    assert.equal(result.code, 0, result.stderr || result.stdout);
+
+    // (a) .gitignore now contains .sentinelayer/ exactly once
+    const gitignore = await readFile(path.join(projectDir, ".gitignore"), "utf-8");
+    const sentinelayerCount = (gitignore.match(/\.sentinelayer\//g) || []).length;
+    assert.equal(
+      sentinelayerCount,
+      1,
+      `.sentinelayer/ must appear exactly once in .gitignore, found ${sentinelayerCount} in:\n${gitignore}`
+    );
+
+    // (b) git check-ignore .sentinelayer/config.json exits 0
+    const check = spawnSync("git", ["-C", projectDir, "check-ignore", ".sentinelayer/config.json"], {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    assert.equal(
+      check.status,
+      0,
+      `git check-ignore must exit 0, got ${check.status}: ${check.stderr || check.stdout}`
+    );
+
+    // (c) config.json has no token
+    const configRaw = await readFile(path.join(projectDir, ".sentinelayer", "config.json"), "utf-8");
+    const config = JSON.parse(configRaw);
+    assert.equal(
+      config.sentinelayer_token,
+      undefined,
+      "sentinelayer_token key must not exist in config.json"
+    );
+    // Verify the token IS in .env (not in config)
+    const envText = await readFile(path.join(projectDir, ".env"), "utf-8");
+    assert.match(envText, /SENTINELAYER_TOKEN=/);
+    assert.match(envText, new RegExp(`SENTINELAYER_TOKEN=${BOOTSTRAP_VALUE_FROM_GENERATE}`));
+  } finally {
+    await mock.close();
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
 
 test("CLI fallback workflow binds dynamically to API-provided secret name", async () => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-e2e-"));
