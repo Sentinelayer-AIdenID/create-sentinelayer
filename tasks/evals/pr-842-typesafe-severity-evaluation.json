@@ -13,7 +13,7 @@
       "src/review/omargate-orchestrator.js": "80bb2c8e57f8784cd0ccb52191be548df269c030a8eb854b5f8958dd7c3152e0",
       "src/commands/omargate.js": "5ccbf2f1bb3f2f1e9ed5e35a8a8197bfc2b1cb699365987a2a979caf834c3567",
       "src/commands/legacy-args.js": "83772b6ccd5765d1a0bd1f3ee3eefcf5c1fdaf4e9fb1a301c0312b286dbc0d29",
-      "src/legacy-cli.js": "3cc8716baed5022b355dcd418188ded310dfafa63e4a4d2e3e65cecf5805bcdb",
+      "src/legacy-cli.js": "524941d7e3b292b257fd3efc2d4e6945a3621d0ad96f1d6da1041034e4a2036e",
       "src/session/redact.js": "a92cd2e70b165e4e015edcbeff1d3119c3b1f091ef72654e776c0139ace663a2"
     },
     "testPath": "tests/unit.typesafe-severity.test.mjs",
@@ -128,6 +128,18 @@
         }
       },
       "scope": "Preserves every historical maintenance record and all synthetic case inputs, mock responses and expected results. Carries the reviewed output-boundary workspace fixture unchanged and refreshes only current canonical source/test bindings after the product-source merge. No live-model accuracy, billing or gate completion claim."
+    },
+    "initTokenGitignoreMaintenance": {
+      "kind": "unrelated_source_binding_refresh",
+      "baseRevision": "d7310715933d944ed11dc262d8b2fe6f253aa058",
+      "priorSha256": {
+        "src/legacy-cli.js": "3cc8716baed5022b355dcd418188ded310dfafa63e4a4d2e3e65cecf5805bcdb"
+      },
+      "currentSha256": {
+        "src/legacy-cli.js": "524941d7e3b292b257fd3efc2d4e6945a3621d0ad96f1d6da1041034e4a2036e"
+      },
+      "scope": "Only `sl init` project setup changed in src/legacy-cli.js: the token is no longer written to .sentinelayer/config.json, .sentinelayer/ is added to .gitignore in existing repos, and a tracked config.json is reported. The severity classification path, all seven synthetic cases, inputs, mock responses, expectations, invariants, the other six implementation hashes and the test bytes are unchanged; the contract suite reruns against the current binding.",
+      "provenance": "Prior bindings remain historical anchors. This refresh binds the current source after CRLF-to-LF normalization only; it is not model accuracy, live-provider, billing or new security-acceptance evidence."
     }
   },
   "baselineMeaning": "Published base generation-only contract, with candidate off mode exercised on identical synthetic inputs; no independent baseline model/provider run.",

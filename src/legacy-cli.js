@@ -2161,6 +2161,55 @@ async function ensureEnvFileIgnored(projectDir) {
   await writeTextFile(gitignorePath, next);
 }
 
+export async function ensureSentinelConfigIgnored(projectDir) {
+  const gitignorePath = path.join(projectDir, ".gitignore");
+  let existing = "";
+  if (fs.existsSync(gitignorePath)) {
+    existing = await fsp.readFile(gitignorePath, "utf-8");
+  }
+
+  const entry = ".sentinelayer/";
+  const lines = existing.split(/\r?\n/);
+  const hasEntry = lines.some((line) => {
+    const normalized = String(line || "").trim();
+    return normalized === entry || normalized === ".sentinelayer";
+  });
+  if (hasEntry) {
+    return;
+  }
+
+  let next = "";
+  if (existing.trim().length === 0) {
+    next = `${entry}\n`;
+  } else if (existing.endsWith("\n")) {
+    next = `${existing}${entry}\n`;
+  } else {
+    next = `${existing}\n${entry}\n`;
+  }
+  await writeTextFile(gitignorePath, next);
+}
+
+export async function warnIfSentinelConfigTracked(projectDir) {
+  try {
+    const configRelPath = ".sentinelayer/config.json";
+    const result = spawnSync("git", ["-C", projectDir, "ls-files", "--error-unmatch", configRelPath], {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    if (result.status === 0) {
+      console.log(
+        pc.yellow(
+          `! ${configRelPath} is tracked by git and may contain a token from a previous init. ` +
+            `To remove it: git rm --cached ${configRelPath} && git commit -m "Remove tracked SentinelLayer config". ` +
+            `Then rotate your token at https://sentinelayer.com/dashboard.`
+        )
+      );
+    }
+  } catch {
+    // git may not be installed or projectDir may not be a repo; silently skip.
+  }
+}
+
 async function ensureSentinelStartScript(projectDir, projectName) {
   const packagePath = path.join(projectDir, "package.json");
   const fallback = {
@@ -2922,7 +2971,7 @@ function resolveGeneratedSpecId(generated) {
   return "";
 }
 
-async function writeInitConfigLockfile({
+export async function writeInitConfigLockfile({
   projectDir,
   specId,
   sentinelayerToken,
@@ -2937,7 +2986,6 @@ async function writeInitConfigLockfile({
     schema_version: 1,
     generated_at: new Date().toISOString(),
     spec_id: String(specId || "").trim(),
-    sentinelayer_token: String(sentinelayerToken || "").trim(),
     required_secret_name: String(secretName || "SENTINELAYER_TOKEN").trim() || "SENTINELAYER_TOKEN",
     repo_slug: normalizeRepoSlug(repoSlug || ""),
     workflow_path: path.relative(projectDir, workflowPath).replace(/\\/g, "/"),
@@ -3629,8 +3677,10 @@ export async function runLegacyCli(rawArgs = process.argv.slice(2)) {
 
   if (sentinelayerToken) {
     await ensureEnvFileIgnored(projectDir);
+    await ensureSentinelConfigIgnored(projectDir);
     await upsertEnvVariable(path.join(projectDir, ".env"), secretName, sentinelayerToken);
   }
+  await warnIfSentinelConfigTracked(projectDir);
   await ensureGitRepositorySetup({
     projectDir,
     repoSlug: interview.connectRepo ? interview.repoSlug : "",
