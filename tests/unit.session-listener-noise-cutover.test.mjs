@@ -29,7 +29,7 @@ async function readJsonBody(req) {
   return raw.trim() ? JSON.parse(raw) : {};
 }
 
-async function startMockApi() {
+async function startMockApi({ renew, roster } = {}) {
   const state = {
     presenceWrites: [],
     durableEventWrites: [],
@@ -37,6 +37,8 @@ async function startMockApi() {
     readCursorWrites: [],
     eventReads: 0,
     listenerAgentIds: [],
+    presenceReads: 0,
+    present: [],
   };
   const server = createServer(async (req, res) => {
     const url = new URL(req.url || "/", "http://127.0.0.1");
@@ -57,12 +59,22 @@ async function startMockApi() {
       req.method === "PUT" &&
       url.pathname === "/api/v1/sessions/sess-noise/presence"
     ) {
-      state.presenceWrites.push(await readJsonBody(req));
+      const body = await readJsonBody(req);
+      state.presenceWrites.push(body);
+      const refusal = renew?.(body, state);
+      if (refusal?.disconnect) return res.destroy();
+      if (refusal) return jsonResponse(res, refusal.status, refusal.body);
+      state.present = [{ agentId: body.agentId, model: body.model }];
       return jsonResponse(res, 200, {
         status: "ok",
         recorded: true,
         ttlSeconds: 90,
       });
+    }
+    if (req.method === "GET" && url.pathname === "/api/v1/sessions/sess-noise/presence") {
+      state.presenceReads += 1;
+      const response = roster || { status: 200, body: { status: "ok", present: state.present } };
+      return jsonResponse(res, response.status, response.body);
     }
     if (
       req.method === "POST" &&
@@ -111,7 +123,7 @@ async function startMockApi() {
 }
 
 function runCli(args, { cwd, apiUrl }) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [CLI_PATH, ...args], {
       cwd,
       env: {
@@ -137,7 +149,12 @@ function runCli(args, { cwd, apiUrl }) {
     child.stderr.on("data", (chunk) => {
       stderr += chunk;
     });
-    child.on("close", (code) => resolve({ code, stdout, stderr }));
+    const timeout = setTimeout(() => child.kill(), 15_000);
+    child.on("error", reject);
+    child.on("close", (code) => {
+      clearTimeout(timeout);
+      resolve({ code, stdout, stderr });
+    });
   });
 }
 
@@ -179,4 +196,94 @@ test("Unit session listener cutover: one poll writes presence only, never durabl
     await mock.close();
     await rm(tmp, { recursive: true, force: true });
   }
+});
+
+async function presenceScenario(options, extraArgs = []) {
+  const tmp = await mkdtemp(path.join(os.tmpdir(), "sl-presence-check-"));
+  const mock = await startMockApi(options);
+  try {
+    const result = await runCli([
+      "session", "listen", "--session", "sess-noise", "--agent", "test-agent",
+      "--model", "test-model", "--transport", "poll", "--max-polls", "1",
+      "--interval", "1", "--presence-interval", "1", "--no-coaching",
+      "--emit", "ndjson", "--path", tmp, ...extraArgs,
+    ], { cwd: tmp, apiUrl: mock.apiUrl });
+    assert.equal(result.code, 0, result.stderr || result.stdout);
+    const events = extraArgs.includes("text") ? [] : result.stdout.trim().split("\n").filter(Boolean).map(JSON.parse);
+    return { ...result, state: mock.state, events };
+  } finally {
+    await mock.close();
+    await rm(tmp, { recursive: true, force: true });
+  }
+}
+
+test("Unit session listener presence: retries identity refusal once and remembers minimal presence", async () => {
+  const result = await presenceScenario({
+    renew: (body) => Object.keys(body).some((key) => !["agentId", "model"].includes(key))
+      ? { status: 403, body: { detail: { code: "AGENT_IDENTITY_REQUIRED" } } }
+      : null,
+  }, ["--presence-check", "--max-polls", "2"]);
+  assert.ok(result.state.presenceWrites.length >= 3);
+  assert.ok(result.state.presenceWrites[0].listenerId);
+  for (const body of result.state.presenceWrites.slice(1)) {
+    assert.deepEqual(body, { agentId: "test-agent", model: "test-model" });
+  }
+  assert.equal((result.stderr.match(/runtime\/working/g) || []).length, 1);
+  assert.equal(result.state.presenceReads, 1);
+  assert.equal(result.events.find((event) => event.event === "session_presence_check")?.payload.present, true);
+  assert.equal(result.state.durableEventWrites.length, 0);
+});
+
+test("Unit session listener presence: a failed fallback is reported without another downgrade", async () => {
+  const result = await presenceScenario({
+    renew: () => ({ status: 403, body: { error: { code: "AGENT_IDENTITY_REQUIRED" } } }),
+  });
+  assert.equal(result.state.presenceWrites.length, 3); // initial, retry, stopped
+  assert.ok(result.state.presenceWrites[0].listenerId);
+  assert.ok(result.state.presenceWrites.slice(1).every((body) => !body.listenerId));
+  assert.equal((result.stderr.match(/runtime\/working/g) || []).length, 1);
+  assert.match(result.stderr, /Presence renewal failed.*api_403/);
+});
+
+test("Unit session listener presence: other refusals are visible and never downgrade", async () => {
+  for (const status of [401, 403, 404, 429, 503]) {
+    const result = await presenceScenario({ renew: () => ({ status, body: { code: "OTHER_ERROR" } }) });
+    assert.equal(result.state.presenceWrites.length, 2, `status ${status}: no immediate retry`);
+    assert.ok(result.state.presenceWrites.every((body) => body.listenerId));
+    assert.match(result.stderr, /Presence renewal failed/);
+    assert.doesNotMatch(result.stderr, /runtime\/working/);
+    assert.equal(result.state.presenceReads, 0);
+  }
+});
+
+test("Unit session listener presence: check reports absent and unknown separately", async () => {
+  for (const [roster, present] of [
+    [{ status: 200, body: { status: "ok", present: [{ agentId: "another-agent" }] } }, false],
+    [{ status: 503, body: {} }, null],
+  ]) {
+    const result = await presenceScenario({ roster }, ["--presence-check"]);
+    assert.equal(result.state.presenceReads, 1);
+    assert.equal(result.events.find((event) => event.event === "session_presence_check")?.payload.present, present);
+    if (present === null) assert.match(result.stderr, /Presence check.*unknown/);
+  }
+});
+
+test("Unit session listener presence: transport and unrecorded renewals are reported", async () => {
+  for (const response of [
+    { disconnect: true },
+    { status: 200, body: { status: "degraded", recorded: false } },
+    { status: 200, body: { status: "ok", recorded: false } },
+  ]) {
+    const result = await presenceScenario({ renew: () => response });
+    assert.match(result.stderr, /Presence renewal failed/);
+    assert.doesNotMatch(result.stderr, /runtime\/working/);
+    assert.equal(result.state.presenceWrites.length, 2);
+  }
+});
+
+test("Unit session listener presence: explicit check still reads when renewal is disabled", async () => {
+  const result = await presenceScenario({}, ["--presence-check", "--no-presence", "--emit", "text"]);
+  assert.equal(result.state.presenceWrites.length, 0);
+  assert.equal(result.state.presenceReads, 1);
+  assert.match(result.stdout, /Presence check: test-agent is not listed/);
 });

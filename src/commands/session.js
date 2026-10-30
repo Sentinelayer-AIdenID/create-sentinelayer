@@ -141,6 +141,7 @@ import {
   createSessionMessageAction,
   editSessionMessage,
   fetchJsonWithFullTimeout,
+  fetchSessionPresence,
   fetchSessionUsageLedger,
   fetchSessionPinnedMessages,
   listSessionMessageActions,
@@ -1987,6 +1988,7 @@ async function publishListenerPresenceEvent({
   clientKind = "cli",
   listenerId,
   lifecycle = {},
+  minimalPresence = false,
 } = {}) {
   const normalizedType = normalizeString(lifecycle.type) || "heartbeat";
   const identity = inferSessionAgentIdentity({
@@ -1999,6 +2001,7 @@ async function publishListenerPresenceEvent({
   return renewSessionPresence(sessionId, {
     targetPath,
     agentId,
+    minimalPresence,
     state:
       normalizedType === "stopped"
         ? "stopped"
@@ -5419,6 +5422,7 @@ export function registerSessionCommand(program) {
       "--no-presence",
       "Do not renew ephemeral remote presence",
     )
+    .option("--presence-check", "Check once whether the server lists this agent after the first presence renewal")
     .option(
       "--model <model>",
       "Model/provider label to publish with listener presence",
@@ -5675,6 +5679,29 @@ export function registerSessionCommand(program) {
       let lastPresenceHeartbeatMs = 0;
       let lastPresenceHeartbeatFingerprint = "";
       let nextPresenceAttemptMs = 0;
+      let minimalPresence = false;
+      let presenceCheckPending = Boolean(options.presenceCheck);
+      const checkPresence = async () => {
+        if (!presenceCheckPending) return;
+        presenceCheckPending = false;
+        const roster = await fetchSessionPresence(normalizedSessionId, { targetPath });
+        const present = roster.ok
+          ? roster.present.some((entry) => entry.agentId === agentId)
+          : null;
+        if (emitFormat === "ndjson") {
+          console.log(JSON.stringify(createAgentEvent({
+            event: "session_presence_check",
+            agentId,
+            sessionId: normalizedSessionId,
+            payload: { present, reason: roster.reason || null },
+          })));
+        } else if (present !== null) {
+          console.log(`Presence check: ${agentId} is ${present ? "listed" : "not listed"} in session ${normalizedSessionId}.`);
+        }
+        if (present === null) {
+          console.error(`Presence check: ${agentId} presence is unknown (${roster.reason || "presence_read_failed"}).`);
+        }
+      };
 
       // Periodic in-session success reminders (ack, claim work, reply
       // in-thread). Long-running interactive listeners only — skipped under
@@ -5850,7 +5877,10 @@ export function registerSessionCommand(program) {
                 );
               }
             }
-            if (!publishPresence) return;
+            if (!publishPresence) {
+              await checkPresence();
+              return;
+            }
             const lifecycleType = normalizeString(lifecycle?.type);
             const presenceAttemptMs = Date.now();
             if (lifecycleType !== "stopped" && presenceAttemptMs < nextPresenceAttemptMs) {
@@ -5877,7 +5907,7 @@ export function registerSessionCommand(program) {
               lastPresenceHeartbeatFingerprint = heartbeatDecision.fingerprint;
               lastPresenceHeartbeatMs = nowMs;
             }
-            const presenceResult = await publishListenerPresenceEvent({
+            const presenceOptions = {
               sessionId: normalizedSessionId,
               targetPath,
               agentId,
@@ -5887,7 +5917,18 @@ export function registerSessionCommand(program) {
               clientKind,
               listenerId,
               lifecycle: publishLifecycle,
-            });
+              minimalPresence,
+            };
+            let presenceResult = await publishListenerPresenceEvent(presenceOptions);
+            if (!minimalPresence && presenceResult?.reason === "api_403" && presenceResult?.code === "AGENT_IDENTITY_REQUIRED") {
+              minimalPresence = true;
+              console.error("Presence renewal refused (403 AGENT_IDENTITY_REQUIRED; runtime/working require scoped agent credentials); retrying with agentId and model only for this listener session.");
+              presenceResult = await publishListenerPresenceEvent({ ...presenceOptions, minimalPresence });
+            }
+            if (!presenceResult?.ok) {
+              console.error(`Presence renewal failed for ${agentId} (${presenceResult?.reason || "not_recorded"}); the server may not list this listener.`);
+            }
+            await checkPresence();
             if (presenceResult?.ok) {
               nextPresenceAttemptMs = 0;
               return;
