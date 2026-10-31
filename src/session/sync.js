@@ -1799,6 +1799,7 @@ export async function renewSessionPresence(
     displayName = "",
     provider = "",
     clientKind = "cli",
+    minimalPresence = false,
     observedAt = new Date().toISOString(),
     timeoutMs = DEFAULT_SYNC_TIMEOUT_MS,
     signal = undefined,
@@ -1882,11 +1883,12 @@ export async function renewSessionPresence(
           "Content-Type": "application/json",
         },
         credential: await credentialFor(session),
-        body: JSON.stringify(body),
+        body: JSON.stringify(minimalPresence ? { agentId: body.agentId, model: body.model } : body),
         signal,
       },
       normalizePositiveInteger(timeoutMs, DEFAULT_SYNC_TIMEOUT_MS),
       fetchImpl,
+      { errorBodyStatuses: [403] },
     );
     if (!response?.ok) {
       if (response?.status === 404) {
@@ -1910,6 +1912,7 @@ export async function renewSessionPresence(
       return {
         ok: false,
         reason: `api_${response ? response.status : "no_response"}`,
+        code: normalizeString(payload?.error?.code || payload?.code || payload?.detail?.code).toUpperCase(),
         status: "degraded",
         recorded: false,
         retryAfterMs: retryAfterMsFromResponse(response, payload, normalizedNowMs),

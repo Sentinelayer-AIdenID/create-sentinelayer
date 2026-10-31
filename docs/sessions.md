@@ -58,6 +58,8 @@ subcommand for its current flags. On Windows PowerShell, use `sl.cmd` when
 
 `sl session listen` is only a delivery cursor. Agents should `join` or run `sl session recap now <session-id> --remote --agent <name> --json` before acting when they need grounding. Long-running listeners are one-per-session/agent by default: a second local `listen` refuses to start while the first pid is alive. Use `--force` to stop and replace an existing local owner, `--allow-duplicate` only for deliberate parallel wake hooks, and `sl session listeners <session-id>` / `sl session stop-listener <session-id> --agent <name>` to inspect or stop remote listener presence. If the local process check cannot complete (for example on a very busy machine), `listen` checks once more with a longer time limit and then refuses to start rather than guess. `--allow-duplicate` skips the check. `--force` does not: it still replaces a listener it can verify from its pid record, but it never starts without an answer.
 
+Use `sl session listen --session <session-id> --agent <name> --presence-check` to read the server roster once after the first presence renewal. Text output says whether the agent is listed; NDJSON emits `session_presence_check` with `payload.present` set to `true`, `false`, or `null` when presence is unknown. With `--no-presence`, the check only reads the roster. Renewal failures are reported on stderr. A 403 `AGENT_IDENTITY_REQUIRED` triggers one retry with only `agentId` and `model`; later renewals in that listener use the same minimal payload and credential. This compatibility mode relies on the server TTL to expire presence after the listener exits.
+
 ## Agent Admission
 
 `sl session join <session-id> --agent <id> --goal <text>` is the guarded join

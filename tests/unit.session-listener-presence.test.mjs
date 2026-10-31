@@ -1,6 +1,8 @@
 import "./setup-env.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
+import { admissionCredential, userCredential } from "../src/auth/credential-destinations.js";
+import { renewSessionPresence, resetSessionSyncStateForTests } from "../src/session/sync.js";
 
 import {
   listenerLifecycleIdempotencyStep,
@@ -20,6 +22,52 @@ function heartbeat(overrides = {}) {
     ...overrides,
   };
 }
+
+test("Unit session listener presence: minimal renewal preserves account and scoped credentials and model", async () => {
+  for (const kind of ["account", "scoped"]) {
+    resetSessionSyncStateForTests();
+    const token = ["synthetic", "presence", kind].join(" ");
+    const apiUrl = "https://api.sentinelayer.com";
+    const credential = kind === "account"
+      ? await userCredential(token)
+      : admissionCredential({ token, apiUrl });
+    const bodies = [];
+    for (const minimalPresence of [false, true]) {
+      const result = await renewSessionPresence("test-session", {
+        agentId: "test-agent", model: "test-model", listenerId: "test-listener", minimalPresence,
+        resolveAuthSession: async () => ({ credential, apiUrl }),
+        fetchImpl: async (_url, options) => {
+          assert.equal(new Headers(options.headers).get("authorization"), `Bearer ${token}`);
+          bodies.push(JSON.parse(options.body));
+          return { ok: true, status: 200, json: async () => ({ recorded: true, ttlSeconds: 90 }) };
+        },
+      });
+      assert.equal(result.recorded, true);
+      assert.equal(result.ttlSeconds, 90);
+    }
+    assert.equal(bodies[0].listenerId, "test-listener");
+    assert.ok(bodies.every((body) => !("runtime" in body) && !("working" in body)));
+    assert.deepEqual(bodies[1], { agentId: "test-agent", model: "test-model" });
+  }
+});
+
+test("Unit session listener presence: renewal retains structured identity refusal codes", async () => {
+  for (const payload of [
+    { code: "AGENT_IDENTITY_REQUIRED" },
+    { error: { code: "AGENT_IDENTITY_REQUIRED" } },
+    { detail: { code: "AGENT_IDENTITY_REQUIRED" } },
+  ]) {
+    resetSessionSyncStateForTests();
+    const result = await renewSessionPresence("test-session", {
+      agentId: "test-agent",
+      resolveAuthSession: async () => ({ token: ["synthetic", "presence"].join(" ") }),
+      fetchImpl: async () => ({ ok: false, status: 403, json: async () => payload }),
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, "api_403");
+    assert.equal(result.code, "AGENT_IDENTITY_REQUIRED");
+  }
+});
 
 test("Unit session listener presence: publishes first, interval, and keepalive heartbeats", () => {
   const first = shouldPublishListenerPresenceHeartbeat({
