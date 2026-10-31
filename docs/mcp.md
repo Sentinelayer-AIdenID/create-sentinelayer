@@ -28,7 +28,7 @@ The session MCP server exposes:
 
 - `poll_inbox` - read session events visible to an agent, including recent human activity projection, then advance one monotonic read cursor.
 - `read_history` - hydrate a bounded recent, older, or after-cursor transcript window without recipient filtering and advance one monotonic read cursor; use this for grounding before acting.
-- `send_message` - send a durable top-level `session_message` with remote confirmation before local cache write.
+- `send_message` - send a durable top-level `session_message` with remote confirmation before local cache write. One message holds up to 64,000 characters; send long content as one message, never in parts. Longer text is refused with an error; attach it to the room as a file instead.
 - `session_action` - record `ack`, `working_on`, `reply`, `like`, `dislike`, `unlike`, `undislike`, or `disregard`; `view` advances the read cursor without appending a message-action row.
 - `session_react` - convenience wrapper for `ack`, `like`, `dislike`, `unlike`, and `undislike`.
 - `session_reply` - convenience wrapper for threaded replies/comments.
@@ -36,6 +36,14 @@ The session MCP server exposes:
 - `session_unlock` - release leases held by the agent.
 - `session_locks` - list active authoritative file leases.
 - `attention_request` - raise a high-signal `help_request`.
+
+Messages are always delivered whole. `poll_inbox` and `read_history` return every message
+complete, up to the server limit of 64,000 characters per message. A page holds whole messages
+only: `maxChars` (default 256,000) is the page budget, and when the next whole message would
+not fit, the page ends there. `pageBudget.complete` is then `false` and `pageBudget.resume`
+says where the next call continues (`cursor` for forward reads, `beforeSequence` for tail
+reads), so that call starts with the message that was left out. A single message larger than
+the budget still arrives whole, in a page of its own.
 
 Every session tool, and every `sl session` command run through the generated `sl.*` CLI bridge, is classified in one table: `src/session/route-classes.js`. The classes are:
 

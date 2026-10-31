@@ -609,7 +609,7 @@ test("Unit session sync: outbound circuit breaker opens after consecutive failur
   resetSessionSyncStateForTests();
 });
 
-test("Unit session sync: pollHumanMessages sanitizes, truncates, and rate limits relayed events", async () => {
+test("Unit session sync: pollHumanMessages sanitizes, keeps whole, and rate limits relayed events", async () => {
   resetSessionSyncStateForTests();
   const longMessage = `${"x".repeat(2_100)}\u0001`;
   const messages = [
@@ -663,7 +663,9 @@ test("Unit session sync: pollHumanMessages sanitizes, truncates, and rate limits
   assert.equal(first.payload.priority, "high");
   assert.equal(first.payload.relayedFromApi, true);
   assert.equal(first.payload.message.includes("\u0001"), false);
-  assert.equal(first.payload.message.length, 2_000);
+  // The relay strips control characters but never cuts a message within the server limit.
+  assert.equal(first.payload.message, "x".repeat(2_100));
+  assert.equal(first.payload.truncated, false);
 });
 
 test("Unit session sync: inbound circuit breaker opens after consecutive poll failures", async () => {

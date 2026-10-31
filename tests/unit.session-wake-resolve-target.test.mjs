@@ -86,8 +86,9 @@ test("Unit resolve-target: custom wakeEventTypes + formatMessage honored", () =>
   assert.equal(t.message, "FIXED");
 });
 
-test("Unit resolve-target: oversized message is capped by default formatter", () => {
+test("Unit resolve-target: the default formatter keeps a long message whole", () => {
   const r = createResolveTarget(base);
-  const t = r(msg({ payload: { to: "claude-mythos", message: "z".repeat(20000) } }));
-  assert.ok(t.message.length <= 16000);
+  const body = "z".repeat(20000);
+  const t = r(msg({ payload: { to: base.agentId, message: body } }));
+  assert.ok(t.message.endsWith(`\n\n${body}`));
 });

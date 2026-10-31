@@ -6,23 +6,28 @@
 // point — if it writes raw, a secret leaks into the audit trail forever.
 //
 // Keep the SECRET_LIKE_PATTERN below in sync with src/session/sync.js.
+//
+// Redaction never shortens a message: a string within the server's per-message limit is kept
+// whole (see message-limits.js).
+
+import { boundToServerLimit } from "./message-limits.js";
 
 const SECRET_LIKE_PATTERN =
   /(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]+PRIVATE KEY-----|SENTINELAYER_TOKEN|AIDENID_API_KEY|NPM_TOKEN|xox[baprs]-[A-Za-z0-9-]+|AIza[0-9A-Za-z_-]{35}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{6,})/;
 
 const REDACTION_MARKER = "[REDACTED]";
-const MAX_STRING_LENGTH = 16_384;
 
 function redactString(value) {
   if (typeof value !== "string") {
     return value;
   }
-  const truncated =
-    value.length > MAX_STRING_LENGTH ? `${value.slice(0, MAX_STRING_LENGTH)}…[truncated]` : value;
-  if (!SECRET_LIKE_PATTERN.test(truncated)) {
-    return truncated;
-  }
-  return truncated.replace(new RegExp(SECRET_LIKE_PATTERN.source, "gi"), REDACTION_MARKER);
+  // Redact over the whole string first, so a cut can never leave part of a secret behind.
+  const redacted = SECRET_LIKE_PATTERN.test(value)
+    ? value.replace(new RegExp(SECRET_LIKE_PATTERN.source, "gi"), REDACTION_MARKER)
+    : value;
+  // Within the server limit the string is kept whole. A longer one cannot come from the
+  // server; it is cut with an explicit marker that states its original length.
+  return boundToServerLimit(redacted).text;
 }
 
 function redactValue(value, depth = 0) {

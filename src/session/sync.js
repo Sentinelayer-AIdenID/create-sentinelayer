@@ -13,6 +13,7 @@ import { messageRevision } from "./message-edits.js";
 import { readAdmissionCredentialState } from "./admission.js";
 import { installTestEgressGuard } from "../net/test-egress-guard.js";
 import { isUrlPathSegment, urlPathSegment } from "../net/url-path.js";
+import { SERVER_MESSAGE_MAX_CHARS, boundToServerLimit } from "./message-limits.js";
 
 // No-op outside tests; inside a test process (or a child it spawned) every fetch
 // to a non-loopback host is refused before a socket opens.
@@ -26,7 +27,8 @@ const CIRCUIT_RESET_MS = 60_000;
 const MESSAGE_ACTION_REFUSAL_STATUSES = Object.freeze([409, 422]);
 const SESSION_INGEST_LIMIT_PER_MINUTE = 500;
 const HUMAN_MESSAGE_LIMIT_PER_MINUTE = 10;
-const HUMAN_MESSAGE_MAX_LENGTH = 2_000;
+// A relayed human message is kept whole up to the server's per-message limit.
+const HUMAN_MESSAGE_MAX_LENGTH = SERVER_MESSAGE_MAX_CHARS;
 const HUMAN_MESSAGE_FETCH_LIMIT = 50;
 const SESSION_EVENT_FETCH_LIMIT = 200;
 const SESSION_ACTION_FETCH_LIMIT = 500;
@@ -850,14 +852,14 @@ function sanitizeHumanMessage(rawMessage) {
       message: "",
     };
   }
-  const truncated = stripped.length > HUMAN_MESSAGE_MAX_LENGTH
-    ? stripped.slice(0, HUMAN_MESSAGE_MAX_LENGTH)
-    : stripped;
+  // Whole up to the server limit; a longer message cannot come from the server and would be
+  // cut with an explicit marker, never silently.
+  const bounded = boundToServerLimit(stripped);
   return {
     accepted: true,
     reason: "",
-    message: truncated,
-    truncated: truncated.length < stripped.length,
+    message: bounded.text,
+    truncated: bounded.cut,
   };
 }
 

@@ -119,14 +119,14 @@ test("Unit codex wake: builds bounded prompt and array-based resume invocation",
   );
 });
 
-test("Unit codex wake: caps oversized Senti messages in wake prompt", () => {
+test("Unit codex wake: keeps a long Senti message whole in the wake prompt", () => {
   const big = "x".repeat(20_000);
   const prompt = buildCodexWakePrompt({
     sentiSessionId: "senti-session",
     message: big,
   });
   const payload = JSON.parse(prompt.match(/```json\n([\s\S]*?)\n```/)?.[1] || "{}");
-  assert.equal(payload.message.length, 16_000);
+  assert.equal(payload.message, big);
 });
 
 test("Unit codex wake: shared adapter helpers expose installHook and resume args", () => {

@@ -3,14 +3,15 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 
+import { boundToServerLimit } from "../message-limits.js";
 import { resolveSessionPaths } from "../paths.js";
+import { promptFitsArgv, sendPromptOnStdin } from "./prompt-transport.js";
 
 export const hostName = "codex";
 
 const DEFAULT_CODEX_BIN = "codex";
 const DEFAULT_WAKE_TIMEOUT_MS = 10 * 60 * 1000;
 const CODEX_NOTIFY_EVENT_TYPE = "agent-turn-complete";
-const MAX_WAKE_MESSAGE_CHARS = 16_000;
 
 function normalizeString(value) {
   return String(value || "").trim();
@@ -170,7 +171,9 @@ export function buildCodexWakePrompt({
   instruction = "",
 } = {}) {
   const normalizedSessionId = requireNonEmptyString(sentiSessionId, "sentiSessionId");
-  const normalizedMessage = requireNonEmptyString(message, "message").slice(0, MAX_WAKE_MESSAGE_CHARS);
+  // The message is delivered whole; only text over the server limit, which the server never
+  // returns, is cut, with an explicit marker.
+  const normalizedMessage = boundToServerLimit(requireNonEmptyString(message, "message")).text;
   const payload = {
     source: "sentinelayer.senti.wake",
     sessionId: normalizedSessionId,
@@ -246,10 +249,16 @@ export function buildCodexExecResumeInvocation({
   } else {
     args.push(normalizedCodexSessionId);
   }
+  const command = normalizeString(codexBin) || DEFAULT_CODEX_BIN;
+  if (!promptFitsArgv(normalizedPrompt)) {
+    // `-` makes codex read the prompt from stdin, so a long prompt reaches it whole.
+    args.push("-");
+    return { command, args, stdin: normalizedPrompt };
+  }
   args.push(normalizedPrompt);
 
   return {
-    command: normalizeString(codexBin) || DEFAULT_CODEX_BIN,
+    command,
     args,
   };
 }
@@ -291,9 +300,15 @@ export function installWakeHook({
   };
 }
 
-function execFilePromise(command, args, { execFileImpl = execFile, timeoutMs, env } = {}) {
+function execFilePromise(command, args, { execFileImpl = execFile, timeoutMs, env, stdin = null } = {}) {
   return new Promise((resolve) => {
-    execFileImpl(
+    let settled = false;
+    const settle = (result) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+    const child = execFileImpl(
       command,
       args,
       {
@@ -309,7 +324,7 @@ function execFilePromise(command, args, { execFileImpl = execFile, timeoutMs, en
         } else if (error) {
           reason = normalizeString(stderr) || normalizeString(error.message) || "resume_failed";
         }
-        resolve({
+        settle({
           code: Number.isFinite(code) ? code : 1,
           stdout: String(stdout || ""),
           stderr: String(stderr || ""),
@@ -317,6 +332,10 @@ function execFilePromise(command, args, { execFileImpl = execFile, timeoutMs, en
         });
       },
     );
+    if (stdin !== null && stdin !== undefined) {
+      const failure = sendPromptOnStdin(child, stdin);
+      if (failure) settle({ code: 1, stdout: "", stderr: "", reason: failure });
+    }
   });
 }
 
@@ -353,6 +372,7 @@ export async function wake(
     execFileImpl,
     timeoutMs,
     env,
+    stdin: invocation.stdin,
   });
   return {
     ok: result.code === 0,
@@ -376,7 +396,8 @@ export async function runCodexExecResume({
   }
   const command = requireNonEmptyString(invocation.command, "invocation.command");
   const args = Array.isArray(invocation.args) ? invocation.args.map(String) : [];
-  const result = await execFilePromise(command, args, { execFileImpl, timeoutMs, env });
+  const stdin = typeof invocation.stdin === "string" ? invocation.stdin : null;
+  const result = await execFilePromise(command, args, { execFileImpl, timeoutMs, env, stdin });
   return {
     exitCode: result.code,
     signal: null,
