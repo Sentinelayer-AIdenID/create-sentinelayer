@@ -157,6 +157,11 @@ import {
   syncSessionMetadataToApi,
   updateSessionReadCursor,
 } from "../session/sync.js";
+import {
+  uploadAttachment,
+  downloadAttachmentToFile,
+  getAttachmentDownload,
+} from "../session/attachments.js";
 import { hydrateSessionFromRemote } from "../session/remote-hydrate.js";
 import { messageRevision, replyRevisionEvent, sessionMessageRoutingEvent } from "../session/message-edits.js";
 import { runSessionRecall } from "../session/recall/index.js";
@@ -3905,6 +3910,7 @@ export function registerSessionCommand(program) {
     .option("--stdin", "Read the message body from stdin")
     .option("--force-cli-user", "Allow fallback sends as cli-user when no agent identity can be resolved")
     .option("--local-only", "Append only to the local session cache without remote send confirmation")
+    .option("--attach <path>", "Attach a file to the message (repeatable)", collectOption, [])
     .option("--no-auto-grant", "Skip auto-grant on 403 IDENTITY_FORGERY; fail immediately instead")
     .option("--path <path>", "Workspace path for the session", ".")
     .option("--json", "Emit machine-readable output")
@@ -3936,11 +3942,33 @@ export function registerSessionCommand(program) {
       const replyToSequenceId = parseOptionalPositiveInteger(options.replyTo, "reply-to");
       const replyToCursor = normalizeString(options.replyCursor);
       const clientMessageId = `cli-${randomUUID()}`;
+      let localOnly = Boolean(options.localOnly) || remoteSessionLookupDisabled();
+      const attachmentPaths = options.attach || [];
+      const uploadedAttachments = [];
+      for (const attachPath of attachmentPaths) {
+        if (localOnly) {
+          throw new Error("--attach requires remote send; --local-only is not compatible with attachments.");
+        }
+        const resolvedAttachPath = path.resolve(process.cwd(), String(attachPath));
+        const uploadResult = await uploadAttachment(normalizedSessionId, resolvedAttachPath, {
+          targetPath,
+        });
+        uploadedAttachments.push({
+          attachmentId: uploadResult.attachmentId,
+          fileName: uploadResult.fileName,
+          mimeType: uploadResult.mimeType,
+          sha256: uploadResult.sha256,
+        });
+      }
+
       const eventPayload = {
         message: normalizedMessage,
         channel: "session",
         clientMessageId,
       };
+      if (uploadedAttachments.length > 0) {
+        eventPayload.attachments = uploadedAttachments;
+      }
       if (to) {
         eventPayload.to = to;
       }
@@ -3967,7 +3995,6 @@ export function registerSessionCommand(program) {
       let remoteSync = null;
       let remoteConfirmation = null;
       let remoteConfirmationAnchor = null;
-      let localOnly = Boolean(options.localOnly) || remoteSessionLookupDisabled();
       if (!localOnly) {
         remoteConfirmationAnchor = await readSessionConfirmationAnchor(normalizedSessionId, { targetPath });
         if (!remoteConfirmationAnchor?.ok) {
@@ -4022,6 +4049,7 @@ export function registerSessionCommand(program) {
         refreshedLocalSession: Boolean(localSession.refreshed),
         identitySource: identity.source,
         identityWarning: identity.identityWarning || undefined,
+        attachments: uploadedAttachments.length > 0 ? uploadedAttachments : undefined,
         agentRegistration,
         agentActivity,
         remoteSync: remoteSync || undefined,
@@ -9412,4 +9440,53 @@ Guide: https://sentinelayer.com/docs/senti/overview/
       );
       console.log(`stopped=${payload.stopped} reason=${reason} duration_ms=${durationMs}`);
     });
+  session
+    .command("attachment-get <sessionId> <attachmentId>")
+    .description("Download an attachment from a session")
+    .option("--out <path>", "Output file path")
+    .option("--thumbnail", "Download the thumbnail/preview")
+    .option("--path <path>", "Workspace path", ".")
+    .option("--json", "Emit machine-readable output")
+    .action(async (sessionId, attachmentId, options, command) => {
+      const normalizedSessionId = normalizeString(sessionId);
+      if (!normalizedSessionId) throw new Error("session id is required.");
+      const normalizedAttachmentId = normalizeString(attachmentId);
+      if (!normalizedAttachmentId) throw new Error("attachment id is required.");
+      const targetPath = path.resolve(process.cwd(), String(options.path || "."));
+      const thumbnail = Boolean(options.thumbnail);
+
+      const meta = await getAttachmentDownload(normalizedSessionId, normalizedAttachmentId, {
+        targetPath,
+        thumbnail,
+      });
+      if (!meta || !meta.downloadUrl) {
+        throw new Error("Attachment not found or no download URL returned.");
+      }
+
+      const outputPath = path.resolve(
+        process.cwd(),
+        String(options.out || meta.fileName || ("attachment-" + normalizedAttachmentId))
+      );
+
+      const result = await downloadAttachmentToFile(meta.downloadUrl, outputPath, meta.sha256);
+
+      const payload = {
+        command: "session attachment-get",
+        sessionId: normalizedSessionId,
+        attachmentId: normalizedAttachmentId,
+        outputPath,
+        sha256: result.sha256,
+        fileName: meta.fileName,
+        mimeType: meta.mimeType,
+        thumbnail,
+      };
+
+      if (shouldEmitJson(options, command)) {
+        console.log(JSON.stringify(payload, null, 2));
+        return;
+      }
+      console.log("Downloaded attachment " + (meta.fileName || normalizedAttachmentId) + " to " + outputPath);
+      console.log("SHA-256: " + result.sha256);
+    });
+
 }

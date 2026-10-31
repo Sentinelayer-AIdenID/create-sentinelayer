@@ -4,6 +4,12 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 import { createAgentEvent } from "../events/schema.js";
 import {
+  uploadAttachment,
+  fetchAndReturnAttachment,
+  isImageMimeType,
+  isPdfMimeType,
+} from "../session/attachments.js";
+import {
   approvedSelfProvisioningMcpCall,
   buildCliCommandMcpTools,
   createCliCommandMcpToolHandlers,
@@ -1344,7 +1350,71 @@ export function createSessionMcpToolHandlers({
         sleepFn,
       });
     },
-    async "memory.write"(input = {}) {
+    async "session.send_attachment"(input = {}) {
+      const sessionId = requireSessionId(input, { targetPath });
+      const filePath = normalizeString(input.filePath || input.file_path || input.path);
+      if (!filePath) {
+        throw new Error("filePath is required.");
+      }
+      const result = await uploadAttachment(sessionId, filePath, {
+        targetPath,
+        fileName: normalizeString(input.fileName || input.file_name) || undefined,
+      });
+      return {
+        ok: true,
+        attachmentId: result.attachmentId,
+        fileName: result.fileName,
+        mimeType: result.mimeType,
+        sha256: result.sha256,
+      };
+    },
+
+    async "session.get_attachment"(input = {}) {
+      const sessionId = requireSessionId(input, { targetPath });
+      const attachmentId = normalizeString(input.attachmentId || input.attachment_id);
+      if (!attachmentId) {
+        throw new Error("attachmentId is required.");
+      }
+      const thumbnail = Boolean(input.thumbnail);
+
+      const result = await fetchAndReturnAttachment(sessionId, attachmentId, {
+        targetPath,
+        thumbnail,
+      });
+
+      const mcpContent = [];
+      if (isImageMimeType(result.mimeType)) {
+        const base64 = result.buffer.toString("base64");
+        mcpContent.push({
+          type: "image",
+          data: base64,
+          mimeType: result.mimeType,
+        });
+      } else if (isPdfMimeType(result.mimeType)) {
+        mcpContent.push({
+          type: "text",
+          text: result.extractedText || "(no text extracted from PDF)",
+        });
+      } else {
+        mcpContent.push({
+          type: "text",
+          text: result.buffer.toString("utf-8").slice(0, 16000),
+        });
+      }
+
+      return {
+        ok: true,
+        attachmentId,
+        fileName: result.fileName,
+        mimeType: result.mimeType,
+        sha256: result.sha256,
+        pageCount: result.pageCount,
+        extractedText: result.extractedText ? result.extractedText.slice(0, 16000) : undefined,
+        content: mcpContent,
+      };
+    },
+
+        async "memory.write"(input = {}) {
       return memoryService.tools.write({
         scope: input.scope,
         items: input.items,
@@ -1698,6 +1768,39 @@ export const SESSION_MCP_TOOLS = Object.freeze([
       },
     },
   },
+  {
+    name: "session.send_attachment",
+    title: "Send Session Attachment",
+    description:
+      "Upload a file as an attachment to a session. Returns the attachment reference for send_message.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["sessionId", "filePath"],
+      properties: {
+        sessionId: { type: "string", minLength: 1 },
+        filePath: { type: "string", minLength: 1, description: "Local path to the file to attach" },
+        fileName: { type: "string", description: "Override file name" },
+      },
+    },
+  },
+  {
+    name: "session.get_attachment",
+    title: "Get Session Attachment",
+    description:
+      "Download and return a session attachment. For images, returns an MCP image content block. For PDFs, returns extracted text and page count. Never returns base64 pasted into prose.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["sessionId", "attachmentId"],
+      properties: {
+        sessionId: { type: "string", minLength: 1 },
+        attachmentId: { type: "string", minLength: 1 },
+        thumbnail: { type: "boolean", default: false, description: "Download thumbnail/preview instead of original" },
+      },
+    },
+  },
+
 ]);
 
 function toMcpTool(tool, { selfProvisioning = false } = {}) {

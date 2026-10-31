@@ -50,6 +50,7 @@ test("the classification names no tool or command that does not exist", async ()
 test("the legacy data-plane list is exactly posting, replying, reading, message actions, reactions and attention", () => {
   assert.deepEqual([...LEGACY_DATA_PLANE_TOOLS].sort(), [
     "cli:session action",
+    "cli:session attachment-get",
     "cli:session comment",
     "cli:session events",
     "cli:session history",
@@ -65,6 +66,8 @@ test("the legacy data-plane list is exactly posting, replying, reading, message 
     "mcp:poll_inbox",
     "mcp:read_history",
     "mcp:send_message",
+    "mcp:session.get_attachment",
+    "mcp:session.send_attachment",
     "mcp:session_action",
     "mcp:session_react",
     "mcp:session_reply",

@@ -197,6 +197,36 @@ function fakeApi({
         credential: { token: adm.token, deliveredOnce: true },
       });
     }
+    // --- attachment upload flow (admission credential path)
+    if (method === "POST" && /\/attachments\/init$/.test(p)) {
+      const attId = `att_${state.requests.length}`;
+      return json({
+        ok: true,
+        duplicate: false,
+        attachment: { attachmentId: attId },
+        upload: { url: `${API}/_upload/${attId}`, method: "PUT", expiresIn: 3600, headers: {} },
+      });
+    }
+    if (method === "POST" && /\/attachments\/[^/]+\/complete$/.test(p)) {
+      return json({ ok: true });
+    }
+    if (method === "GET" && /\/attachments\/[^/]+$/.test(p)) {
+      const attId = p.split("/").pop();
+      return json({
+        status: "ready",
+        attachmentId: attId,
+        downloadUrl: `${API}/_download/${attId}`,
+        fileName: "test.png",
+        mimeType: "image/png",
+        sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      });
+    }
+    if (method === "PUT" && /\/_upload\//.test(p)) {
+      return new Response(null, { status: 200 });
+    }
+    if (method === "GET" && /\/_download\//.test(p)) {
+      return new Response(Buffer.from("fake-image-data"), { status: 200, headers: { "Content-Type": "image/png" } });
+    }
     // --- the room
     if (method === "GET" && /\/replies\/[^/]+$/.test(p)) {
       return json({ ok: true, event: null, reply: { id: p.split("/").pop(), actionType: "reply", actorId: "reply-edit-agent", targetSequenceId: 1,
@@ -462,6 +492,16 @@ test("MCP reactions run on the agent's admission and refuse a tombstone before a
 
 // Every actor-bearing local MCP tool, in every stored-credential state. The user's own
 // credential stays configured throughout, so any request made with it would be visible.
+
+let _attachFilePath = null;
+async function attachFilePath() {
+  if (!_attachFilePath) {
+    _attachFilePath = path.join(scratch, "attach-test.bin");
+    await fsp.writeFile(_attachFilePath, Buffer.from("hello attachment test data for admissions"));
+  }
+  return _attachFilePath;
+}
+
 const MCP_ACTOR_CALLS = [
   ["poll_inbox", (h, agentId) => h.poll_inbox({ sessionId: SID, agentId })],
   ["read_history", (h, agentId) => h.read_history({ sessionId: SID, agentId })],
@@ -481,6 +521,11 @@ const MCP_ACTOR_CALLS = [
   ["session_lock", (h, agentId) => h.session_lock({ sessionId: SID, agentId, files: ["src/a.js"] })],
   ["session_unlock", (h, agentId) => h.session_unlock({ sessionId: SID, agentId, files: ["src/a.js"] })],
   ["session_locks", (h, agentId) => h.session_locks({ sessionId: SID, agentId })],
+  ["session.send_attachment", async (h, agentId) => {
+    const fp = await attachFilePath();
+    return h["session.send_attachment"]({ sessionId: SID, agentId, filePath: fp });
+  }],
+  ["session.get_attachment", (h, agentId) => h["session.get_attachment"]({ sessionId: SID, agentId, attachmentId: "att_test" })],
 ];
 
 const STORED_CREDENTIAL_STATES = [
