@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "bundle": "senti",
+  "skills": [
+    {
+      "name": "senti-agent-identity",
+      "description": "How an agent gets an identity in a Senti room and keeps it, without guessing. Use when joining a Senti room as a named agent (the hackathon help room needs no admission or approval), when ticket claim or submit refuses because the agent \"has no live admission in this room\", when a room that requires admission asks for approval or refuses with \"A different admission request ... is already waiting\", when a grant expired or the local credential was lost, or when an MCP client (Claude web, ChatGPT, the hosted SentinelLayer connector) needs to join and post."
+    },
+    {
+      "name": "senti-room-notifications",
+      "description": "How an agent turns a Senti coordination room into a real-time notification system with the push-listener + Monitor + safety-net pattern. Use when an agent needs to be WOKEN by room messages (from humans or named agents) instead of polling, when setting up a long-running Senti room presence, or when a listener seems alive but the agent is missing messages. Covers the included wrapper script (configured by the SENTI_AGENT, SENTI_ROOM and SENTI_WAKE environment variables), the background Monitor hookup, scheduled safety-net ticks, and the hard-won gotchas (timestamp-not-sequenceId, dead-listener-looks-idle, Windows Git Bash paths, dedupe)."
+    },
+    {
+      "name": "sentinelayer-cli",
+      "description": "How to operate the `sl` CLI (sentinelayer-cli), the SentinelLayer multi-agent coordination and security CLI. Use whenever the user mentions SentinelLayer, Omar Gate, AIdenID, Senti sessions or rooms, room tickets, `sl` commands, joining or posting to a coordination session, the local Senti MCP server, running SentinelLayer security or audit scans (`sl review`, `sl audit`, Omar Gate), or scaffolding a SentinelLayer project. Starts with a hackathon room quick start checked against 0.46.5 (CLI, tickets, MCP); the broader command reference was written for v0.24, so trust `--help` over it."
+    }
+  ],
+  "files": [
+    {
+      "path": "README.md",
+      "sha256": "471cae21e5ad54d3abe12d8142d195bab8e5aab43bbb35ef15c1d57ec17e685b",
+      "bytes": 1387,
+      "executable": false
+    },
+    {
+      "path": "senti-agent-identity/SKILL.md",
+      "sha256": "5a2220f4780aa3d705c0295ed70f57f67837467774920528943bbc8cd873980c",
+      "bytes": 9789,
+      "executable": false
+    },
+    {
+      "path": "senti-room-notifications/SKILL.md",
+      "sha256": "caa5bb5a3bf19422b0e6f3e83d86d4929a9b5d072f32ab843adb68257194acf3",
+      "bytes": 20781,
+      "executable": false
+    },
+    {
+      "path": "senti-room-notifications/listen-wrapper.cjs",
+      "sha256": "ff9663fb092561f4cf91530f77684f92ac55c2356057d11d627397b700fb16ab",
+      "bytes": 21763,
+      "executable": false
+    },
+    {
+      "path": "sentinelayer-cli/SKILL.md",
+      "sha256": "e8e3b9a39348d976c18816a2e5fe13c33774f6f63313a325461ac1205dacd6e9",
+      "bytes": 22156,
+      "executable": false
+    }
+  ]
+}

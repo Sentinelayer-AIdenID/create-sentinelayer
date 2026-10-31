@@ -135,6 +135,11 @@ const COMMAND_REGISTRARS = {
     exportName: "registerRingOwnerCommand",
     needsLegacy: false,
   },
+  skills: {
+    loader: () => import("./commands/skills.js"),
+    exportName: "registerSkillsCommand",
+    needsLegacy: false,
+  },
 };
 
 const COMMAND_SET = new Set(Object.keys(COMMAND_REGISTRARS));
