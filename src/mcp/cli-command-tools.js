@@ -78,6 +78,10 @@ const SENSITIVE_COMMAND_PATHS = new Set([
   // approval gate; unblocking it needs an argument-bound approval, workspace-scoped paths, and a
   // model and session that the caller cannot choose freely.
   "session.wake.codex",
+  // An agent's own skills folder (instructions it loads on its own): install writes there, and with
+  // --force replaces a skill; list reads it. The host's human runs both in a terminal, never a tool caller.
+  "skills.install",
+  "skills.list",
 ]);
 
 // Whole governance sub-trees under ai.identity (domain/target/site/legal-hold) are live

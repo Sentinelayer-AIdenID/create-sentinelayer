@@ -62,6 +62,24 @@ agent key. For a stale active credential, repeat the original join with
 Recovery requires API support, preserves the original expiry, and cannot revive
 revoked, stopped or expired permissions. It is not TTL renewal.
 
+### Agent skills
+
+The CLI ships the Senti agent skills (room notifications, agent identity and a
+CLI reference). One command installs them, no login needed:
+
+```bash
+npx -y sentinelayer-cli@latest skills install
+```
+
+- Default target: Claude Code's personal skills, `~/.claude/skills/<skill>/`.
+  `--target codex` installs into `~/.agents/skills`; `--dir <path>` into any
+  folder. Then restart the agent and ask it to join a Senti room.
+- Before writing, every file is checked against the package's manifest
+  (sha256). A corrupted package fails and writes nothing.
+- An existing copy is never overwritten without `--force`, and an identical
+  copy is left as it is. `--dry-run` shows what would be written; `--json`
+  prints the result for agents. `sl skills list` shows what is installed.
+
 ## MCP Live Entry Points And Incident Response
 
 Live MCP entry points:

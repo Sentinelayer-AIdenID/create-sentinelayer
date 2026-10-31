@@ -40,6 +40,12 @@ const SESSION_NO_AUTH_SUBCOMMANDS = new Set([
   "list",
   "status",
 ]);
+// `skills install` and `skills list` copy and inspect the skill files bundled in this package:
+// local files only, no API call and no account data, so a newcomer can install before signing in.
+const SKILLS_NO_AUTH_SUBCOMMANDS = new Set([
+  "install",
+  "list",
+]);
 
 const TEST_BYPASS_NONCE_ENV = "SENTINELAYER_CLI_TEST_BYPASS_NONCE";
 const TEST_BYPASS_SECRET_ENV = "SENTINELAYER_CLI_TEST_BYPASS_SECRET";
@@ -245,6 +251,14 @@ function isSessionNoAuthCommand(args = []) {
   return SESSION_NO_AUTH_SUBCOMMANDS.has(subcommand);
 }
 
+function isSkillsNoAuthCommand(args = []) {
+  const first = String(args[0] || "").trim().toLowerCase();
+  if (first !== "skills") {
+    return false;
+  }
+  return SKILLS_NO_AUTH_SUBCOMMANDS.has(firstPositionalArg(args, 1));
+}
+
 function hasTrustedBypassExecutableContext() {
   const argvPath = String(process.argv[1] || "").trim();
   if (!argvPath) {
@@ -370,6 +384,10 @@ export async function checkAuthGate(args) {
 
   if (isSessionNoAuthCommand(args)) {
     return { authenticated: true, session: null, bypassReason: "session_no_auth_required", failureReason: null };
+  }
+
+  if (isSkillsNoAuthCommand(args)) {
+    return { authenticated: true, session: null, bypassReason: "skills_no_auth_required", failureReason: null };
   }
 
   if (process.env.SENTINELAYER_CLI_SKIP_AUTH === "1" && hasTrustedBypassContext(args)) {

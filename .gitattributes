@@ -1,3 +1,5 @@
 tests/fixtures/engram/* -text
+# Bundled skills ship byte for byte: skills/*.manifest.json records each file's sha256, so no checkout may convert line endings.
+skills/** -text
 # bin scripts keep LF so a package built from any checkout has a working shebang.
 bin/*.js text eol=lf
