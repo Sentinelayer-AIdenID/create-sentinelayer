@@ -41,6 +41,10 @@ const KIT_END = "KIT-END";
 const KIT_MAX_ARCHIVE_BYTES = KIT_MAX_TOTAL_BYTES;
 // Headers of every kind, so a hostile archive cannot keep the reader busy with empty entries.
 const KIT_MAX_TAR_ENTRIES = 256;
+// One entry name. An extended header can carry a name as long as the archive, and the collision
+// check walks every ancestor of every name, so both are bounded before any of that work.
+const KIT_MAX_PATH_CHARS = 1024;
+const KIT_MAX_PATH_DEPTH = 32;
 const TAR_BLOCK = 512;
 // The tar stream: the content limit plus a header and padding per entry and the end blocks.
 const KIT_MAX_TAR_BYTES = KIT_MAX_TOTAL_BYTES + 2 * TAR_BLOCK * KIT_MAX_TAR_ENTRIES + 20 * TAR_BLOCK;
@@ -240,12 +244,14 @@ function readPaxRecords(data) {
  */
 function kitEntrySegments(name, { directory = false } = {}) {
   const shown = quoteName(name);
+  if (name.length > KIT_MAX_PATH_CHARS) refuseArchive(`${shown} is longer than ${KIT_MAX_PATH_CHARS} characters`);
   if (CONTROL_CHARACTER.test(name)) refuseArchive(`${shown} contains a control character`);
   if (name.includes("\\")) refuseArchive(`${shown} contains a backslash`);
   if (name.startsWith("/")) refuseArchive(`${shown} is an absolute path`);
   if (name.includes(":")) refuseArchive(`${shown} contains ":", a drive or stream separator`);
   const segments = name.split("/").filter((segment) => segment !== "" && segment !== ".");
   if (segments.includes("..")) refuseArchive(`${shown} leaves the kit through ".."`);
+  if (segments.length > KIT_MAX_PATH_DEPTH) refuseArchive(`${shown} is nested more than ${KIT_MAX_PATH_DEPTH} levels deep`);
   for (const segment of segments) {
     if (WINDOWS_RESERVED_NAME.test(segment)) refuseArchive(`${shown} uses the reserved device name ${quoteName(segment)}`);
     if (/[. ]$/.test(segment)) refuseArchive(`${shown} has a name that ends in "." or a space`);

@@ -443,6 +443,25 @@ test("the file-count and size caps hold, and a decompression bomb is refused", a
   const directories = Array.from({ length: 300 }, (_, index) => tarEntry(`senti-starter-kit/d${index}/`, "", { type: "5" }));
   assertRefused(await install(t, kitRoom(tarball(...directories, tarEntry("senti-starter-kit/a.txt", "x")))), "kit_archive_refused", /more than 256 entries/);
 
+  // Entry names are bounded before the collision check walks their ancestors: an extended header
+  // can carry a name as long as the archive.
+  const atDepth = await install(t, kitRoom(tarball(tarEntry(`${"d/".repeat(31)}f.txt`, "x"))));
+  assert.equal(atDepth.result.ok, true, atDepth.result.message);
+  assertRefused(await install(t, kitRoom(tarball(tarEntry(`${"d/".repeat(32)}f.txt`, "x")))), "kit_archive_refused", /nested more than 32 levels deep/);
+  const longName = `senti-starter-kit/${"n".repeat(1100)}.txt`;
+  assertRefused(
+    await install(t, kitRoom(tarball(paxEntry({ path: longName }), tarEntry("senti-starter-kit/short.txt", "x")))),
+    "kit_archive_refused",
+    /longer than 1024 characters/,
+  );
+  const started = Date.now();
+  assertRefused(
+    await install(t, kitRoom(tarball(paxEntry({ path: `${"d/".repeat(200_000)}f.txt` }), tarEntry("senti-starter-kit/short.txt", "x")))),
+    "kit_archive_refused",
+    /longer than 1024 characters/,
+  );
+  assert.ok(Date.now() - started < 5_000, "a very deep name is refused quickly");
+
   const oversized = randomBytes(KIT_MAX_TOTAL_BYTES + 1);
   assert.throws(
     () => unpackKitArchive({ expectedSha256: sha256(oversized), bytes: oversized }),
@@ -566,6 +585,33 @@ test("session_kit returns the same verified result as the CLI path, plus the REA
   assert.equal(refused.result.isError, true);
   assert.equal(refused.result.structuredContent.reason, "kit_pin_untrusted");
   assert.equal(fs.existsSync(path.join(ws, "other")), false);
+});
+
+test("session_kit's out cannot leave the workspace through a link inside it", async (t) => {
+  const fake = kitRoom(starterKit());
+  const base = await workspace(t);
+  const ws = path.join(base, "workspace");
+  const outside = path.join(base, "outside");
+  await fsp.mkdir(ws);
+  await fsp.mkdir(outside);
+  try {
+    fs.symlinkSync(outside, path.join(ws, "link"), process.platform === "win32" ? "junction" : "dir");
+  } catch (error) {
+    t.diagnostic(`link case skipped: ${error.code}`);
+    return;
+  }
+  const handlers = createSessionMcpToolHandlers({
+    targetPath: ws,
+    fetchSessionPinnedMessagesFn: fake.fetchPinnedMessagesFn,
+    fetchSessionMembersFn: fake.fetchMembersFn,
+  });
+  const response = await handleMcpJsonRpcMessage(
+    { jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "session_kit", arguments: { sessionId: SESSION, out: "link/kit" } } },
+    { handlers },
+  );
+  assert.equal(response.result.isError, true);
+  assert.equal(response.result.structuredContent.reason, "kit_out_refused");
+  assert.deepEqual(await fsp.readdir(outside), [], "nothing was written outside the workspace");
 });
 
 // ---- end to end: the real CLI and the real MCP server against a loopback API
