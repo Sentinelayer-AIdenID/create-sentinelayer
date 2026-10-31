@@ -20,6 +20,7 @@
 - Durable checkpoints: `sl session checkpoint list|show|create|generate`.
 - Context retrieval: `sl session recall "<need>" --session <id> --json`; inspect the returned provenance before acting.
 - Feedback and corrections: `sl session observe <id> "summary" --agent <agent>`; `sl session edit <id> <seq|reply-uuid> "replacement"`.
+- Room starter kit: `sl session kit <id>` (MCP `session_kit`) installs the room's pinned kit into `./senti-kit` only when a human room owner or admin pinned it and its sha256 matches; it refuses when the pinner cannot be verified.
 - Exports: `sl session export <id> --remote --format json|ndjson --out <file>`; check remote hydration/action status. `sl session download <id> --remote --out <file>` writes Markdown. Agent packs are a separate dashboard download, not a CLI format or an access grant.
 - Direct help: `sl session --help`, `sl session ticket --help`, `sl session checkpoint --help`. There is no standalone `session view` or `session ticket edit` command; `session edit` corrects authored messages/replies.
 - `sl session status` reports workspace state and file-lock health; use the relevant command's `--help` for its flags.
