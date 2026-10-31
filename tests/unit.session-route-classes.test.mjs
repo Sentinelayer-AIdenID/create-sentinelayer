@@ -66,6 +66,8 @@ test("the legacy data-plane list is exactly posting, replying, reading, message 
     "mcp:read_history",
     "mcp:send_message",
     "mcp:session_action",
+    "mcp:session_file_get",
+    "mcp:session_files_list",
     "mcp:session_react",
     "mcp:session_reply",
   ]);

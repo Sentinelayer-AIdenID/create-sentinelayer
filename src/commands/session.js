@@ -158,6 +158,14 @@ import {
   updateSessionReadCursor,
 } from "../session/sync.js";
 import { hydrateSessionFromRemote } from "../session/remote-hydrate.js";
+import {
+  DEFAULT_ROOM_FILES_LIMIT,
+  DEFAULT_ROOM_FILES_MAX_PAGES,
+  MAX_ROOM_FILES_LIMIT,
+  RoomFileError,
+  downloadRoomFile,
+  listRoomFiles,
+} from "../session/room-files.js";
 import { messageRevision, replyRevisionEvent, sessionMessageRoutingEvent } from "../session/message-edits.js";
 import { runSessionRecall } from "../session/recall/index.js";
 import { mergeLiveSources } from "../session/live-source.js";
@@ -2442,6 +2450,19 @@ function resolveSessionIdOption(options = {}) {
     throw new Error("session id is required (use --session <id>).");
   }
   return sessionId;
+}
+
+function formatFileSize(bytes) {
+  const value = Number(bytes) || 0;
+  if (value < 1024) return `${value} B`;
+  const units = ["KB", "MB", "GB"];
+  let size = value / 1024;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit += 1;
+  }
+  return `${size.toFixed(size < 10 ? 1 : 0)} ${units[unit]}`;
 }
 
 function formatEventLine(event = {}) {
@@ -4773,6 +4794,128 @@ export function registerSessionCommand(program) {
           console.log(pc.gray("  (no readable text content for this pinned event)"));
         }
       }
+      return payload;
+    });
+
+  const filesCommand = session
+    .command("files <sessionId>")
+    .description(
+      "List the files published in a room: name, size, type, who uploaded it and when, and the attachment id to download it with",
+    )
+    .option("--limit <n>", `Most files to list (default ${DEFAULT_ROOM_FILES_LIMIT}, max ${MAX_ROOM_FILES_LIMIT})`)
+    .option(
+      "--max-pages <n>",
+      `Most pages of room history to read, 200 events each (default ${DEFAULT_ROOM_FILES_MAX_PAGES})`,
+    )
+    .option("--path <path>", "Workspace path for the session", ".")
+    .option("--json", "Emit machine-readable output")
+    .addHelpText(
+      "after",
+      "\nDownload a file with: sl session files get <sessionId> <attachmentId> [--out <path>] [--force]",
+    )
+    .action(async (sessionId, options, command) => {
+      const normalizedSessionId = normalizeString(sessionId);
+      if (!normalizedSessionId) {
+        throw new Error("session id is required.");
+      }
+      const targetPath = path.resolve(process.cwd(), String(options.path || "."));
+      const limit = parsePositiveInteger(options.limit, "limit", DEFAULT_ROOM_FILES_LIMIT);
+      const maxPages = parsePositiveInteger(options.maxPages, "max-pages", DEFAULT_ROOM_FILES_MAX_PAGES);
+      const result = await listRoomFiles(normalizedSessionId, { targetPath, limit, maxPages });
+      if (!result.ok) {
+        throw new Error(`Could not list room files (${result.reason || "unknown"}).`);
+      }
+      const payload = {
+        command: "session files",
+        sessionId: normalizedSessionId,
+        count: result.count,
+        complete: result.complete,
+        pages: result.pages,
+        scannedEvents: result.scannedEvents,
+        files: result.files,
+      };
+      if (shouldEmitJson(options, command)) {
+        console.log(JSON.stringify(payload, null, 2));
+        return payload;
+      }
+      if (!result.count) {
+        console.log(
+          pc.gray(
+            result.complete
+              ? "No files have been published in this room."
+              : `No files in the last ${result.scannedEvents} events; raise --max-pages to read further back.`,
+          ),
+        );
+        return payload;
+      }
+      console.log(pc.bold(`Files published in ${normalizedSessionId} (${result.count}, newest first)`));
+      for (const file of result.files) {
+        const type = file.contentType || file.kind || "unknown type";
+        const who = file.uploadedBy ? ` by ${file.uploadedBy}` : "";
+        const when = file.uploadedAt || file.publishedAt;
+        const message = file.publishedSequenceId ? ` in #${file.publishedSequenceId}` : "";
+        console.log(`${file.filename || "(unnamed)"}  ${formatFileSize(file.sizeBytes)}  ${type}${who}${when ? ` ${when}` : ""}${message}`);
+        console.log(pc.gray(`  attachment id ${file.attachmentId}`));
+      }
+      if (!result.complete) {
+        console.log(pc.gray("More files may exist further back; raise --limit or --max-pages."));
+      }
+      console.log(pc.gray(`Download one with: sl session files get ${normalizedSessionId} <attachmentId> [--out <path>]`));
+      return payload;
+    });
+
+  filesCommand
+    .command("get <sessionId> <attachmentId>")
+    .description(
+      "Download one published room file: streamed to disk, checked against the server's sha256, and written atomically",
+    )
+    .option("--out <path>", "File or directory to write to (default: the server's file name in the workspace)")
+    .option("--force", "Overwrite an existing file")
+    .option("--path <path>", "Workspace path; a relative --out must stay inside it", ".")
+    .option("--json", "Emit machine-readable output")
+    .action(async (sessionId, attachmentId, options, command) => {
+      const normalizedSessionId = normalizeString(sessionId);
+      const normalizedAttachmentId = normalizeString(attachmentId);
+      if (!normalizedSessionId) {
+        throw new Error("session id is required.");
+      }
+      // `files` also defines --path and --json, so Commander gives them to it: read the merged values.
+      const merged = typeof command?.optsWithGlobals === "function" ? command.optsWithGlobals() : options;
+      const targetPath = path.resolve(process.cwd(), String(merged.path || options.path || "."));
+      let result;
+      try {
+        result = await downloadRoomFile(normalizedSessionId, normalizedAttachmentId, {
+          targetPath,
+          out: options.out,
+          force: Boolean(options.force),
+        });
+      } catch (error) {
+        if (error instanceof RoomFileError) {
+          throw new Error(error.message);
+        }
+        throw error;
+      }
+      const payload = {
+        command: "session files get",
+        sessionId: normalizedSessionId,
+        attachmentId: normalizedAttachmentId,
+        path: result.path,
+        bytes: result.bytes,
+        sha256: result.sha256,
+        verified: result.verified,
+        overwritten: result.overwritten,
+        linkRefetched: result.linkRefetched,
+        attachment: result.attachment,
+      };
+      if (shouldEmitJson(options, command)) {
+        console.log(JSON.stringify(payload, null, 2));
+        return payload;
+      }
+      console.log(
+        pc.green(
+          `Saved ${result.attachment.filename || normalizedAttachmentId} (${formatFileSize(result.bytes)}, sha256 verified) to ${result.path}`,
+        ),
+      );
       return payload;
     });
 

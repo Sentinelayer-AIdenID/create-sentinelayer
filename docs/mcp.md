@@ -35,6 +35,8 @@ The session MCP server exposes:
 - `session_lock` - claim authoritative API-backed file leases before editing.
 - `session_unlock` - release leases held by the agent.
 - `session_locks` - list active authoritative file leases.
+- `session_files_list` - list the files published in the room, newest first, with each file's name, size, type, uploader, upload time and attachment id.
+- `session_file_get` - download one published file into the workspace: streamed, checked against the server's sha256, and renamed into place only when it matches. It returns the saved path and metadata, never the file's bytes; it refuses to overwrite without `force` and refuses an `out` outside the workspace.
 - `attention_request` - raise a high-signal `help_request`.
 
 Every session tool, and every `sl session` command run through the generated `sl.*` CLI bridge, is classified in one table: `src/session/route-classes.js`. The classes are:
