@@ -415,6 +415,26 @@ test("room files: a checksum mismatch saves nothing and leaves no partial file",
   });
 });
 
+test("room files: a failed forced download leaves the existing file untouched", async () => {
+  await withWorkspace("room-files-atomic", async ({ workspace }) => {
+    const existing = path.join(workspace, "review-notes.md");
+    await writeFile(existing, "my local edits", "utf-8");
+    const tampered = Buffer.from(REPORT);
+    tampered[0] ^= 0xff;
+    const fake = installFakeApi({ store: () => new Response(tampered, { status: 200 }) });
+    try {
+      await assert.rejects(
+        () => downloadRoomFile(SESSION_ID, "att-report-0001", { targetPath: workspace, force: true }),
+        (error) => error instanceof RoomFileError && error.code === "checksum_mismatch",
+      );
+      assert.equal(await readFile(existing, "utf-8"), "my local edits");
+      assert.deepEqual(await readdir(workspace), ["review-notes.md"]);
+    } finally {
+      fake.restore();
+    }
+  });
+});
+
 test("room files: a download longer than the reported size is stopped and not saved", async () => {
   await withWorkspace("room-files-size", async ({ workspace }) => {
     const fake = installFakeApi({ store: () => new Response(Buffer.concat([REPORT, bytesOf("extra")]), { status: 200 }) });
