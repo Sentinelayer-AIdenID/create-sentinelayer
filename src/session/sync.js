@@ -2767,6 +2767,12 @@ function pinnedEventAuthorId(event = {}) {
  * (`projection.pinnedMessages`, capped at `projection.pinLimit`); content is
  * resolved per pinned sequence via `/events/before`. Bounded by the pin cap
  * (<= 10), so at most ~10 single-event lookups.
+ *
+ * `pinnedByUserId` is the pinner's account id. `contentSequenceId` names the
+ * event the content came from: when the pinned event itself is not returned the
+ * content falls back to the nearest earlier event, so a caller that must have
+ * the pinned message's own text (`sl session kit`) compares it with
+ * `targetSequenceId`. `contentRevision` and `contentEditedAt` describe edits.
  */
 export async function fetchSessionPinnedMessages(
   sessionId,
@@ -2816,9 +2822,13 @@ export async function fetchSessionPinnedMessages(
         targetCursor: normalizeString(action?.targetCursor) || null,
         pinnedBy: normalizeString(action?.actorId) || "",
         pinnedByKind: normalizeString(action?.actorKind) || "",
+        pinnedByUserId: normalizeString(action?.actorUserId) || "",
         pinnedAt: normalizeString(action?.createdAt) || "",
         author: "",
         content: "",
+        contentSequenceId: 0,
+        contentRevision: 1,
+        contentEditedAt: "",
         resolved: false,
       };
       if (targetSequenceId <= 0) {
@@ -2843,6 +2853,9 @@ export async function fetchSessionPinnedMessages(
         if (match) {
           base.author = pinnedEventAuthorId(match);
           base.content = pinnedEventContentText(match);
+          base.contentSequenceId = Number(match.sequenceId) || 0;
+          base.contentRevision = messageRevision(match);
+          base.contentEditedAt = normalizeString(match.editedAt) || "";
           base.resolved = true;
         }
       }
@@ -2858,6 +2871,85 @@ export async function fetchSessionPinnedMessages(
     pinLimit,
     count: pins.length,
   };
+}
+
+/**
+ * Read the room's member roster (`GET /api/v1/sessions/{id}/members`): each
+ * member's account id (`userId`) and room role (owner, admin, contributor or
+ * viewer). The API serves it to the room's owner and admins only and never to
+ * an agent admission, so a 401/403 here means "this caller cannot see roles",
+ * not "the room has no owner". `status` carries the HTTP status.
+ */
+export async function fetchSessionMembers(
+  sessionId,
+  {
+    targetPath = process.cwd(),
+    timeoutMs = DEFAULT_SYNC_TIMEOUT_MS,
+    forceCircuitProbe = false,
+    resolveAuthSession = resolveActiveAuthSession,
+    fetchImpl = fetchWithTimeout,
+    nowMs = Date.now,
+  } = {}
+) {
+  const normalizedSessionId = normalizeString(sessionId);
+  if (!normalizedSessionId) {
+    return { ok: false, reason: "invalid_session_id", status: 0, members: [] };
+  }
+  const normalizedNowMs = Number(nowMs()) || Date.now();
+  if (!forceCircuitProbe && isCircuitOpen(inboundCircuit, normalizedNowMs)) {
+    return { ok: false, reason: "circuit_breaker_open", status: 0, members: [] };
+  }
+
+  let session = null;
+  try {
+    session = await resolveAuthSession({
+      cwd: targetPath,
+      env: process.env,
+      autoRotate: false,
+    });
+  } catch {
+    return { ok: false, reason: "no_session", status: 0, members: [] };
+  }
+  if (!isAuthenticated(session)) {
+    return { ok: false, reason: "not_authenticated", status: 0, members: [] };
+  }
+
+  const apiBaseUrl = resolveApiBaseUrl(session);
+  const endpoint = `${apiBaseUrl}/api/v1/sessions/${urlPathSegment(normalizedSessionId, { label: "sessionId" })}/members`;
+
+  try {
+    const { response, payload } = await fetchJsonWithFullTimeout(
+      endpoint,
+      {
+        method: "GET",
+        credential: await credentialFor(session),
+      },
+      normalizePositiveInteger(timeoutMs, DEFAULT_SYNC_TIMEOUT_MS),
+      fetchImpl,
+    );
+    if (!response || !response.ok) {
+      recordInboundFailure(response, normalizedNowMs);
+      return {
+        ok: false,
+        reason: `api_${response ? response.status : "no_response"}`,
+        status: response?.status || 0,
+        members: [],
+      };
+    }
+    recordCircuitSuccess(inboundCircuit);
+    const members = Array.isArray(payload?.members)
+      ? payload.members.filter((member) => member && typeof member === "object")
+      : [];
+    return { ok: true, reason: "", status: response.status || 200, members };
+  } catch (error) {
+    recordCircuitFailure(inboundCircuit, normalizedNowMs);
+    return {
+      ok: false,
+      reason: normalizeString(error?.message) || "members_read_failed",
+      status: 0,
+      members: [],
+    };
+  }
 }
 
 // Native edits never fall back to POST /events or mutate an optimistic local row.

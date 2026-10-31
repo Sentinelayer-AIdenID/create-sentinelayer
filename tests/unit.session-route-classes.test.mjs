@@ -53,6 +53,7 @@ test("the legacy data-plane list is exactly posting, replying, reading, message 
     "cli:session comment",
     "cli:session events",
     "cli:session history",
+    "cli:session kit",
     "cli:session observe",
     "cli:session pins",
     "cli:session post-agent",
@@ -66,6 +67,7 @@ test("the legacy data-plane list is exactly posting, replying, reading, message 
     "mcp:read_history",
     "mcp:send_message",
     "mcp:session_action",
+    "mcp:session_kit",
     "mcp:session_react",
     "mcp:session_reply",
   ]);

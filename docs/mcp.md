@@ -35,11 +35,12 @@ The session MCP server exposes:
 - `session_lock` - claim authoritative API-backed file leases before editing.
 - `session_unlock` - release leases held by the agent.
 - `session_locks` - list active authoritative file leases.
+- `session_kit` - fetch the room's pinned starter kit, verify it (a human room owner or admin pinned it, and it matches the sha256 its message states) and unpack it safely into a directory inside the workspace; returns the files with their sha256s and the kit's README text. See [Room Starter Kits](./sessions.md#room-starter-kits).
 - `attention_request` - raise a high-signal `help_request`.
 
 Every session tool, and every `sl session` command run through the generated `sl.*` CLI bridge, is classified in one table: `src/session/route-classes.js`. The classes are:
 
-- `legacy-data-plane`: posting, replying, reading and polling, message actions and reactions, and attention requests.
+- `legacy-data-plane`: posting, replying, reading and polling (including reading the pinned starter kit), message actions and reactions, and attention requests.
 - `control`: leases, locks, guards, tickets, checkpoints, joining and leaving, listeners, and room setup.
 - `owner`: the room owner's `session access` actions.
 - `exempt-local`: the `memory.*` tools and two built-in listings. These send no request.

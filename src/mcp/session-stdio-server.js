@@ -31,12 +31,15 @@ import {
 } from "../session/reactions.js";
 import {
   createSessionMessageAction,
+  fetchSessionMembers,
+  fetchSessionPinnedMessages,
   listSessionMessageActions,
   pollSessionEvents,
   pollSessionEventsBefore,
   syncSessionEventToApi,
   updateSessionReadCursor,
 } from "../session/sync.js";
+import { installSessionKit } from "../session/kit.js";
 
 export const SESSION_MCP_SERVER_NAME = "sentinelayer-session-mcp";
 export const SESSION_MCP_PROTOCOL_VERSION = "2025-06-18";
@@ -972,6 +975,8 @@ export function createSessionMcpToolHandlers({
   listFileLocksFn = listFileLocks,
   syncSessionEventToApiFn = syncSessionEventToApi,
   appendToStreamFn = appendToStream,
+  fetchSessionPinnedMessagesFn = fetchSessionPinnedMessages,
+  fetchSessionMembersFn = fetchSessionMembers,
   sleepFn = sleep,
   uuidFn = randomUUID,
   now = () => new Date().toISOString(),
@@ -1307,6 +1312,23 @@ export function createSessionMcpToolHandlers({
         lockCount: Array.isArray(locks) ? locks.length : 0,
         locks: Array.isArray(locks) ? locks : [],
       };
+    },
+
+    // The same fetch, trust check, sha256 check and safe unpack as `sl session kit`, with the
+    // output directory held inside this server's workspace.
+    async session_kit(input = {}) {
+      const sessionId = requireSessionId(input, { targetPath });
+      return installSessionKit({
+        sessionId,
+        targetPath,
+        out: input.out,
+        outBase: targetPath,
+        confineOut: true,
+        force: input.force === true,
+        dryRun: input.dryRun === true || input.dry_run === true,
+        fetchPinnedMessagesFn: fetchSessionPinnedMessagesFn,
+        fetchMembersFn: fetchSessionMembersFn,
+      });
     },
 
     async attention_request(input = {}) {
@@ -1670,6 +1692,28 @@ export const SESSION_MCP_TOOLS = Object.freeze([
     },
   },
   {
+    name: "session_kit",
+    title: "Install Senti Room Starter Kit",
+    description:
+      "Fetch the room's pinned starter kit and verify it: pinned by a human room owner or admin, and matching the sha256 stated in the pinned message. Unpacks regular files only, safely, into a directory inside the workspace (out, default senti-kit) and returns the verified files with their sha256s and the kit's README text. dryRun verifies without writing; existing files are replaced only with force.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["sessionId"],
+      properties: {
+        sessionId: { type: "string", minLength: 1 },
+        agentId: { type: "string", minLength: 1 },
+        out: {
+          type: "string",
+          minLength: 1,
+          description: "Directory inside the workspace to unpack into; default senti-kit.",
+        },
+        dryRun: { type: "boolean", default: false },
+        force: { type: "boolean", default: false },
+      },
+    },
+  },
+  {
     name: "attention_request",
     title: "Request Senti Attention",
     description:
@@ -1836,7 +1880,7 @@ export async function handleMcpJsonRpcMessage(
         version: "0.20.0",
       },
       instructions:
-        "Use native Senti tools for coordination actions and generated sl.* bridge tools for the rest of SentinelLayer CLI. Use poll_inbox for addressed wake-style delivery, read_history for recent/older transcript grounding, session_action/session_react/session_reply/session_lock/session_unlock/session_locks for low-noise session work, send_message for durable posts, and generated command tools such as sl.auth.status or sl.review.scan for ordinary CLI commands.",
+        "Use native Senti tools for coordination actions and generated sl.* bridge tools for the rest of SentinelLayer CLI. Use poll_inbox for addressed wake-style delivery, read_history for recent/older transcript grounding, session_action/session_react/session_reply/session_lock/session_unlock/session_locks for low-noise session work, send_message for durable posts, session_kit to install the room's verified pinned starter kit, and generated command tools such as sl.auth.status or sl.review.scan for ordinary CLI commands.",
     });
   }
 
