@@ -66,6 +66,42 @@ test("Unit session pins: resolves pinned messages with author and content", asyn
   assert.equal(second.resolved, true);
 });
 
+test("Unit session pins: reports the pinner's account and which event, at which revision, the content came from", async () => {
+  const projection = {
+    pinLimit: 10,
+    pinnedMessages: [
+      {
+        targetSequenceId: 50,
+        actorId: "human-room-owner",
+        actorKind: "human",
+        actorUserId: "00000000-0000-4000-8000-0000000000a1",
+        createdAt: "2026-10-31T12:00:00.000Z",
+      },
+      { targetSequenceId: 60, actorId: "human-room-owner", actorKind: "human", createdAt: "2026-10-31T12:00:00.000Z" },
+    ],
+  };
+  const fetchEventsBefore = async (_sessionId, { beforeSequence }) => {
+    const events = {
+      51: [{ sequenceId: 50, agent: { id: "host" }, payload: { message: "edited text" }, messageRevision: 2, editedAt: "2026-10-31T11:00:00Z" }],
+      // the pinned event 60 is not returned: the nearest earlier event stands in for it
+      61: [{ sequenceId: 58, agent: { id: "someone-else" }, payload: { message: "not the pinned message" } }],
+    };
+    return { ok: true, reason: "", events: events[beforeSequence] || [] };
+  };
+  const result = await fetchSessionPinnedMessages("sess-fields", { listActions: actionsStub(projection), fetchEventsBefore });
+  assert.equal(result.ok, true);
+  const [exact, fallback] = result.pins;
+  assert.equal(exact.pinnedByUserId, "00000000-0000-4000-8000-0000000000a1");
+  assert.equal(exact.contentSequenceId, 50);
+  assert.equal(exact.contentRevision, 2);
+  assert.equal(exact.contentEditedAt, "2026-10-31T11:00:00Z");
+  assert.equal(fallback.pinnedByUserId, "");
+  assert.equal(fallback.resolved, true);
+  assert.equal(fallback.contentSequenceId, 58, "the stand-in event is named, so callers can tell");
+  assert.equal(fallback.contentRevision, 1);
+  assert.equal(fallback.contentEditedAt, "");
+});
+
 test("Unit session pins: no pins returns an empty, ok result", async () => {
   const result = await fetchSessionPinnedMessages("sess-empty", {
     listActions: actionsStub({ pinLimit: 10, pinnedMessages: [] }),

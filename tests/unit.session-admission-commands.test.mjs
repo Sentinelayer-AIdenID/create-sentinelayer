@@ -481,6 +481,7 @@ const MCP_ACTOR_CALLS = [
   ["session_lock", (h, agentId) => h.session_lock({ sessionId: SID, agentId, files: ["src/a.js"] })],
   ["session_unlock", (h, agentId) => h.session_unlock({ sessionId: SID, agentId, files: ["src/a.js"] })],
   ["session_locks", (h, agentId) => h.session_locks({ sessionId: SID, agentId })],
+  ["session_kit", (h, agentId) => h.session_kit({ sessionId: SID, agentId, dryRun: true })],
 ];
 
 const STORED_CREDENTIAL_STATES = [

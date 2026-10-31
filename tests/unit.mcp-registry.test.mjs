@@ -71,6 +71,7 @@ test("Unit MCP registry: SentinelLayer session registry exposes inbox and write 
   assert.equal(tools.has("session_lock"), true);
   assert.equal(tools.has("session_unlock"), true);
   assert.equal(tools.has("session_locks"), true);
+  assert.equal(tools.has("session_kit"), true);
   assert.equal(tools.has("attention_request"), true);
   const pollInbox = parsed.tools.find((tool) => tool.name === "poll_inbox");
   const readHistory = parsed.tools.find((tool) => tool.name === "read_history");
@@ -83,6 +84,7 @@ test("Unit MCP registry: SentinelLayer session registry exposes inbox and write 
   assert.deepEqual(parsed.tools.find((tool) => tool.name === "send_message").security.scopes, ["session:write"]);
   assert.deepEqual(parsed.tools.find((tool) => tool.name === "session_react").security.scopes, ["session:write", "session:action"]);
   assert.deepEqual(parsed.tools.find((tool) => tool.name === "session_lock").security.scopes, ["session:lock"]);
+  assert.deepEqual(parsed.tools.find((tool) => tool.name === "session_kit").security.scopes, ["session:read"]);
 });
 
 test("Unit MCP registry: hosted Senti connector contract rejects identity from tool args", () => {

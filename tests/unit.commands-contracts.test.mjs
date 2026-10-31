@@ -419,7 +419,8 @@ test("Unit command contracts: mcp init-senti-session writes a validated Senti re
     const payload = JSON.parse(stdout.join("").trim());
     assert.equal(payload.command, "mcp registry init-senti-session");
     assert.equal(payload.outputPath, outputPath);
-    assert.equal(payload.toolCount, 10);
+    assert.equal(payload.toolCount, 11);
+    assert.equal(payload.tools.includes("session_kit"), true);
     assert.equal(payload.tools.includes("poll_inbox"), true);
     assert.equal(payload.tools.includes("read_history"), true);
     assert.equal(payload.tools.includes("send_message"), true);

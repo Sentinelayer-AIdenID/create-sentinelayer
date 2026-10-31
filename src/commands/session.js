@@ -112,6 +112,7 @@ import {
   currentAdmittedAgent,
   withAgentAdmission,
 } from "../session/admission-auth.js";
+import { KIT_DEFAULT_OUT_DIR, installSessionKit } from "../session/kit.js";
 import {
   SESSION_REACTION_TYPES,
   isSessionReactionType,
@@ -4772,6 +4773,69 @@ export function registerSessionCommand(program) {
         } else {
           console.log(pc.gray("  (no readable text content for this pinned event)"));
         }
+      }
+      return payload;
+    });
+
+  session
+    .command("kit <sessionId>")
+    .description(
+      "Fetch, verify and unpack the room's pinned starter kit (pinned by a human owner or admin, sha256-checked)",
+    )
+    .option("--out <dir>", "Directory to unpack the kit into", KIT_DEFAULT_OUT_DIR)
+    .option("--force", "Replace kit files that already exist in the output directory")
+    .option("--dry-run", "Verify the kit and list its files without writing anything")
+    .option("--path <path>", "Workspace path for the session", ".")
+    .option("--json", "Emit machine-readable output")
+    .action(async (sessionId, options, command) => {
+      const targetPath = path.resolve(process.cwd(), String(options.path || "."));
+      const result = await installSessionKit({
+        sessionId,
+        targetPath,
+        out: options.out,
+        outBase: process.cwd(),
+        force: Boolean(options.force),
+        dryRun: Boolean(options.dryRun),
+      });
+      const payload = { command: "session kit", ...result };
+      if (!result.ok) process.exitCode = 1;
+      if (shouldEmitJson(options, command)) {
+        console.log(JSON.stringify(payload, null, 2));
+        return payload;
+      }
+      if (!result.ok) {
+        console.error(pc.red(result.message));
+        return payload;
+      }
+      const shown = (file) => {
+        const relative = path.relative(process.cwd(), file);
+        return relative && !relative.startsWith("..") && !path.isAbsolute(relative) ? relative : file;
+      };
+      for (const ignored of result.ignoredPins) {
+        console.error(pc.yellow(`Ignored the kit pinned at #${ignored.sequenceId}: ${ignored.reason}.`));
+      }
+      const { source } = result;
+      console.log(
+        pc.green(`Verified the starter kit pinned at #${source.sequenceId} by ${source.pinnedBy} (room ${source.pinnedByRole}).`),
+      );
+      console.log(`sha256 ${result.sha256} (${result.archiveBytes} bytes; ${result.fileCount} files, ${result.totalBytes} bytes unpacked)`);
+      console.log(
+        result.dryRun
+          ? `Dry run, nothing written. These files would be unpacked into ${shown(result.out)}:`
+          : `Unpacked into ${shown(result.out)}:`,
+      );
+      for (const file of result.files) {
+        console.log(`  ${file.path}  ${file.bytes} bytes  sha256 ${file.sha256.slice(0, 16)}`);
+      }
+      if (result.replaced.length > 0 && !result.dryRun) {
+        console.log(pc.yellow(`Replaced ${result.replaced.length} existing file(s).`));
+      }
+      if (result.readme) {
+        console.log(
+          result.dryRun
+            ? `After a real run, start with ${shown(result.readme.file)}`
+            : `Start with ${shown(result.readme.file)}`,
+        );
       }
       return payload;
     });

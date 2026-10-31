@@ -33,6 +33,8 @@ export const SESSION_ROUTE_CLASSES = Object.freeze({
   "mcp:session_action": "legacy-data-plane",
   "mcp:session_react": "legacy-data-plane",
   "mcp:session_reply": "legacy-data-plane",
+  // Reads the pins and the member roster like `session pins`; writes only local files.
+  "mcp:session_kit": "legacy-data-plane",
   "mcp:session_lock": "control",
   "mcp:session_unlock": "control",
   "mcp:session_locks": "control",
@@ -53,6 +55,7 @@ export const SESSION_ROUTE_CLASSES = Object.freeze({
   "cli:session search": "legacy-data-plane",
   "cli:session events": "legacy-data-plane",
   "cli:session pins": "legacy-data-plane",
+  "cli:session kit": "legacy-data-plane",
   "cli:session lock": "control",
   "cli:session unlock": "control",
   "cli:session locks": "control",

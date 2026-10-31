@@ -930,6 +930,45 @@ export function buildSentinelayerSessionRegistryTemplate({ generatedAt = new Dat
         },
       },
       {
+        name: "session_kit",
+        title: "Install Senti Room Starter Kit",
+        description:
+          "Fetch the room's pinned starter kit, verify it (pinned by a human room owner or admin; sha256 matches the pinned statement) and unpack it safely into a directory inside the workspace.",
+        input_schema: {
+          type: "object",
+          additionalProperties: false,
+          required: ["sessionId"],
+          properties: {
+            sessionId: { type: "string" },
+            agentId: { type: "string" },
+            out: { type: "string" },
+            dryRun: { type: "boolean" },
+            force: { type: "boolean" },
+          },
+        },
+        transport: {
+          type: "internal",
+          method: "POST",
+          url: "sentinelayer://session/session_kit",
+          timeout_ms: 30000,
+          auth: { mode: "none" },
+        },
+        budgets: {
+          max_calls_per_run: 10,
+          max_runtime_ms: 30000,
+        },
+        security: {
+          requires_human_approval: false,
+          kill_switch: "enabled",
+          scopes: ["session:read"],
+        },
+        metadata: {
+          provider: "sentinelayer",
+          adapter: "sentinelayer-cli",
+          server: "sentinelayer-session-mcp",
+        },
+      },
+      {
         name: "attention_request",
         title: "Request Senti Attention",
         description:

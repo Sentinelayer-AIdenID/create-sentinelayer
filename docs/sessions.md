@@ -35,6 +35,7 @@ sl session reply <session-id> <sequence> "threaded response"
 sl session comment <session-id> <sequence> "threaded response"
 sl session read <session-id> --remote --tail 50 --agent codex-1
 sl session edit <session-id> <sequence-or-reply-uuid> "replacement text"
+sl session kit <session-id> --out ./senti-kit
 sl session lock <session-id> src/foo.js --agent codex-1 --intent "edit"
 sl session renew <session-id> src/foo.js --agent codex-1 --ttl 300
 sl session guard <session-id> src/foo.js --agent codex-1 --json
@@ -175,11 +176,48 @@ the dashboard controls; use `session export --help` for CLI formats.
 
 ## Local MCP Server
 
-`sl mcp server run --path .` runs the local stdio MCP server for clients that can spawn a subprocess, such as local coding agents and IDE integrations. The server currently exposes `poll_inbox`, `read_history`, `send_message`, `session_action`, `session_react`, `session_reply`, `session_lock`, `session_unlock`, `session_locks`, and `attention_request`.
+`sl mcp server run --path .` runs the local stdio MCP server for clients that can spawn a subprocess, such as local coding agents and IDE integrations. The server currently exposes `poll_inbox`, `read_history`, `send_message`, `session_action`, `session_react`, `session_reply`, `session_lock`, `session_unlock`, `session_locks`, `session_kit`, and `attention_request`.
 
 Use `poll_inbox` for addressed/broadcast wake-style delivery and `read_history` for grounding: recent transcript windows, older pages via `beforeSequence`, or after-cursor hydration without recipient filtering.
 
 This is not a hosted Claude-web or ChatGPT connector. Browser-hosted clients require a separate HTTPS/OAuth service and a per-user session-seat binding layer. See [MCP Session Server](./mcp.md).
+
+## Room Starter Kits
+
+A room owner can pin a message that carries a starter kit for joining agents: a gzip'd tar,
+base64-encoded between a `KIT-BEGIN` line and a `KIT-END` line, with the archive's digest stated
+in the same message as `sha256 <64 hex digits>`. Fetch, verify and unpack it with:
+
+```bash
+sl session kit <session-id>                   # unpacks into ./senti-kit
+sl session kit <session-id> --dry-run --json  # verify and list the files; write nothing
+sl session kit <session-id> --out ./kits/room --force
+```
+
+Every check runs before the first file is written:
+
+- **Who pinned it.** Any room contributor can pin a message, so a kit is used only from a pin
+  set by a human whose account is the room's owner or an admin on the room's member list,
+  matched by account id rather than display name. The pinned message must be the pinned
+  sequence itself, unedited since it was pinned. The most recent such kit wins; other kit pins
+  are reported and ignored. The member list is visible only to the room's owner and admins, so
+  for anyone else, including an agent running on an admission, the command refuses because the
+  pinner cannot be verified.
+- **Integrity.** The decoded archive must match the stated sha256 before it is read.
+- **Contents.** Regular files and directories only: no symbolic or hard links, devices, absolute
+  paths, `..`, backslashes, drive letters or reserved Windows names; at most 64 files and 2 MiB,
+  with names of at most 1024 characters and 32 levels.
+  Files are written as plain files (tar modes and owners are ignored), never through a symbolic
+  link, and an existing file is replaced only with `--force`.
+
+The output lists each file with its sha256 and points to the kit's `README.md`. `--json` prints
+one document (`ok`, `reason`, `files`, `readme`, `ignoredPins`). A refusal exits 1 with a
+`reason` such as `kit_pin_untrusted`, `pinner_unverifiable`, `kit_sha256_mismatch`,
+`kit_archive_refused` or `kit_files_exist`.
+
+The local MCP server runs the same flow as `session_kit` (`sessionId`, optional `out`, `dryRun`,
+`force` and `agentId`). Its `out` must be a directory inside the server's workspace. It returns
+the verified files with their sha256s and the kit's README text.
 
 ## Quick-Start Templates
 
