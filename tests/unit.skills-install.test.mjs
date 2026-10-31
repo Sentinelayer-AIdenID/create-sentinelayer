@@ -81,3 +81,14 @@ test("local skills exemption does not admit unknown or remote commands", async (
     assert.equal((await checkAuthGate(args)).authenticated, false);
   }
 });
+
+test("skills installation and listing remain direct CLI operations in the MCP bridge", async () => {
+  const { buildCliCommandMcpTools } = await import("../src/mcp/cli-command-tools.js");
+  const tools = await buildCliCommandMcpTools();
+  for (const name of ["sl.skills.install", "sl.skills.list"]) {
+    const tool = tools.find((item) => item.name === name);
+    assert.ok(tool);
+    assert.equal(tool.metadata.blocked, true);
+    assert.equal(tool.metadata.blockedReason, "blocked_sensitive_cli_command");
+  }
+});

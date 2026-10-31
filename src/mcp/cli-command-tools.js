@@ -33,6 +33,10 @@ export function selfProvisioningMcpInputSchema(tool) {
   };
 }
 const SENSITIVE_COMMAND_PATHS = new Set([
+  // Local instruction installation stays a direct CLI operation. Do not let a
+  // bridge caller choose a skills destination or replace the host's guidance.
+  "skills.install",
+  "skills.list",
   "auth.login",
   "auth.logout",
   "auth.revoke",
