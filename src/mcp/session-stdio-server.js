@@ -11,6 +11,15 @@ import {
 } from "./cli-command-tools.js";
 import { appendToStream, readStream } from "../session/stream.js";
 import { listFileLocks, lockFile, unlockFile } from "../session/file-locks.js";
+import {
+  DEFAULT_ROOM_FILES_LIMIT,
+  DEFAULT_ROOM_FILES_MAX_PAGES,
+  MAX_ROOM_FILES_LIMIT,
+  MAX_ROOM_FILES_MAX_PAGES,
+  RoomFileError,
+  downloadRoomFile,
+  listRoomFiles,
+} from "../session/room-files.js";
 import { resolveSessionDir } from "../session/paths.js";
 import { eventMatchesAgent } from "../session/listener.js";
 import { isSessionControlEvent } from "../session/control-events.js";
@@ -970,6 +979,8 @@ export function createSessionMcpToolHandlers({
   lockFileFn = lockFile,
   unlockFileFn = unlockFile,
   listFileLocksFn = listFileLocks,
+  listRoomFilesFn = listRoomFiles,
+  downloadRoomFileFn = downloadRoomFile,
   syncSessionEventToApiFn = syncSessionEventToApi,
   appendToStreamFn = appendToStream,
   sleepFn = sleep,
@@ -1307,6 +1318,57 @@ export function createSessionMcpToolHandlers({
         lockCount: Array.isArray(locks) ? locks.length : 0,
         locks: Array.isArray(locks) ? locks : [],
       };
+    },
+
+    async session_files_list(input = {}) {
+      const sessionId = requireSessionId(input, { targetPath });
+      const result = await listRoomFilesFn(sessionId, {
+        targetPath,
+        limit: input.limit,
+        maxPages: input.maxPages ?? input.max_pages,
+      });
+      return {
+        ok: Boolean(result?.ok),
+        reason: normalizeString(result?.reason),
+        sessionId,
+        count: Number(result?.count) || 0,
+        complete: Boolean(result?.complete),
+        pages: Number(result?.pages) || 0,
+        scannedEvents: Number(result?.scannedEvents) || 0,
+        files: Array.isArray(result?.files) ? result.files : [],
+      };
+    },
+
+    // Writes the file into this server's workspace and returns where; never the bytes.
+    async session_file_get(input = {}) {
+      const sessionId = requireSessionId(input, { targetPath });
+      const attachmentId = normalizeString(input.attachmentId || input.attachment_id);
+      try {
+        const result = await downloadRoomFileFn(sessionId, attachmentId, {
+          targetPath,
+          out: normalizeString(input.out),
+          force: Boolean(input.force),
+          workspaceOnly: true,
+        });
+        return {
+          ok: true,
+          reason: "",
+          sessionId,
+          attachmentId,
+          path: result.path,
+          bytes: result.bytes,
+          sha256: result.sha256,
+          verified: Boolean(result.verified),
+          overwritten: Boolean(result.overwritten),
+          linkRefetched: Boolean(result.linkRefetched),
+          attachment: result.attachment,
+        };
+      } catch (error) {
+        if (error instanceof RoomFileError) {
+          return { ok: false, reason: error.code, message: error.message, sessionId, attachmentId };
+        }
+        throw error;
+      }
     },
 
     async attention_request(input = {}) {
@@ -1666,6 +1728,50 @@ export const SESSION_MCP_TOOLS = Object.freeze([
       properties: {
         sessionId: { type: "string", minLength: 1 },
         agentId: { type: "string", minLength: 1 },
+      },
+    },
+  },
+  {
+    name: "session_files_list",
+    title: "List Senti Room Files",
+    description:
+      "List the files published in a session room, newest first: file name, size, content type, uploader, upload time, the message that published it, and the attachmentId that session_file_get downloads.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["sessionId"],
+      properties: {
+        sessionId: { type: "string", minLength: 1 },
+        agentId: { type: "string", minLength: 1 },
+        limit: { type: "integer", minimum: 1, maximum: MAX_ROOM_FILES_LIMIT, default: DEFAULT_ROOM_FILES_LIMIT },
+        maxPages: {
+          type: "integer",
+          minimum: 1,
+          maximum: MAX_ROOM_FILES_MAX_PAGES,
+          default: DEFAULT_ROOM_FILES_MAX_PAGES,
+          description: "Most pages of room history to read, 200 events each.",
+        },
+      },
+    },
+  },
+  {
+    name: "session_file_get",
+    title: "Download Senti Room File",
+    description:
+      "Download one published room file into the workspace: streamed to disk, checked against the server's sha256, and written atomically. Returns the saved path and the file's metadata, never its bytes. Refuses to overwrite an existing file unless force is true, and refuses an out path outside the workspace.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["sessionId", "attachmentId"],
+      properties: {
+        sessionId: { type: "string", minLength: 1 },
+        agentId: { type: "string", minLength: 1 },
+        attachmentId: { type: "string", pattern: "^[A-Za-z0-9._:-]{8,120}$" },
+        out: {
+          type: "string",
+          description: "File or directory inside the workspace; default: the server's file name in the workspace root.",
+        },
+        force: { type: "boolean", default: false },
       },
     },
   },

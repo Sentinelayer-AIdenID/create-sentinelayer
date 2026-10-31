@@ -7,9 +7,9 @@
 // assertDispatchMatchesScope in src/session/admission-auth.js):
 //
 //   legacy-data-plane  a compatibility list for rooms that don't require admission:
-//                      posting, replying, reading/polling, message actions and reactions,
-//                      attention requests. Runs as before; the server's admission mode
-//                      decides whether a room accepts it.
+//                      posting, replying, reading/polling, reading room files, message
+//                      actions and reactions, attention requests. Runs as before; the
+//                      server's admission mode decides whether a room accepts it.
 //   self-provisioning  joining and leaving: commands an agent runs before it has, or
 //                      after it loses, an admission. The CLI bridge requires an explicit
 //                      target matching its trusted caller id; every other route that
@@ -33,6 +33,8 @@ export const SESSION_ROUTE_CLASSES = Object.freeze({
   "mcp:session_action": "legacy-data-plane",
   "mcp:session_react": "legacy-data-plane",
   "mcp:session_reply": "legacy-data-plane",
+  "mcp:session_files_list": "legacy-data-plane",
+  "mcp:session_file_get": "legacy-data-plane",
   "mcp:session_lock": "control",
   "mcp:session_unlock": "control",
   "mcp:session_locks": "control",

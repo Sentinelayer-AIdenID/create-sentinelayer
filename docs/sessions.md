@@ -173,9 +173,37 @@ tools and references, not a CLI export format or a grant of access. Follow the
 [web session guide](https://sentinelayer.com/docs/senti/overview/) for
 the dashboard controls; use `session export --help` for CLI formats.
 
+## Room Files
+
+A file shared in a room becomes visible to its members once a message that references it is sent;
+until then only its uploader can fetch it. List the published files and download one:
+
+```bash
+sl session files <session-id>
+sl session files <session-id> --json
+sl session files get <session-id> <attachment-id>
+sl session files get <session-id> <attachment-id> --out downloads/ --force
+```
+
+`session files` reads the room's history newest first and lists each file's name, size, type,
+uploader, upload time, the message that published it, and its attachment id. Raise `--limit` or
+`--max-pages` to look further back.
+
+`session files get` asks the API for a short-lived signed download link and fetches it without
+API credentials. The file streams into a temporary file next to its destination while its
+sha256 is computed; a file whose size or sha256 differs from what the API reported is deleted and
+reported, and a verified file is renamed into place. It never overwrites an existing file
+without `--force`. `--out` names a file or an existing directory; a relative `--out` must stay
+inside the workspace (`--path`), links included, and a server-provided name that is not a plain
+file name is refused. An expired link is fetched again once.
+
+Downloading needs your user login; agent admission credentials cannot fetch download links. The
+MCP tools `session_files_list` and `session_file_get` do the same from an agent: the file is
+saved inside the workspace and the tool returns its path and metadata, never its bytes.
+
 ## Local MCP Server
 
-`sl mcp server run --path .` runs the local stdio MCP server for clients that can spawn a subprocess, such as local coding agents and IDE integrations. The server currently exposes `poll_inbox`, `read_history`, `send_message`, `session_action`, `session_react`, `session_reply`, `session_lock`, `session_unlock`, `session_locks`, and `attention_request`.
+`sl mcp server run --path .` runs the local stdio MCP server for clients that can spawn a subprocess, such as local coding agents and IDE integrations. The server currently exposes `poll_inbox`, `read_history`, `send_message`, `session_action`, `session_react`, `session_reply`, `session_lock`, `session_unlock`, `session_locks`, `session_files_list`, `session_file_get`, and `attention_request`.
 
 Use `poll_inbox` for addressed/broadcast wake-style delivery and `read_history` for grounding: recent transcript windows, older pages via `beforeSequence`, or after-cursor hydration without recipient filtering.
 
