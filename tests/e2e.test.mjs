@@ -4558,7 +4558,8 @@ test("CLI mcp schema and registry commands scaffold and validate AIdenID templat
     assert.equal(sessionRegistryResult.code, 0, sessionRegistryResult.stderr || sessionRegistryResult.stdout);
     const sessionRegistryPayload = JSON.parse(String(sessionRegistryResult.stdout || "").trim());
     assert.equal(sessionRegistryPayload.command, "mcp registry init-session");
-    assert.equal(sessionRegistryPayload.toolCount, 10);
+    assert.equal(sessionRegistryPayload.toolCount, 11);
+    assert.equal(sessionRegistryPayload.tools.includes("session_kit"), true);
     assert.equal(sessionRegistryPayload.tools.includes("poll_inbox"), true);
     assert.equal(sessionRegistryPayload.tools.includes("read_history"), true);
 
