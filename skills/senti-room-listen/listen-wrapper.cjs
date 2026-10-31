@@ -92,7 +92,7 @@ function createDelivery({ agent, stateDir, emit = console.log, flushMs = 180_000
     save();
   }
   function ingest(event, { history = false } = {}) {
-    if (stopped || !["session_message", "session_reply"].includes(event.event)) return;
+    if (stopped || !event || typeof event !== "object" || !["session_message", "session_reply"].includes(event.event)) return;
     const who = event.agent?.id || event.agentId;
     const seq = event.sequenceId;
     if (who === agent) {
@@ -172,6 +172,7 @@ function startListener({ session, agent, stateDir, emit = console.log, pollMs = 
       if (stopped) return;
       let event;
       try { event = JSON.parse(line); } catch { return; }
+      if (!event || typeof event !== "object") return;
       if (event.event === "session_listen_error") {
         if (!reportedListenError) emit("[listener-error] event delivery failed; inspect listener and admission status");
         reportedListenError = true;
@@ -206,8 +207,9 @@ function startListener({ session, agent, stateDir, emit = console.log, pollMs = 
         let data;
         try { data = JSON.parse(stdout); } catch { emit("[reply-poll-error] invalid JSON response"); }
         if (data) {
-          const events = [...(data.events || [])];
-          for (const activity of data.recentHumanActivity || []) {
+          const events = Array.isArray(data.events) ? data.events.filter((event) => event && typeof event === "object") : [];
+          for (const activity of Array.isArray(data.recentHumanActivity) ? data.recentHumanActivity : []) {
+            if (!activity || typeof activity !== "object") continue;
             const action = activity.actionType || activity.action_type;
             if (action !== "reply" && action !== "comment") continue;
             // This collection is the CLI's projection of server human activity.

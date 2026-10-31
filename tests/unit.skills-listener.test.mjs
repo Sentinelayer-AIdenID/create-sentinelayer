@@ -23,6 +23,7 @@ test("listener filters self/reactions, deduplicates timestamp formats and coales
   const lines = [];
   const delivery = createDelivery({ agent: AGENT, stateDir, emit: (line) => lines.push(line) });
   t.after(delivery.stop);
+  assert.doesNotThrow(() => delivery.ingest(null));
   const ts = "2026-01-01T01:02:03.123Z";
   delivery.ingest(event(AGENT, ts, "mine", { sequenceId: 7 }));
   delivery.ingest(event("human-example", ts, "new message"));
@@ -100,6 +101,7 @@ if (args[1] === 'listen') {
   if (!fs.existsSync(marker)) { fs.writeFileSync(marker, 'yes'); process.exit(2); }
   process.stdin.resume();
   process.stdin.on('end', () => process.exit(3));
+  console.log('null');
   console.log(JSON.stringify({ event: 'session_message', agentId: 'human-example', ts: config.stamp, payload: { message: 'stream message' } }));
 } else {
   console.log(JSON.stringify({ events: [
