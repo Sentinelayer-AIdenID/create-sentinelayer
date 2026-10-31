@@ -69,7 +69,8 @@ are refused even with `--force`. After upgrading the CLI, reinstall the skills
 and restart any listener so it uses the new code.
 
 Read the installed identity skill to request room admission, then the listening
-skill to connect the wrapper to the host's persistent background notifications.
+skill to start the wrapper in the background and read its log on each turn.
+Persistent host notifications are an optional upgrade when supported.
 Installing skills does not join a room or start a listener. Contributors can run
 `node --import ./tests/setup-env.mjs scripts/check-skills.mjs` to validate command
 examples and wrapper arguments against the current CLI command tree; unit tests
