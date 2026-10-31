@@ -1,9 +1,12 @@
 import "./setup-env.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { Writable } from "node:stream";
+import { fileURLToPath } from "node:url";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 
 import { Command } from "commander";
@@ -48,6 +51,7 @@ function longBody(chars, label = "body") {
 }
 
 const MESSAGE_40K = longBody(40_000, "whole");
+const SL_CLI_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "bin", "sl.js");
 // Built at runtime so no token-shaped literal appears in source.
 const FAKE_GITHUB_TOKEN = ["g", "hp_", "Abcdefghijklmnopqrstuvwxyz0123456789"].join("");
 // The marker the CLI used to append when it cut a message, before reads kept messages whole.
@@ -816,4 +820,137 @@ test("whole messages: session reply posts a long reply file whole and refuses on
     );
     assert.equal(actionBodies.length, 1);
   });
+});
+
+function replyActionResponse(sessionId, body) {
+  return {
+    ok: true,
+    action: {
+      id: "00000000-0000-4000-8000-000000000002",
+      sessionId,
+      actionType: "reply",
+      targetSequenceId: body.targetSequenceId,
+      actorId: "agent-a",
+      note: body.note,
+      createdAt: "2026-10-31T12:00:00.000Z",
+    },
+  };
+}
+
+test("whole messages: session reply takes exactly one body source", async () => {
+  await withTempWorkspace("whole-reply-one-source", async (tempRoot) => {
+    const session = await createSession({ targetPath: tempRoot, sessionId: "whole-reply-source", ttlSeconds: 120 });
+    const replyFile = path.join(tempRoot, "reply.md");
+    await writeFile(replyFile, "from a file", "utf-8");
+    let requests = 0;
+    globalThis.fetch = async () => {
+      requests += 1;
+      return jsonResponse({}, 500);
+    };
+    await assert.rejects(
+      () => runSessionCommand([
+        "session", "reply", session.sessionId, "5", "inline words", "--message-file", replyFile, "--agent", "agent-a", "--path", tempRoot,
+      ]),
+      /Use only one message source: positional message, --message-file, or --stdin\./,
+    );
+    await assert.rejects(
+      () => runSessionCommand(["session", "reply", session.sessionId, "5", "--agent", "agent-a", "--path", tempRoot]),
+      /message is required\./,
+    );
+    assert.equal(requests, 0);
+  });
+});
+
+test("whole messages: session comment posts a long comment file whole", async () => {
+  await withTempWorkspace("whole-comment", async (tempRoot) => {
+    const session = await createSession({ targetPath: tempRoot, sessionId: "whole-comment", ttlSeconds: 120 });
+    const commentFile = path.join(tempRoot, "comment.md");
+    await writeFile(commentFile, MESSAGE_40K, "utf-8");
+    const actionBodies = [];
+    globalThis.fetch = async (url, options = {}) => {
+      if (options.method === "POST" && String(url).endsWith(`/api/v1/sessions/${session.sessionId}/actions`)) {
+        const body = JSON.parse(options.body);
+        actionBodies.push(body);
+        return jsonResponse(replyActionResponse(session.sessionId, body), 201);
+      }
+      return jsonResponse({}, 404);
+    };
+    await runSessionCommand([
+      "session", "comment", session.sessionId, "7", "--message-file", commentFile, "--agent", "agent-a", "--path", tempRoot, "--json",
+    ]);
+    assert.equal(actionBodies.length, 1);
+    assert.equal(actionBodies[0].actionType, "reply");
+    assert.equal(actionBodies[0].note, MESSAGE_40K);
+  });
+});
+
+// Runs the real CLI in a child process, with this test process's isolated home.
+function runSlCli(args, { cwd, stdin = "", env = {} } = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [SL_CLI_PATH, ...args], {
+      cwd,
+      env: {
+        ...process.env,
+        NODE_ENV: "test",
+        SENTINELAYER_SKIP_SENTI_AUTOSTART: "1",
+        ...env,
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += String(chunk);
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+    child.on("error", reject);
+    child.on("close", (code) => resolve({ code: Number(code ?? 1), stdout, stderr }));
+    child.stdin.end(stdin);
+  });
+}
+
+test("whole messages: session reply --stdin posts a 40,000-character reply whole through the real CLI", async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "create-sentinelayer-whole-reply-stdin-"));
+  const sessionId = "whole-reply-stdin";
+  const actionBodies = [];
+  const server = createServer(async (req, res) => {
+    let raw = "";
+    for await (const chunk of req) raw += chunk;
+    if (req.method === "POST" && req.url === `/api/v1/sessions/${sessionId}/actions`) {
+      const body = JSON.parse(raw);
+      actionBodies.push(body);
+      res.writeHead(201, { "content-type": "application/json" });
+      res.end(JSON.stringify(replyActionResponse(sessionId, body)));
+      return;
+    }
+    res.writeHead(404, { "content-type": "application/json" });
+    res.end("{}");
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    await seedWorkspace(tempRoot);
+    await createSession({ targetPath: tempRoot, sessionId, ttlSeconds: 120 });
+    const result = await runSlCli(
+      ["session", "reply", sessionId, "5", "--stdin", "--agent", "agent-a", "--path", tempRoot, "--json"],
+      {
+        cwd: tempRoot,
+        stdin: MESSAGE_40K,
+        env: {
+          SENTINELAYER_API_URL: `http://127.0.0.1:${server.address().port}`,
+          SENTINELAYER_TOKEN: "whole-messages-test-placeholder",
+          SENTINELAYER_SKIP_REMOTE_SYNC: "0",
+        },
+      },
+    );
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(actionBodies.length, 1);
+    assert.equal(actionBodies[0].note, MESSAGE_40K);
+    assert.equal(JSON.parse(result.stdout).action.note, MESSAGE_40K);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await rm(tempRoot, { recursive: true, force: true });
+  }
 });
