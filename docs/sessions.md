@@ -205,7 +205,8 @@ Every check runs before the first file is written:
   pinner cannot be verified.
 - **Integrity.** The decoded archive must match the stated sha256 before it is read.
 - **Contents.** Regular files and directories only: no symbolic or hard links, devices, absolute
-  paths, `..`, backslashes, drive letters or reserved Windows names; at most 64 files and 2 MiB.
+  paths, `..`, backslashes, drive letters or reserved Windows names; at most 64 files and 2 MiB,
+  with names of at most 1024 characters and 32 levels.
   Files are written as plain files (tar modes and owners are ignored), never through a symbolic
   link, and an existing file is replaced only with `--force`.
 
