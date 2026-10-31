@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.48.0](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/compare/v0.47.0...v0.48.0) (2026-10-31)
+
+
+### Features
+
+* **engram:** EW03 site-scoped immutable snapshots + atomically published graph generations ([9d5b560](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/9d5b560187d335da7e46a8873d67af59ad289807))
+* **engram:** EW05 compile source snapshots into the canonical capability graph ([#871](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/issues/871)) ([36c4e49](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/36c4e49ce40414ae8eb1fb31fdedebbd57e6383a))
+* **engram:** EW06 site retrieval: identifier-first, site-link expansion, generation-bound cursors ([#873](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/issues/873)) ([41544ec](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/41544ec2a7712826675245b807e214e2c2364cf8))
+* **engram:** EW08 capability index and site-skill documents ([#874](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/issues/874)) ([225aaf2](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/225aaf23377c980aa448be0739083aa0201a5d16))
+* **engram:** EW14 live state: hydrate volatile values, clear on outage, revalidate before acting ([#875](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/issues/875)) ([75d4ae4](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/75d4ae4a55cc7fc198ff401cdec0a28a6d86aba6))
+* **engram:** safe source reader, HTML/JSON-LD extraction, site ingestion (EW04 phase 1) ([#869](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/issues/869)) ([533e37e](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/533e37e30beed54768f452daca0e0e684b5a354b))
+* **engram:** site-scoped immutable snapshots and atomically published graph generations ([8be5bdf](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/8be5bdf1a8ae5c7135065f18c7541f9b7e7f7657))
+* **session:** add sl session events, one raw and verifiable history page ([#867](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/issues/867)) ([c45ab66](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/c45ab6615cfbfc45b001108297e5cd81f7d78700))
+* **session:** create tickets with authorized actor and source ([#850](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/issues/850)) ([143081e](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/143081e9824e9d51512f03f2756599947f7be3c7))
+
+
+### Bug Fixes
+
+* **auth:** serialize complete session-store operations ([#855](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/issues/855)) ([3a7b34e](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/3a7b34e71195faa93da35b98746c1638fbb32432))
+* bind rollback input and remove false secret hit ([fcb0912](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/fcb0912835a3c81d9e346f5c175ac73be87cfe60))
+* **board:** honor JSON output selected by global options ([c11ca85](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/c11ca8567ac5ea505e7f3e5877190ad3d8e2bd31))
+* **board:** honor JSON output selected by global options ([6b2654d](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/6b2654d82fcc8cd15a34b2e9e7387dc785f53cff))
+* **ci:** make the Omar artifact scan's token and assignment patterns match ([#880](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/issues/880)) ([0ddfe7e](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/0ddfe7e766e6759fc3937e1d992fb6111127a8ed))
+* **engram:** bind entity facts and close review contract gaps ([faa7ff8](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/faa7ff86c6b80419f8efa266879f21fbe7665d7a))
+* **engram:** compile common product markup instead of rejecting the whole graph ([#876](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/issues/876)) ([f3a45b2](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/f3a45b2ca130e9c8bf27066c69cd2e8df9df47a9))
+* **engram:** compile schema.org prices into canonical money objects ([#872](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/issues/872)) ([b48642e](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/b48642e9c8f1bbd79e28b31b3ab0ae86a7396951))
+* **engram:** enforce money contracts across compound fact names ([971459b](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/971459b517f91f61ecdeecad660dd9329faa2e01))
+* **engram:** give every memory namespace its own storage directory ([#870](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/issues/870)) ([5e1a3d8](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/5e1a3d87b6118b5acfa3542397aafb90c6eda1de))
+* **engram:** reject invalid money formatting and late entity evidence ([76490b9](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/76490b9ca6de177d40e6f84eea8ff6300e8e7aec))
+* **gh:** close API path segment census ([628f96c](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/628f96c191640b03b4f6a167f0a5dc5299a8f338))
+* **gh:** close API path segment census ([b401cb6](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/b401cb6a0f4036622c2b2d903e49f5fbac0ca8ab))
+* **init:** keep the project token out of .sentinelayer/config.json ([#882](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/issues/882)) ([b326f55](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/b326f559b092a545a42c5d161dc03f7bb021b669))
+* **release:** pin verified tag objects before publication ([#860](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/issues/860)) ([4a76a8e](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/4a76a8e3979cf7630aeb3a826d5c76a647376f5d))
+* **runtime-audit:** use pinned local Lighthouse CLI ([c97aa3c](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/c97aa3c7ef8584f9fa824d8711589d7ffcd5087b))
+* **session:** caller-bound CLI and MCP self-provisioning ([aa68b9f](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/aa68b9f9908454a04c2da2b3ca9ddacf73676592))
+* **session:** recover and report refused listener presence ([#883](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/issues/883)) ([9ef6485](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/9ef6485ea17da204cad71af9384aa09ab8b0a517))
+
 ## [0.47.0](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/compare/v0.46.5...v0.47.0) (2026-10-18)
 
 
