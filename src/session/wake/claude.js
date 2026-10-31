@@ -19,6 +19,9 @@
 
 import { execFile } from "node:child_process";
 
+import { boundToServerLimit } from "../message-limits.js";
+import { promptFitsArgv, sendPromptOnStdin } from "./prompt-transport.js";
+
 export const hostName = "claude";
 
 const DEFAULT_CLAUDE_BIN = "claude";
@@ -28,7 +31,6 @@ const DEFAULT_ASYNC_HOOK_TIMEOUT_S = 600;
 // without progress; our release helper mirrors that cap so a parked session
 // can never wedge itself.
 const STOP_BLOCK_CAP = 8;
-const MAX_MESSAGE_CHARS = 16_000;
 
 function requireNonEmptyString(value, label) {
   if (typeof value !== "string" || value.trim() === "") {
@@ -39,19 +41,21 @@ function requireNonEmptyString(value, label) {
 
 function normalizeMessage(message) {
   const text = requireNonEmptyString(message, "message");
-  // Cap length so a runaway event payload can't blow the argv / context.
-  return text.length > MAX_MESSAGE_CHARS ? text.slice(0, MAX_MESSAGE_CHARS) : text;
+  // The message is delivered whole; only text over the server limit, which the server never
+  // returns, is cut, with an explicit marker.
+  return boundToServerLimit(text).text;
 }
 
 /**
- * Build the `claude` argv for a daemon-owned resume wake. Returns a plain
- * argument array so callers invoke it via execFile (no shell), which is what
- * keeps an untrusted event message from being interpreted as a command.
+ * Build the `claude` invocation for a daemon-owned resume wake: a plain argument array, so
+ * callers invoke it via execFile (no shell), which keeps an untrusted event message from being
+ * interpreted as a command. A long prompt in print mode is returned as `stdin` instead of an
+ * argument (print mode reads its prompt from stdin), so it reaches the host whole.
  *
  * @param {{ sessionId: string, message: string, print?: boolean, extraArgs?: string[] }} opts
- * @returns {string[]}
+ * @returns {{ args: string[], stdin: string|null }}
  */
-export function buildResumeArgs({ sessionId, message, print = true, extraArgs = [] } = {}) {
+export function buildResumeInvocation({ sessionId, message, print = true, extraArgs = [] } = {}) {
   requireNonEmptyString(sessionId, "sessionId");
   const text = normalizeMessage(message);
   if (!Array.isArray(extraArgs) || extraArgs.some((a) => typeof a !== "string")) {
@@ -60,8 +64,22 @@ export function buildResumeArgs({ sessionId, message, print = true, extraArgs = 
   const args = ["--resume", sessionId, ...extraArgs];
   // `-p` runs headless/non-interactive, which is what a daemon-driven wake wants.
   if (print) args.push("-p");
+  if (print && !promptFitsArgv(text)) {
+    return { args, stdin: text };
+  }
   args.push(text);
-  return args;
+  return { args, stdin: null };
+}
+
+/**
+ * The argv of buildResumeInvocation. For a long prompt in print mode the prompt is not among
+ * these arguments; it must be written to stdin (wake() does this).
+ *
+ * @param {{ sessionId: string, message: string, print?: boolean, extraArgs?: string[] }} opts
+ * @returns {string[]}
+ */
+export function buildResumeArgs(options = {}) {
+  return buildResumeInvocation(options).args;
 }
 
 /**
@@ -118,8 +136,9 @@ export function installWakeHook({ command, timeoutSeconds, event = "Stop" } = {}
 /**
  * Shared-interface method the L2 daemon calls. Deterministic external wake =
  * daemon-owned resume: spawn `claude --resume <id> <message>` via execFile
- * (argv array, no shell). Resolves to a structured result; never throws for a
- * non-zero exit — the daemon inspects `ok` and decides whether to retry.
+ * (argv array, no shell); a long message goes to the child's stdin instead.
+ * Resolves to a structured result; never throws for a non-zero exit — the
+ * daemon inspects `ok` and decides whether to retry.
  *
  * @param {{ sessionId: string, message: string, print?: boolean, extraArgs?: string[] }} target
  * @param {{ execFileImpl?: Function, claudeBin?: string, timeoutMs?: number, env?: object }} [deps]
@@ -134,31 +153,41 @@ export function wake(target = {}, deps = {}) {
   } = deps;
 
   // Build args first so validation errors reject the promise deterministically.
-  let args;
+  let invocation;
   try {
-    args = buildResumeArgs(target);
+    invocation = buildResumeInvocation(target);
   } catch (error) {
     return Promise.reject(error);
   }
   const sessionId = target.sessionId;
 
   return new Promise((resolve) => {
-    execFileImpl(
+    let settled = false;
+    const settle = (result) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+    const child = execFileImpl(
       claudeBin,
-      args,
+      invocation.args,
       { timeout: timeoutMs, env, windowsHide: true },
       (error, _stdout, stderr) => {
         if (!error) {
-          resolve({ ok: true, hostName, sessionId, code: 0, reason: null });
+          settle({ ok: true, hostName, sessionId, code: 0, reason: null });
           return;
         }
         const code = typeof error.code === "number" ? error.code : null;
         const reason = error.killed
           ? "resume_timeout"
           : (typeof stderr === "string" && stderr.trim()) || error.message || "resume_failed";
-        resolve({ ok: false, hostName, sessionId, code, reason });
+        settle({ ok: false, hostName, sessionId, code, reason });
       }
     );
+    if (invocation.stdin !== null) {
+      const failure = sendPromptOnStdin(child, invocation.stdin);
+      if (failure) settle({ ok: false, hostName, sessionId, code: null, reason: failure });
+    }
   });
 }
 
@@ -167,6 +196,7 @@ export const claudeWakeAdapter = {
   installWakeHook,
   wake,
   buildResumeArgs,
+  buildResumeInvocation,
   buildAsyncRewakeHook,
   buildStopBlockDecision,
   shouldReleaseStopBlock,

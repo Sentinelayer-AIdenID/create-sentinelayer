@@ -37,11 +37,21 @@ import {
   syncSessionEventToApi,
   updateSessionReadCursor,
 } from "../session/sync.js";
+import {
+  DEFAULT_READ_PAGE_MAX_CHARS,
+  SERVER_MESSAGE_MAX_CHARS,
+  assertMessageWithinServerLimit,
+  boundToServerLimit,
+  formatCount,
+  normalizeReadPageMaxChars,
+  takeWholeItemsWithinBudget,
+} from "../session/message-limits.js";
 
 export const SESSION_MCP_SERVER_NAME = "sentinelayer-session-mcp";
 export const SESSION_MCP_PROTOCOL_VERSION = "2025-06-18";
 
-const MAX_MESSAGE_CHARS = 16_000;
+// ENGRAM memory items keep their own size limit; session messages use SERVER_MESSAGE_MAX_CHARS.
+const MEMORY_ITEM_MAX_CHARS = 16_000;
 const MAX_TOOL_LIMIT = 200;
 const DEFAULT_TOOL_LIMIT = 50;
 const SESSION_MCP_CONFIRM_ATTEMPTS = 3;
@@ -111,15 +121,17 @@ function normalizeLimit(value) {
   return Math.max(1, Math.min(MAX_TOOL_LIMIT, normalizePositiveInteger(value, DEFAULT_TOOL_LIMIT)));
 }
 
-function truncateText(value, maxChars = MAX_MESSAGE_CHARS) {
-  const normalized = normalizeString(value);
-  if (normalized.length <= maxChars) {
-    return { text: normalized, truncated: false };
-  }
-  return {
-    text: normalized.slice(0, maxChars),
-    truncated: true,
-  };
+// Read paths deliver a message whole; only text over the server limit, which the server never
+// returns, is cut, with an explicit marker (see message-limits.js).
+function wholeText(value) {
+  return boundToServerLimit(normalizeString(value)).text;
+}
+
+// Send paths refuse text over the server limit instead of cutting or splitting it.
+function requireTextWithinServerLimit(value, what) {
+  const text = normalizeString(value);
+  assertMessageWithinServerLimit(text, { what });
+  return text;
 }
 
 function normalizeRecipients(value) {
@@ -178,9 +190,7 @@ function safePayload(payload = {}) {
   if (!isPlainObject(payload)) return {};
   const next = { ...payload };
   if (typeof next.message === "string") {
-    const truncated = truncateText(next.message, MAX_MESSAGE_CHARS);
-    next.message = truncated.text;
-    if (truncated.truncated) next.truncated = true;
+    next.message = wholeText(next.message);
   }
   return next;
 }
@@ -226,6 +236,18 @@ function latestReadCursorTarget(events = [], fallbackCursor = "") {
   return targetSequenceId || targetCursor
     ? { targetSequenceId, targetCursor }
     : null;
+}
+
+// What a bundled read reports about its page budget. A page that ended early says where the
+// next call resumes: after `cursor` (forward reads) or before `beforeSequence` (tail reads).
+function readPageBudgetSummary(page, resume = {}) {
+  return cleanObject({
+    maxChars: page.maxChars,
+    usedChars: page.usedChars,
+    complete: page.complete,
+    omittedEventCount: page.omittedCount,
+    resume: page.complete ? undefined : cleanObject(resume),
+  });
 }
 
 function sessionEventMatchesClientMessageId(event, clientMessageId) {
@@ -468,7 +490,7 @@ function summarizeMessageActionActivity(action = {}) {
     actorKind: normalizeString(action.actorKind || action.actor_kind),
     actorId: normalizeString(action.actorId || action.actor_id),
     actorRole: normalizeString(action.actorRole || action.actor_role),
-    note: truncateText(action.note || action.message || "").text,
+    note: wholeText(action.note || action.message || ""),
     createdAt: normalizeString(action.createdAt || action.created_at || action.ts || action.timestamp),
     activityType: normalizeString(action.activityType || action.activity_type) || "message_action",
     isHumanActivity: isHumanMessageAction(action),
@@ -683,20 +705,21 @@ function buildSessionMessageEvent({
   uuid = randomUUID,
   extraPayload = {},
 } = {}) {
-  const messageShape = truncateText(message);
-  if (!messageShape.text) {
+  const text = normalizeString(message);
+  if (!text) {
     throw new Error("message is required.");
   }
+  // One message, never cut or split: over the server limit it is refused.
+  assertMessageWithinServerLimit(text, { what: "message" });
 
   const eventId = normalizeString(idempotencyKey) || `mcp-${event}-${uuid()}`;
   const payload = cleanObject({
-    message: messageShape.text,
+    message: text,
     channel: "session",
     source: "mcp",
     clientKind: "mcp",
     to: recipients.length > 0 ? recipients : undefined,
     priority: normalizeString(priority) || undefined,
-    truncated: messageShape.truncated || undefined,
     ...extraPayload,
     clientMessageId: eventId,
   });
@@ -722,7 +745,10 @@ async function runSessionAction({
   const agentId = requireAgentId(input);
   const normalizedActionType = normalizeSessionMessageActionType(actionType || input.actionType || input.action_type);
   const target = requireSessionActionTarget(input);
-  const normalizedNote = truncateText(note || input.note || input.message || input.text || "").text;
+  const normalizedNote = requireTextWithinServerLimit(
+    note || input.note || input.message || input.text || "",
+    normalizedActionType === "reply" ? "reply" : "note",
+  );
   if (isSessionReactionType(normalizedActionType)) {
     // The same path as the native CLI: canonical fail-closed admission, a fresh
     // operation key per new intent (an explicit idempotencyKey is a retry), and a
@@ -1030,11 +1056,24 @@ export function createSessionMcpToolHandlers({
         };
       }
 
-      const events = (Array.isArray(result.events) ? result.events : []).filter((event) => {
+      const rawEvents = Array.isArray(result.events) ? result.events : [];
+      const inboxEvents = rawEvents.filter((event) => {
         if (!includeControlEvents && isSessionControlEvent(event)) return false;
         if (!includeSelf && eventAgentId(event) === agentId) return false;
         return eventMatchesAgent(event, agentId);
       });
+      // Whole messages only: the page ends before the first message that would not fit the
+      // budget, and the cursor stops there so the next poll starts with that message.
+      const page = takeWholeItemsWithinBudget(
+        inboxEvents.map((event) => (includeRaw ? event : summarizeSessionEvent(event))),
+        { maxChars: normalizeReadPageMaxChars(input.maxChars ?? input.max_chars) },
+      );
+      let consumedEvents = rawEvents;
+      let pageCursor = normalizeString(result.cursor) || cursor;
+      if (!page.complete) {
+        consumedEvents = rawEvents.slice(0, rawEvents.indexOf(inboxEvents[page.items.length]));
+        pageCursor = normalizeString(consumedEvents[consumedEvents.length - 1]?.cursor) || cursor;
+      }
       const actionResult = includeActions
         ? await listSessionMessageActionsFn(sessionId, {
             targetPath,
@@ -1045,7 +1084,7 @@ export function createSessionMcpToolHandlers({
       const recentHumanActivity = actionResult?.ok
         ? recentHumanActivityFromActions(actionResult, { limit: actionLimit })
         : [];
-      const readTarget = latestReadCursorTarget(result.events, result.cursor);
+      const readTarget = latestReadCursorTarget(consumedEvents, page.complete ? result.cursor : pageCursor);
       const readCursor = readTarget
         ? await updateSessionReadCursorFn(sessionId, {
             targetPath,
@@ -1059,9 +1098,10 @@ export function createSessionMcpToolHandlers({
         reason: "",
         sessionId,
         agentId,
-        cursor: normalizeString(result.cursor) || cursor,
-        eventCount: Array.isArray(result.events) ? result.events.length : 0,
-        inboxCount: events.length,
+        cursor: pageCursor,
+        eventCount: consumedEvents.length,
+        inboxCount: page.items.length,
+        pageBudget: readPageBudgetSummary(page, { cursor: pageCursor }),
         recentHumanActivityCount: recentHumanActivity.length,
         recentHumanActivity,
         readCursor,
@@ -1072,7 +1112,7 @@ export function createSessionMcpToolHandlers({
               count: Array.isArray(actionResult.actions) ? actionResult.actions.length : 0,
             }
           : null,
-        events: includeRaw ? events : events.map((event) => summarizeSessionEvent(event)),
+        events: page.items,
       };
     },
 
@@ -1118,7 +1158,24 @@ export function createSessionMcpToolHandlers({
         };
       }
 
-      const events = Array.isArray(result.events) ? result.events : [];
+      const windowEvents = Array.isArray(result.events) ? result.events : [];
+      // Whole messages only. A forward (cursor) read keeps the oldest messages and resumes after
+      // the last one kept; a tail read keeps the newest and pages back before the first one kept.
+      const forward = Boolean(cursor);
+      const page = takeWholeItemsWithinBudget(
+        windowEvents.map((event) => (includeRaw ? event : summarizeSessionEvent(event))),
+        { maxChars: normalizeReadPageMaxChars(input.maxChars ?? input.max_chars), fromEnd: !forward },
+      );
+      const events = forward
+        ? windowEvents.slice(0, page.items.length)
+        : windowEvents.slice(windowEvents.length - page.items.length);
+      let pageCursor = normalizeString(result.cursor) || cursor;
+      let pageBeforeSequence = normalizePositiveInteger(result.beforeSequence || result.before_sequence, null);
+      if (!page.complete && forward) {
+        pageCursor = normalizeString(events[events.length - 1]?.cursor) || cursor;
+      } else if (!page.complete) {
+        pageBeforeSequence = normalizePositiveInteger(events[0]?.sequenceId ?? events[0]?.sequence_id, null);
+      }
       const actionResult = includeActions
         ? await listSessionMessageActionsFn(sessionId, {
             targetPath,
@@ -1136,7 +1193,7 @@ export function createSessionMcpToolHandlers({
         process.env.SENTINELAYER_AGENT_ID,
         "",
       );
-      const readTarget = latestReadCursorTarget(events, result.cursor);
+      const readTarget = latestReadCursorTarget(events, page.complete ? result.cursor : pageCursor);
       const readCursor = readTarget
         ? await updateSessionReadCursorFn(sessionId, {
             targetPath,
@@ -1150,11 +1207,15 @@ export function createSessionMcpToolHandlers({
         reason: "",
         sessionId,
         source: result.source,
-        cursor: normalizeString(result.cursor) || cursor,
-        beforeSequence: normalizePositiveInteger(result.beforeSequence || result.before_sequence, null),
+        cursor: pageCursor,
+        beforeSequence: pageBeforeSequence,
         eventCount: normalizePositiveInteger(result.eventCount, 0),
         materialEventCount: events.length,
         pageCount: normalizePositiveInteger(result.pages, 0),
+        pageBudget: readPageBudgetSummary(
+          page,
+          forward ? { cursor: pageCursor } : { beforeSequence: pageBeforeSequence || undefined },
+        ),
         recentHumanActivityCount: recentHumanActivity.length,
         recentHumanActivity,
         readCursor,
@@ -1165,7 +1226,7 @@ export function createSessionMcpToolHandlers({
               count: Array.isArray(actionResult.actions) ? actionResult.actions.length : 0,
             }
           : null,
-        events: includeRaw ? events : events.map((event) => summarizeSessionEvent(event)),
+        events: page.items,
       };
     },
 
@@ -1396,7 +1457,7 @@ export const SESSION_MCP_TOOLS = Object.freeze([
             type: "object",
             required: ["text"],
             properties: {
-              text: { type: "string", minLength: 1, maxLength: MAX_MESSAGE_CHARS },
+              text: { type: "string", minLength: 1, maxLength: MEMORY_ITEM_MAX_CHARS },
               kind: { type: "string" },
               topics: { type: "array", items: { type: "string" } },
               files: { type: "array", items: { type: "string" } },
@@ -1451,7 +1512,7 @@ export const SESSION_MCP_TOOLS = Object.freeze([
     name: "poll_inbox",
     title: "Poll Senti Inbox",
     description:
-      "Poll durable SentinelLayer session events after an optional cursor, return only events addressed or visible to the agent, and advance one monotonic read cursor.",
+      "Poll durable SentinelLayer session events after an optional cursor, return only events addressed or visible to the agent, and advance one monotonic read cursor. Every message arrives whole; when the next whole message would push the page past maxChars the page ends and the returned cursor resumes with that message.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -1466,6 +1527,12 @@ export const SESSION_MCP_TOOLS = Object.freeze([
         includeSelf: { type: "boolean", default: false },
         includeControlEvents: { type: "boolean", default: false },
         includeRaw: { type: "boolean", default: false },
+        maxChars: {
+          type: "integer",
+          minimum: 1,
+          default: DEFAULT_READ_PAGE_MAX_CHARS,
+          description: "Page budget in characters. Messages are never split: a single larger message still arrives whole in its own page.",
+        },
       },
     },
   },
@@ -1473,7 +1540,7 @@ export const SESSION_MCP_TOOLS = Object.freeze([
     name: "read_history",
     title: "Read Senti History",
     description:
-      "Hydrate a bounded recent, older, or after-cursor session transcript window and advance one monotonic read cursor without appending view events.",
+      "Hydrate a bounded recent, older, or after-cursor session transcript window and advance one monotonic read cursor without appending view events. Every message arrives whole; when the next whole message would push the page past maxChars the page ends early and pageBudget.resume says where the next call continues.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -1488,6 +1555,12 @@ export const SESSION_MCP_TOOLS = Object.freeze([
         includeActions: { type: "boolean", default: true },
         includeControlEvents: { type: "boolean", default: false },
         includeRaw: { type: "boolean", default: false },
+        maxChars: {
+          type: "integer",
+          minimum: 1,
+          default: DEFAULT_READ_PAGE_MAX_CHARS,
+          description: "Page budget in characters. Messages are never split: a single larger message still arrives whole in its own page.",
+        },
       },
     },
   },
@@ -1495,7 +1568,7 @@ export const SESSION_MCP_TOOLS = Object.freeze([
     name: "send_message",
     title: "Send Senti Message",
     description:
-      "Send an authenticated agent session_message through the canonical SentinelLayer session event API.",
+      `Send an authenticated agent session_message through the canonical SentinelLayer session event API. Send long content as ONE message of up to ${formatCount(SERVER_MESSAGE_MAX_CHARS)} characters; never split it into parts. Longer text is refused: attach it to the room as a file instead.`,
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -1503,7 +1576,7 @@ export const SESSION_MCP_TOOLS = Object.freeze([
       properties: {
         sessionId: { type: "string", minLength: 1 },
         agentId: { type: "string", minLength: 1 },
-        message: { type: "string", minLength: 1, maxLength: MAX_MESSAGE_CHARS },
+        message: { type: "string", minLength: 1, maxLength: SERVER_MESSAGE_MAX_CHARS },
         to: {
           anyOf: [
             { type: "string" },
@@ -1534,7 +1607,7 @@ export const SESSION_MCP_TOOLS = Object.freeze([
         targetSequenceId: { type: "integer", minimum: 1 },
         targetCursor: { type: "string" },
         targetActionId: { type: "string" },
-        note: { type: "string", maxLength: MAX_MESSAGE_CHARS },
+        note: { type: "string", maxLength: SERVER_MESSAGE_MAX_CHARS },
         idempotencyKey: { type: "string" },
         timeoutMs: { type: "integer", minimum: 1, default: 15000 },
         dryRun: { type: "boolean", default: false },
@@ -1567,7 +1640,7 @@ export const SESSION_MCP_TOOLS = Object.freeze([
     name: "session_reply",
     title: "Reply In Senti Thread",
     description:
-      "Add a threaded reply/comment under a specific session event using the session action channel.",
+      `Add a threaded reply/comment under a specific session event using the session action channel. A reply holds up to ${formatCount(SERVER_MESSAGE_MAX_CHARS)} characters and is never split.`,
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -1578,7 +1651,7 @@ export const SESSION_MCP_TOOLS = Object.freeze([
         targetSequenceId: { type: "integer", minimum: 1 },
         targetCursor: { type: "string" },
         targetActionId: { type: "string" },
-        message: { type: "string", minLength: 1, maxLength: MAX_MESSAGE_CHARS },
+        message: { type: "string", minLength: 1, maxLength: SERVER_MESSAGE_MAX_CHARS },
         idempotencyKey: { type: "string" },
         timeoutMs: { type: "integer", minimum: 1, default: 15000 },
         dryRun: { type: "boolean", default: false },
@@ -1681,7 +1754,7 @@ export const SESSION_MCP_TOOLS = Object.freeze([
       properties: {
         sessionId: { type: "string", minLength: 1 },
         agentId: { type: "string", minLength: 1 },
-        message: { type: "string", minLength: 1, maxLength: MAX_MESSAGE_CHARS },
+        message: { type: "string", minLength: 1, maxLength: SERVER_MESSAGE_MAX_CHARS },
         to: {
           anyOf: [
             { type: "string" },

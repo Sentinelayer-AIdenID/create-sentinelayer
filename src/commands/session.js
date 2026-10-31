@@ -164,6 +164,14 @@ import { mergeLiveSources } from "../session/live-source.js";
 import { listenSessionEvents } from "../session/listener.js";
 import { SESSION_LIVE_SUCCESS_TIPS } from "../session/coordination-guidance.js";
 import {
+  DEFAULT_READ_PAGE_MAX_CHARS,
+  SERVER_MESSAGE_MAX_CHARS,
+  argvMessageWarning,
+  assertMessageWithinServerLimit,
+  formatCount,
+  takeWholeItemsWithinBudget,
+} from "../session/message-limits.js";
+import {
   DEFAULT_ROTATING_LOG_MAX_BYTES,
   DEFAULT_ROTATING_LOG_MAX_FILES,
   installRotatingConsoleLog,
@@ -270,8 +278,23 @@ async function resolveSessionSayMessageInput(messageParts, options = {}) {
   if (hasStdin) {
     return normalizeString(await readUtf8FromStdin());
   }
-  return normalizeString(joinMessageParts(messageParts));
+  const message = normalizeString(joinMessageParts(messageParts));
+  const warning = argvMessageWarning(message);
+  if (warning) {
+    console.error(pc.yellow(warning));
+  }
+  return message;
 }
+
+// Help shared by the commands that post a message or a reply.
+const LONG_MESSAGE_HELP = [
+  "",
+  "Long messages:",
+  `  Post long content as ONE message with --message-file <path> or --stdin, up to ${formatCount(SERVER_MESSAGE_MAX_CHARS)} characters.`,
+  "  Never split it into parts: readers get every message whole.",
+  "  A long message given as command-line words can be cut silently by the shell on Windows.",
+  `  Over ${formatCount(SERVER_MESSAGE_MAX_CHARS)} characters the CLI refuses the message; attach the full text to the room as a file instead.`,
+].join("\n");
 
 function optionWasSetByCli(command, optionName) {
   if (!command || typeof command.getOptionValueSource !== "function") {
@@ -3878,7 +3901,8 @@ export function registerSessionCommand(program) {
 
   session
     .command("say <sessionId> [message...]")
-    .description("Send a message to the session")
+    .description(`Send one message to the session (whole, up to ${formatCount(SERVER_MESSAGE_MAX_CHARS)} characters)`)
+    .addHelpText("after", LONG_MESSAGE_HELP)
     .option(
       "--agent <id>",
       "Agent id to emit from; defaults to SENTINELAYER_AGENT_ID, then the sole local joined agent, then cli-user",
@@ -3901,7 +3925,7 @@ export function registerSessionCommand(program) {
     .option("--to <agent>", "Direct the message to a specific agent id")
     .option("--reply-to <sequence>", "Mark this message as a reply to a target sequence id")
     .option("--reply-cursor <cursor>", "Mark this message as a reply to a target event cursor")
-    .option("--message-file <path>", "Read the message body from a UTF-8 file")
+    .option("--message-file <path>", "Read the message body from a UTF-8 file (the way to post long content)")
     .option("--stdin", "Read the message body from stdin")
     .option("--force-cli-user", "Allow fallback sends as cli-user when no agent identity can be resolved")
     .option("--local-only", "Append only to the local session cache without remote send confirmation")
@@ -3917,6 +3941,7 @@ export function registerSessionCommand(program) {
       if (!normalizedMessage) {
         throw new Error("message is required.");
       }
+      assertMessageWithinServerLimit(normalizedMessage, { what: "message" });
       const targetPath = path.resolve(process.cwd(), String(options.path || "."));
       const identity = await resolveSessionSayIdentity({
         sessionId: normalizedSessionId,
@@ -4040,13 +4065,16 @@ export function registerSessionCommand(program) {
     }));
 
   session
-    .command("post-agent <sessionId> <message>")
+    .command("post-agent <sessionId> [message]")
     .description("Post an authenticated agent message through the canonical session event API")
+    .addHelpText("after", LONG_MESSAGE_HELP)
     .requiredOption("--agent <id>", "Granted agent id to post as")
     .option("--model <model>", "Agent model/provider hint", "cli")
     .option("--display-name <name>", "Human-readable agent display name")
     .option("--role <role>", "Agent role metadata: coder, reviewer, tester, observer", "coder")
     .option("--to <agent>", "Direct the message to a specific agent id")
+    .option("--message-file <path>", "Read the message body from a UTF-8 file (the way to post long content)")
+    .option("--stdin", "Read the message body from stdin")
     .option("--no-auto-grant", "Skip auto-grant on 403 IDENTITY_FORGERY; fail immediately instead")
     .option("--path <path>", "Workspace path for the session", ".")
     .option("--json", "Emit machine-readable output")
@@ -4055,10 +4083,11 @@ export function registerSessionCommand(program) {
       if (!normalizedSessionId) {
         throw new Error("session id is required.");
       }
-      const normalizedMessage = normalizeString(message);
+      const normalizedMessage = await resolveSessionSayMessageInput(message, options);
       if (!normalizedMessage) {
         throw new Error("message is required.");
       }
+      assertMessageWithinServerLimit(normalizedMessage, { what: "message" });
       const targetPath = path.resolve(process.cwd(), String(options.path || "."));
       const agentId = normalizeAgentId(options.agent, "");
       if (!agentId || agentId === "cli-user" || agentId === "unknown" || agentId.startsWith("human-")) {
@@ -4369,8 +4398,10 @@ export function registerSessionCommand(program) {
     if (!targetSequenceId && !targetCursor && !targetActionId) {
       throw new Error("Provide --target-sequence, --target-cursor, or --target-action-id.");
     }
-    await ensureLocalSessionForRemoteCommand(normalizedSessionId, { targetPath });
     const note = normalizeString(noteOverride) || normalizeString(options.note);
+    // One reply or note, never cut or split: over the server limit it is refused.
+    assertMessageWithinServerLimit(note, { what: normalizedActionType === "reply" ? "reply" : "note" });
+    await ensureLocalSessionForRemoteCommand(normalizedSessionId, { targetPath });
     // Resolve the authoring agent. The bare `cli-user` default is rejected by
     // the API (api_422); resolveMessageActionIdentity treats it as unset and
     // falls back to the joined agent. If no concrete identity resolves, fail
@@ -4638,14 +4669,20 @@ export function registerSessionCommand(program) {
     });
 
   session
-    .command("reply <sessionId> <targetSequenceId> <message...>")
+    .command("reply <sessionId> <targetSequenceId> [message...]")
     .description("Reply to a target session event using the message-action channel")
+    .addHelpText("after", LONG_MESSAGE_HELP)
+    .option("--message-file <path>", "Read the reply body from a UTF-8 file (the way to post long content)")
+    .option("--stdin", "Read the reply body from stdin")
     .option("--agent <id>", "Agent id authoring the action (defaults to the joined session agent)")
     .option("--idempotency-key <key>", "Explicit idempotency key")
     .option("--path <path>", "Workspace path for the session", ".")
     .option("--json", "Emit machine-readable output")
     .action(async (sessionId, targetSequenceId, messageParts, options, command) => {
-      const message = Array.isArray(messageParts) ? messageParts.join(" ") : messageParts;
+      const message = await resolveSessionSayMessageInput(messageParts, options);
+      if (!message) {
+        throw new Error("message is required.");
+      }
       await runMessageActionCommand({
         sessionId,
         actionType: "reply",
@@ -4658,14 +4695,20 @@ export function registerSessionCommand(program) {
     });
 
   session
-    .command("comment <sessionId> <targetSequenceId> <message...>")
+    .command("comment <sessionId> <targetSequenceId> [message...]")
     .description("Alias for `session reply`; add a threaded comment to a target event")
+    .addHelpText("after", LONG_MESSAGE_HELP)
+    .option("--message-file <path>", "Read the comment body from a UTF-8 file (the way to post long content)")
+    .option("--stdin", "Read the comment body from stdin")
     .option("--agent <id>", "Agent id authoring the action (defaults to the joined session agent)")
     .option("--idempotency-key <key>", "Explicit idempotency key")
     .option("--path <path>", "Workspace path for the session", ".")
     .option("--json", "Emit machine-readable output")
     .action(async (sessionId, targetSequenceId, messageParts, options, command) => {
-      const message = Array.isArray(messageParts) ? messageParts.join(" ") : messageParts;
+      const message = await resolveSessionSayMessageInput(messageParts, options);
+      if (!message) {
+        throw new Error("message is required.");
+      }
       await runMessageActionCommand({
         sessionId,
         actionType: "reply",
@@ -6525,6 +6568,10 @@ export function registerSessionCommand(program) {
     .option("--agent <id>", "Agent id for automatic view receipts", process.env.SENTINELAYER_AGENT_ID || "cli-user")
     .option("--no-view", "Do not record automatic view receipts for displayed remote messages")
     .option("--include-control-events", "Include listener lifecycle/control-plane events in transcript output")
+    .option(
+      "--max-chars <n>",
+      `Page budget in characters (default ${DEFAULT_READ_PAGE_MAX_CHARS}): the page ends before the next whole message that would not fit; messages are never split`,
+    )
     .option("--path <path>", "Workspace path for the session", ".")
     .option("--json", "Emit machine-readable output")
     .action(asAdmittedAgent(sessionReadAgent, async (sessionId, options, command) => {
@@ -6534,6 +6581,7 @@ export function registerSessionCommand(program) {
       }
       const targetPath = path.resolve(process.cwd(), String(options.path || "."));
       const tail = parsePositiveInteger(options.tail, "tail", 20);
+      const maxChars = parsePositiveInteger(options.maxChars, "max-chars", DEFAULT_READ_PAGE_MAX_CHARS);
       const beforeSequence = parseOptionalPositiveInteger(options.beforeSequence, "before-sequence");
       const emitJson = shouldEmitJson(options, command);
       const includeControlEvents = Boolean(options.includeControlEvents);
@@ -6711,7 +6759,20 @@ export function registerSessionCommand(program) {
         const actionEvents = remoteWindowRead
           ? filterSessionActionEventsForTranscriptWindow(visibleActionEvents, transcriptEvents)
           : visibleActionEvents;
-        const events = mergeSessionActionEvents(transcriptEvents, actionEvents).slice(-tail);
+        // Whole messages only: keep the newest events that fit the page budget and say where
+        // to page back for the rest.
+        const page = takeWholeItemsWithinBudget(
+          mergeSessionActionEvents(transcriptEvents, actionEvents).slice(-tail),
+          { maxChars, fromEnd: true },
+        );
+        const events = page.items;
+        const pageBudget = {
+          maxChars: page.maxChars,
+          usedChars: page.usedChars,
+          complete: page.complete,
+          omittedEventCount: page.omittedCount,
+          nextBeforeSequence: page.complete ? null : eventSequenceNumber(events[0]) || null,
+        };
         const autoView = recordSessionReadCursor(normalizedSessionId, events, {
           targetPath,
           agentId: readAgentId,
@@ -6730,6 +6791,7 @@ export function registerSessionCommand(program) {
           beforeSequence,
           count: events.length,
           events,
+          pageBudget,
           includeControlEvents,
           hiddenControlEventCount,
           unacknowledgedHumanMessageCount: unacknowledgedHumanMessages.length,
@@ -6799,6 +6861,16 @@ export function registerSessionCommand(program) {
           for (const action of recentHumanActivity.slice(0, 3)) {
             console.log(pc.yellow(`- ${formatMessageActionActivityLine(action)}`));
           }
+        }
+        if (!pageBudget.complete) {
+          const more = pageBudget.nextBeforeSequence
+            ? `page back with --remote --before-sequence ${pageBudget.nextBeforeSequence}, or raise --max-chars.`
+            : "raise --max-chars or lower --tail to see them.";
+          console.log(
+            pc.gray(
+              `${pageBudget.omittedEventCount} older event(s) left out so this page stays within ${formatCount(pageBudget.maxChars)} characters with every message whole; ${more}`,
+            ),
+          );
         }
         for (const event of events) {
           console.log(formatEventLine(event));

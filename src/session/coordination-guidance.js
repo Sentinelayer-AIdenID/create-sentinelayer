@@ -1,4 +1,8 @@
+import { SERVER_MESSAGE_MAX_CHARS, formatCount } from "./message-limits.js";
+
 export const COORDINATION_GUIDANCE_TITLE = "Multi-Agent Coordination Protocol";
+
+const LONG_MESSAGE_LIMIT_TEXT = `up to ${formatCount(SERVER_MESSAGE_MAX_CHARS)} characters`;
 
 export const COORDINATION_ETIQUETTE_ITEMS = Object.freeze([
   "Find the recent Senti session for this codebase: run `sl session list --path .` and `sl session list --remote --path .`; join the right room with `sl session join <id> --name <your-name> --role coder`.",
@@ -10,7 +14,7 @@ export const COORDINATION_ETIQUETTE_ITEMS = Object.freeze([
   "Use message actions for low-noise coordination before posting a new top-level message: `sl session react <id> ack --target-sequence <n>` only when an explicit ACK is useful, `sl session action <id> working_on --target-sequence <n>` for ownership, and `sl session reply <id> <sequence> \"<message>\"` / `sl session comment <id> <sequence> \"<message>\"` for threaded responses. `sl session read <id> --remote --agent <your-name>` advances one monotonic per-agent delivery cursor for the displayed window; it never appends per-message view events or proves human viewing. Correct your own message with `sl session edit <id> <sequence-or-reply-uuid> \"<replacement>\"`; edits retain audit history and notify recipients. Run `sl session actions` for the full list.",
   "Search before asking peers to restate context: `sl session search <id> \"<topic>\" --limit 10`.",
   "Run `sl review --diff` after each finished file or PR-ready diff and post the result summary back to the session.",
-  "Post findings through `sl session say <id> \"finding: [P2] <title> in <file>:<line>\"` with enough context for a peer to act.",
+  `Post findings through \`sl session say <id> "finding: [P2] <title> in <file>:<line>"\` with enough context for a peer to act. Post long content as ONE message with \`--message-file <path>\` or \`--stdin\` (${LONG_MESSAGE_LIMIT_TEXT}); never split it into parts, because readers get every message whole.`,
   "Ask for help in-session instead of stopping on unexpected file changes, blocked context, or ambiguous ownership.",
   "Offer non-conflicting follow-up work to peers when you finish your claimed scope or discover separable tasks.",
   "Run `sl --help` when you hit an unfamiliar workflow before guessing at command syntax.",
@@ -31,6 +35,7 @@ export const SESSION_LIVE_SUCCESS_TIPS = Object.freeze([
   "Say what you're doing: claim work with `sl session action <id> working_on --target-sequence <n>`.",
   'Reply in-thread with `sl session reply <id> <seq> "..."`; start a new top-level post only when needed.',
   "Post findings and blockers in-session, and ask for help instead of stalling.",
+  `Post long content as ONE message with \`sl session say <id> --message-file <path>\` (${LONG_MESSAGE_LIMIT_TEXT}); never split it into parts.`,
   "Prefer low-noise actions over new top-level messages; run `sl session actions` for the full list.",
 ]);
 

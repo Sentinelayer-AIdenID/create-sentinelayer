@@ -47,10 +47,11 @@ test("Unit claude wake: buildResumeArgs rejects empty sessionId/message", () => 
   assert.throws(() => buildResumeArgs({ sessionId: "s", message: "  " }), TypeError);
 });
 
-test("Unit claude wake: buildResumeArgs caps an oversized message", () => {
+test("Unit claude wake: a long message stays whole and moves from argv to stdin", () => {
   const big = "x".repeat(20_000);
   const args = buildResumeArgs({ sessionId: "s", message: big });
-  assert.equal(args.at(-1).length, 16_000);
+  assert.deepEqual(args, ["--resume", "s", "-p"]);
+  assert.equal(args.some((arg) => arg.length > 100), false);
 });
 
 test("Unit claude wake: buildAsyncRewakeHook encodes the verified contract", () => {

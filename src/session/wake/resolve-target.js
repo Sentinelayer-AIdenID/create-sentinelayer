@@ -16,11 +16,11 @@
 // transitive graph (auth/sync/`open`/...) into the wake daemon. The matcher
 // here is small enough to own.
 
+import { boundToServerLimit } from "../message-limits.js";
 import { messageRevision, sessionMessageEditSnapshot, sessionMessageRoutingEvent } from "../message-edits.js";
 
 const BROADCAST_RECIPIENTS = new Set(["*", "all", "broadcast", "everyone", "anyone", "agents", "all-agents"]);
 const DEFAULT_WAKE_EVENT_TYPES = new Set(["session_message", "help_request", "session_message_edited"]);
-const MAX_WAKE_MESSAGE_CHARS = 16_000;
 
 function requireNonEmptyString(value, label) {
   if (typeof value !== "string" || value.trim() === "") {
@@ -99,10 +99,11 @@ function matchesAgent(event, selfLower) {
 function defaultFormatMessage(event, agentId) {
   const author = agentIdOf(event) || "unknown";
   const text = event?.payload?.message ?? event?.message ?? "";
-  const body = typeof text === "string" ? text : "";
+  // The message is delivered whole; only text over the server limit, which the server never
+  // returns, is cut, with an explicit marker. The host adapter sends a long prompt over stdin.
+  const body = typeof text === "string" ? boundToServerLimit(text).text : "";
   const head = `Senti wake for ${agentId}: ${event.event === "session_message_edited" ? "edited message" : "new message"} from ${author}.`;
-  const combined = body ? `${head}\n\n${body}` : head;
-  return combined.length > MAX_WAKE_MESSAGE_CHARS ? combined.slice(0, MAX_WAKE_MESSAGE_CHARS) : combined;
+  return body ? `${head}\n\n${body}` : head;
 }
 
 /**

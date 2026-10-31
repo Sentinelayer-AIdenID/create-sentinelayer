@@ -27,6 +27,7 @@ sl session access approve <session-id> <admission-id> --scope session.read,sessi
 sl session access deny <session-id> <admission-id> --note "Out of scope"
 sl session access revoke <session-id> <admission-id> --reason "Work complete"
 sl session say <session-id> "PR #123 opened" --agent codex-1
+sl session say <session-id> --message-file ./review.md --agent codex-1
 sl session actions
 sl session react <session-id> ack --target-sequence <n>
 sl session react <session-id> unlike --target-sequence <n>
@@ -59,6 +60,24 @@ subcommand for its current flags. On Windows PowerShell, use `sl.cmd` when
 `sl session listen` is only a delivery cursor. Agents should `join` or run `sl session recap now <session-id> --remote --agent <name> --json` before acting when they need grounding. Long-running listeners are one-per-session/agent by default: a second local `listen` refuses to start while the first pid is alive. Use `--force` to stop and replace an existing local owner, `--allow-duplicate` only for deliberate parallel wake hooks, and `sl session listeners <session-id>` / `sl session stop-listener <session-id> --agent <name>` to inspect or stop remote listener presence. If the local process check cannot complete (for example on a very busy machine), `listen` checks once more with a longer time limit and then refuses to start rather than guess. `--allow-duplicate` skips the check. `--force` does not: it still replaces a listener it can verify from its pid record, but it never starts without an answer.
 
 Use `sl session listen --session <session-id> --agent <name> --presence-check` to read the server roster once after the first presence renewal. Text output says whether the agent is listed; NDJSON emits `session_presence_check` with `payload.present` set to `true`, `false`, or `null` when presence is unknown. With `--no-presence`, the check only reads the roster. Renewal failures are reported on stderr. A 403 `AGENT_IDENTITY_REQUIRED` triggers one retry with only `agentId` and `model`; later renewals in that listener use the same minimal payload and credential. This compatibility mode relies on the server TTL to expire presence after the listener exits.
+
+## Long Messages
+
+Every read path delivers a message whole: `session read` (local and `--remote`), the local
+session store, the MCP `read_history` and `poll_inbox` tools, the human-message relay, and the
+wake prompts. The server stores up to 64,000 characters per message, and so does every reader.
+
+- Post long content as ONE message with `--message-file <path>` or `--stdin`, up to 64,000
+  characters: `sl session say <session-id> --message-file ./review.md`. The same options work
+  for `session post-agent`, `session reply`, and `session comment`. Never split a message into
+  "part 1, part 2" posts.
+- A long message given as command-line words can be cut silently by the shell on Windows; the
+  CLI warns when one is longer than 30,000 characters.
+- Over 64,000 characters the CLI refuses the message with an error. Attach the full text to the
+  room as a file instead.
+- A read that bundles many messages (`session read --tail`, MCP `read_history`) holds whole
+  messages only. When the next message would push the page past its budget (`--max-chars`,
+  default 256,000), the page ends there and says how to page back; it never cuts a message.
 
 ## Agent Admission
 

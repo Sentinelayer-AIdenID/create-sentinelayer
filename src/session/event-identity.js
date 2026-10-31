@@ -24,10 +24,40 @@ export function sessionEventHasDurableCursor(event = {}) {
   return Boolean(keyString(event?.cursor));
 }
 
+// Before every read path kept messages whole, the CLI could store a long message cut short: the
+// local redactor kept 16,384 characters and appended LEGACY_CUT_MARKER, and the human-message
+// relay kept 2,000 characters and set payload.truncated. A whole copy of the same message at
+// the same revision replaces such a cut copy.
+const LEGACY_CUT_MARKER = "…[truncated]";
+
+function payloadBodyText(event = {}) {
+  const payload = event?.payload && typeof event.payload === "object" ? event.payload : {};
+  for (const value of [payload.message, payload.note, payload.text]) {
+    if (typeof value === "string") return value;
+  }
+  return "";
+}
+
+function isCutCopy(event = {}) {
+  const payload = event?.payload && typeof event.payload === "object" ? event.payload : {};
+  return payload.truncated === true || payloadBodyText(event).endsWith(LEGACY_CUT_MARKER);
+}
+
+/**
+ * True when candidateEvent is a whole copy of a message that existingEvent holds cut short.
+ */
+export function sessionEventRestoresCutCopy(existingEvent = {}, candidateEvent = {}) {
+  if (!isCutCopy(existingEvent) || isCutCopy(candidateEvent)) return false;
+  const cutText = payloadBodyText(existingEvent);
+  const keptText = cutText.endsWith(LEGACY_CUT_MARKER) ? cutText.slice(0, -LEGACY_CUT_MARKER.length) : cutText;
+  return payloadBodyText(candidateEvent).length > keptText.length;
+}
+
 export function sessionEventUpgradesExisting(existingEvent = {}, candidateEvent = {}) {
   const existingRevision = Number(existingEvent.messageRevision ?? 1);
   const candidateRevision = Number(candidateEvent.messageRevision ?? 1);
   if (candidateRevision !== existingRevision) return candidateRevision > existingRevision;
+  if (sessionEventRestoresCutCopy(existingEvent, candidateEvent)) return true;
   const existingSequence = readSessionEventSequence(existingEvent);
   const candidateSequence = readSessionEventSequence(candidateEvent);
   if (candidateSequence > 0 && existingSequence <= 0) {
@@ -91,7 +121,8 @@ function mergeDuplicateEvent(existingEvent = {}, candidateEvent = {}) {
   const existingRevision = Number(existingEvent.messageRevision ?? 1);
   const candidateRevision = Number(candidateEvent.messageRevision ?? 1);
   const differentRevision = existingRevision !== candidateRevision;
-  const candidateIsPrimary = differentRevision ? candidateRevision > existingRevision : candidateScore > existingScore || (
+  const restoresCutCopy = !differentRevision && sessionEventRestoresCutCopy(existingEvent, candidateEvent);
+  const candidateIsPrimary = differentRevision ? candidateRevision > existingRevision : restoresCutCopy || candidateScore > existingScore || (
     candidateScore === existingScore &&
     sessionEventUpgradesExisting(existingEvent, candidateEvent)
   ) || (
@@ -100,13 +131,21 @@ function mergeDuplicateEvent(existingEvent = {}, candidateEvent = {}) {
   );
   const primaryEvent = candidateIsPrimary ? candidateEvent : existingEvent;
   const secondaryEvent = candidateIsPrimary ? existingEvent : candidateEvent;
+  // Revision snapshots replace, rather than merge, the body/routing fields.
+  let payload = differentRevision
+    ? primaryEvent.payload
+    : mergeObjectPreferringPrimary(primaryEvent.payload, secondaryEvent.payload);
+  if (restoresCutCopy && payload && typeof payload === "object" && !Object.hasOwn(candidateEvent.payload || {}, "truncated")) {
+    // The whole copy must not inherit the cut copy's truncated flag.
+    payload = { ...payload };
+    delete payload.truncated;
+  }
 
   return {
     ...secondaryEvent,
     ...primaryEvent,
     agent: mergeObjectPreferringPrimary(primaryEvent.agent, secondaryEvent.agent),
-    // Revision snapshots replace, rather than merge, the body/routing fields.
-    payload: differentRevision ? primaryEvent.payload : mergeObjectPreferringPrimary(primaryEvent.payload, secondaryEvent.payload),
+    payload,
   };
 }
 

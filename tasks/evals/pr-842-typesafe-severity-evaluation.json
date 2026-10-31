@@ -14,7 +14,7 @@
       "src/commands/omargate.js": "5ccbf2f1bb3f2f1e9ed5e35a8a8197bfc2b1cb699365987a2a979caf834c3567",
       "src/commands/legacy-args.js": "83772b6ccd5765d1a0bd1f3ee3eefcf5c1fdaf4e9fb1a301c0312b286dbc0d29",
       "src/legacy-cli.js": "524941d7e3b292b257fd3efc2d4e6945a3621d0ad96f1d6da1041034e4a2036e",
-      "src/session/redact.js": "a92cd2e70b165e4e015edcbeff1d3119c3b1f091ef72654e776c0139ace663a2"
+      "src/session/redact.js": "4ecd21e05186c3167772aabae5b907f2b1402dd146a743ef0043bea2fed65db3"
     },
     "testPath": "tests/unit.typesafe-severity.test.mjs",
     "testSha256": "a1bbdb78a7e271d8bd183da13abe007473e0bc33968230680caefc94a6f4e86d",
@@ -139,6 +139,18 @@
         "src/legacy-cli.js": "524941d7e3b292b257fd3efc2d4e6945a3621d0ad96f1d6da1041034e4a2036e"
       },
       "scope": "Only `sl init` project setup changed in src/legacy-cli.js: the token is no longer written to .sentinelayer/config.json, .sentinelayer/ is added to .gitignore in existing repos, and a tracked config.json is reported. The severity classification path, all seven synthetic cases, inputs, mock responses, expectations, invariants, the other six implementation hashes and the test bytes are unchanged; the contract suite reruns against the current binding.",
+      "provenance": "Prior bindings remain historical anchors. This refresh binds the current source after CRLF-to-LF normalization only; it is not model accuracy, live-provider, billing or new security-acceptance evidence."
+    },
+    "wholeMessageRedactionMaintenance": {
+      "kind": "unrelated_source_binding_refresh",
+      "baseRevision": "9ef6485ea17da204cad71af9384aa09ab8b0a517",
+      "priorSha256": {
+        "src/session/redact.js": "a92cd2e70b165e4e015edcbeff1d3119c3b1f091ef72654e776c0139ace663a2"
+      },
+      "currentSha256": {
+        "src/session/redact.js": "4ecd21e05186c3167772aabae5b907f2b1402dd146a743ef0043bea2fed65db3"
+      },
+      "scope": "Only the session payload redactor changed in src/session/redact.js: it now redacts secret-like patterns over the whole string and no longer cuts strings at 16,384 characters. A string within the server's 64,000-character message limit stays whole; a longer one is cut after redaction with an explicit marker. containsSecret and the secret-like pattern the severity classifier relies on are unchanged. All seven synthetic cases, inputs, mock responses, expectations, invariants, the other six implementation hashes and the test bytes are unchanged; the contract suite reruns against the current binding.",
       "provenance": "Prior bindings remain historical anchors. This refresh binds the current source after CRLF-to-LF normalization only; it is not model accuracy, live-provider, billing or new security-acceptance evidence."
     }
   },
