@@ -1,9 +1,14 @@
 ---
 name: sentinelayer-cli
-description: Use the installed Sentinelayer CLI for room coordination, project review and local skill installation, checking live command help before choosing options.
+description: Use when the user explicitly requests Sentinelayer CLI help, room coordination, skill installation or a Sentinelayer review of an authorized repository. Check the installed command help before choosing options.
 ---
 
 # Sentinelayer CLI
+
+Run scan, review or audit commands only when the user explicitly asks, and only
+on a repository the user says they own or are authorized to scan. A mention of
+security scanning alone is not a request to run it. If the request or repository
+authorization is missing, ask for that information before running those commands.
 
 This skill ships with the CLI it describes. Use `sl --version` to identify that
 installation and `sl --help` to discover its command groups. The package also
