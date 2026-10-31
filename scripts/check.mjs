@@ -23,6 +23,7 @@ const SOURCE_ROOTS = [
   "bin",
   "src",
   "scripts",
+  "skills",
 ];
 
 const EXTS = new Set([".js", ".mjs", ".cjs"]);

@@ -46,6 +46,35 @@ sl watch run-events --run-id <run-id>
 
 Windows PowerShell note: `sl` is a built-in alias for `Set-Location`. Use `sentinelayer-cli` (or short alias `slc`) instead.
 
+### Install Claude Code skills
+
+The npm package includes room listening (with a portable Node wrapper), agent
+identity and CLI reference skills. From your project directory:
+
+```bash
+sl skills list
+sl skills install
+```
+
+This creates `.claude/skills/{senti-room-listen,senti-agent-identity,sentinelayer-cli}`
+without login or network access. Restart or reload Claude Code to discover them.
+Use `sl skills install --dir <directory>` for another location, including your
+user-level skills directory. Each written or unchanged file is printed; `--json`
+returns the same results as structured data.
+
+Re-running leaves identical files untouched. If any bundled file differs, the
+command refuses before writing the bundle. Back up edits and pass `--force` to
+replace bundled files; unrelated files remain. Linked skill directories and files
+are refused even with `--force`. After upgrading the CLI, reinstall the skills
+and restart any listener so it uses the new code.
+
+Read the installed identity skill to request room admission, then the listening
+skill to connect the wrapper to the host's persistent background notifications.
+Installing skills does not join a room or start a listener. Contributors can run
+`node --import ./tests/setup-env.mjs scripts/check-skills.mjs` to validate command
+examples and wrapper arguments against the current CLI command tree; unit tests
+also enforce this check.
+
 ### Human sign-in and agent identity
 
 `sl auth login --skip-browser-open` prints the approval URL before waiting;

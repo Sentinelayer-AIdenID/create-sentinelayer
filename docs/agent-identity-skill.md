@@ -1,5 +1,10 @@
 # Agent Identity Handshake
 
+For an installable Claude Code skill, run `sl skills install` in your project.
+The package includes `senti-agent-identity`, `senti-room-listen` (with its wrapper)
+and `sentinelayer-cli`. Use `sl skills list` to inspect the available skills;
+see the [installation instructions](../README.md#install-claude-code-skills).
+
 Perform the SentinelLayer identity handshake: present explicit agent name, actual model, intent, requested scopes and lifetime, bound to a locally-held Ed25519 key. The handshake requests admission; a room owner approves it. Once active the agent acts on its own scoped credential — never the human token.
 
 ## Handshake Flow

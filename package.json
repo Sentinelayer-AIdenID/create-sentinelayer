@@ -8,9 +8,9 @@
     "devtestbot:install-browsers": "playwright install chromium ffmpeg",
     "docs:build": "node scripts/docs-build.mjs",
     "test": "npm run test:unit && npm run test:e2e",
-    "test:unit": "node --import ./tests/setup-env.mjs --test tests/unit*.test.mjs",
-    "test:e2e": "node --import ./tests/setup-env.mjs --test tests/e2e*.test.mjs",
-    "test:coverage": "c8 node --import ./tests/setup-env.mjs --test tests/unit*.test.mjs",
+    "test:unit": "node --import ./tests/setup-env.mjs --test --test-concurrency=2 tests/unit*.test.mjs",
+    "test:e2e": "node --import ./tests/setup-env.mjs --test --test-concurrency=2 tests/e2e*.test.mjs",
+    "test:coverage": "c8 node --import ./tests/setup-env.mjs --test --test-concurrency=2 tests/unit*.test.mjs",
     "verify": "npm run check && npm run docs:build && npm run test:e2e && npm run test:coverage && npm pack --dry-run",
     "release:publish": "node scripts/release-publish.mjs",
     "test:conformance": "node --import ./tests/setup-env.mjs --test tests/conformance.engram-21-3.test.mjs"
@@ -26,6 +26,7 @@
   "files": [
     "bin",
     "src",
+    "skills",
     "README.md"
   ],
   "engines": {

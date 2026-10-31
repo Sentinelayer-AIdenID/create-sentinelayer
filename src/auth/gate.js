@@ -368,6 +368,12 @@ export async function checkAuthGate(args) {
     return { authenticated: true, session: null, bypassReason: "no_auth_required", failureReason: null };
   }
 
+  // Installing bundled files and listing them need no account or network access.
+  // Keep this limited to the two local actions, not future skills subcommands.
+  if (args[0] === "skills" && ["install", "list"].includes(args[1])) {
+    return { authenticated: true, session: null, bypassReason: "local_skills", failureReason: null };
+  }
+
   if (isSessionNoAuthCommand(args)) {
     return { authenticated: true, session: null, bypassReason: "session_no_auth_required", failureReason: null };
   }
