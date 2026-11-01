@@ -11,6 +11,33 @@ CLI binaries:
 - `sentinel` (legacy alias)
 - `sl` (short alias)
 
+## Install agent skills
+
+The npm package includes `senti-agent-identity`, `senti-room-notifications` and
+`sentinelayer-cli`, with the notification wrapper and its checks.
+
+```bash
+sl skills install
+sl skills list
+sl skills install --dir ./agent-skills --json
+sl skills list --dir ./agent-skills --json
+```
+
+Installation defaults to `~/.claude/skills/<name>/` and prints the destination.
+These commands work offline without login. Installation copies files only; configure
+and start the notification wrapper separately as described in its skill.
+
+Identical files are left untouched. If any bundled destination file differs,
+installation refuses before writing any skill files. Review your local edits before
+using `sl skills install --force` to replace them. This also applies when upgrading
+from an older bundled version. Unrelated local files are preserved; symlinks at
+bundled destination paths are refused even with `--force`.
+
+`list` shows each bundled skill's version and SHA-256 hash, the installed version
+and hash when present, and whether it is missing, modified or invalid. Versions live
+in each skill's `metadata.version`. Hashes cover sorted relative file names and their
+SHA-256 content hashes, including helper files and any extra installed files.
+
 ## What it does
 
 - runs an interactive project interview

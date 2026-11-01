@@ -17,6 +17,7 @@ import { isAuthenticated } from "./credential-destinations.js";
  * - auth login, auth status, auth --help
  * - --help, --version, -h, -v
  * - config (read-only config inspection)
+ * - skills install/list (local packaged files only)
  *
  * All other commands require a valid session.
  * If not authenticated, prints instructions and exits.
@@ -31,7 +32,7 @@ const AUTH_BYPASS_COMMANDS = new Set([
   "-v",
 ]);
 
-// Commands that work without auth (read-only, no API calls)
+// Commands that work without auth (local only, no API calls)
 const NO_AUTH_REQUIRED = new Set([
   "config",    // local config inspection
 ]);
@@ -366,6 +367,11 @@ export async function checkAuthGate(args) {
 
   if (NO_AUTH_REQUIRED.has(first)) {
     return { authenticated: true, session: null, bypassReason: "no_auth_required", failureReason: null };
+  }
+
+  // These two commands only inspect/copy packaged files. Future skills subcommands stay gated.
+  if (args[0] === "skills" && (args[1] === "install" || args[1] === "list")) {
+    return { authenticated: true, session: null, bypassReason: "local_skills", failureReason: null };
   }
 
   if (isSessionNoAuthCommand(args)) {

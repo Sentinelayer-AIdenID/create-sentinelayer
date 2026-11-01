@@ -27,6 +27,10 @@ function buildSessionCoordinationSection() {
   return `${SECTION_START_MARKER}
 ${SECTION_HEADING}
 
+### Agent Skills
+Install the bundled Senti identity, notification and CLI guides with \`sl skills install\`.
+Use \`sl skills list\` to inspect installed versions and hashes.
+
 ### Required Etiquette
 ${renderCoordinationBulletList()}
 

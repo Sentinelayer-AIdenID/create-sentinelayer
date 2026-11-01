@@ -71,6 +71,8 @@ test("Unit session setup-guides: generation is idempotent and emits one coordina
 
     assert.equal(countCoordinationMarkers(firstAgents), 1);
     assert.equal(countCoordinationMarkers(firstClaude), 1);
+    assert.match(firstAgents, /sl skills install/);
+    assert.match(firstClaude, /sl skills install/);
     assert.match(firstGuide, /SentinelLayer Session Guide for AI Agents/);
     assert.match(firstAgents, /Find the recent Senti session for this codebase/);
     assert.match(firstAgents, /sl session action <id> working_on --target-sequence <n>/);
@@ -187,6 +189,7 @@ test("Unit session setup-guides: `session setup-guides` command emits JSON paylo
     ]);
     const firstPayload = JSON.parse(firstOutput);
     assert.equal(firstPayload.command, "session setup-guides");
+    assert.equal(firstPayload.skillsInstallCommand, "sl skills install");
     assert.equal(firstPayload.sessionId, session.sessionId);
     assert.equal(firstPayload.agents.changed, true);
     assert.equal(firstPayload.claude.changed, true);
@@ -207,6 +210,10 @@ test("Unit session setup-guides: `session setup-guides` command emits JSON paylo
     assert.equal(secondPayload.sessionGuide.changed, false);
     assert.equal(secondPayload.agents.sectionCount, 1);
     assert.equal(secondPayload.claude.sectionCount, 1);
+    const textOutput = await runSessionCommand([
+      "session", "setup-guides", session.sessionId, "--path", tempRoot,
+    ]);
+    assert.match(textOutput, /sl skills install/);
   } finally {
     await rm(tempRoot, { recursive: true, force: true });
   }

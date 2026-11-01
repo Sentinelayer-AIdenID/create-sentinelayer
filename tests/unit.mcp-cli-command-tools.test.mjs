@@ -154,6 +154,8 @@ test("Unit MCP CLI command tools: blocks sensitive AIdenID commands in the real 
   });
   const byName = new Map(tools.map((tool) => [tool.name, tool]));
   const expectedBlocked = [
+    "sl.skills.install",
+    "sl.skills.list",
     "sl.mcp.token.mint",
     "sl.ai.provision-email",
     "sl.ai.identity.provision",

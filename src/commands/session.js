@@ -8840,6 +8840,7 @@ Guide: https://sentinelayer.com/docs/senti/overview/
       });
       const payload = {
         command: "session setup-guides",
+        skillsInstallCommand: "sl skills install",
         targetPath,
         sessionId: normalizedSessionId,
         sectionHeading: result.sectionHeading,
@@ -8853,6 +8854,7 @@ Guide: https://sentinelayer.com/docs/senti/overview/
       }
 
       console.log(pc.bold(`Session guide sync complete for ${normalizedSessionId}`));
+      console.log("Install bundled Senti agent skills: sl skills install");
       console.log(pc.gray(`AGENTS.md: changed=${result.agents.changed} path=${result.agents.path}`));
       console.log(pc.gray(`CLAUDE.md: changed=${result.claude.changed} path=${result.claude.path}`));
       console.log(
