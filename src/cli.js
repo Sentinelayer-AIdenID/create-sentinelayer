@@ -5,6 +5,11 @@ import { CLI_VERSION, runLegacyCliWithErrorHandling } from "./legacy-cli.js";
 import { restrictProgramLookupToPath } from "./program-lookup.js";
 
 const COMMAND_REGISTRARS = {
+  skills: {
+    loader: () => import("./commands/skills.js"),
+    exportName: "registerSkillsCommand",
+    needsLegacy: false,
+  },
   init: {
     loader: () => import("./commands/init.js"),
     exportName: "registerInitCommand",
@@ -274,6 +279,11 @@ export async function runCli(rawArgs = process.argv.slice(2)) {
 
   if (shouldBypassCommander(normalizedArgs)) {
     await runLegacyCliWithErrorHandling(normalizedArgs);
+    if (["--help", "-h", "help"].includes(normalizedArgs[0])) {
+      console.log("\nAgent Skills:");
+      console.log("  sl skills install [--dir <path>] [--force] [--json]  Install bundled Senti skills");
+      console.log("  sl skills list [--dir <path>] [--json]  Show bundled and installed versions/hashes");
+    }
     return;
   }
 

@@ -33,6 +33,9 @@ export function selfProvisioningMcpInputSchema(tool) {
   };
 }
 const SENSITIVE_COMMAND_PATHS = new Set([
+  // Skill installation and inspection use user-selected local paths; keep them on the direct CLI.
+  "skills.install",
+  "skills.list",
   "auth.login",
   "auth.logout",
   "auth.revoke",
