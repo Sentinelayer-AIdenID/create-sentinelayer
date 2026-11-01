@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
-import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import fsp, { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 
 import { Command } from "commander";
 
@@ -333,6 +333,97 @@ test("room files: an existing file is kept unless --force, and --force replaces 
       assert.equal(forced.overwritten, true);
       assert.deepEqual(await readFile(existing), REPORT);
       assert.deepEqual(await leftoverTemporaryFiles(workspace), []);
+    } finally {
+      fake.restore();
+    }
+  });
+});
+
+/**
+ * Holds every lstat of a file named `name`, after it has looked, until the test releases it: the
+ * window between a download's existence check and what the download does next. next() gives the
+ * held checks in the order they arrive.
+ */
+function holdExistenceChecks(t, name) {
+  const lstat = fsp.lstat;
+  const held = [];
+  const takers = [];
+  t.mock.method(fsp, "lstat", async (target, ...rest) => {
+    const looked = await lstat.call(fsp, target, ...rest).then((stats) => ({ stats }), (error) => ({ error }));
+    if (path.basename(String(target)) === name) {
+      await new Promise((release) => {
+        const check = { sawFile: looked.error?.code !== "ENOENT", release };
+        if (takers.length > 0) takers.shift()(check);
+        else held.push(check);
+      });
+    }
+    if (looked.error) throw looked.error;
+    return looked.stats;
+  });
+  return { next: () => (held.length > 0 ? Promise.resolve(held.shift()) : new Promise((take) => takers.push(take))) };
+}
+
+/**
+ * Two downloads to one path, interleaved so that both pass the last existence check before either
+ * publishes. Then the first publishes its file, and after it the second.
+ */
+async function downloadTwicePastTheLastCheck(t, workspace) {
+  const checks = holdExistenceChecks(t, "shared.bin");
+  const download = (attachmentId) =>
+    downloadRoomFile(SESSION_ID, attachmentId, { targetPath: workspace, out: "shared.bin" }).then(
+      (saved) => ({ saved }),
+      (error) => ({ error }),
+    );
+
+  const first = download("att-image-0002");
+  (await checks.next()).release(); // the first download's check before it fetches the file
+  const firstLastCheck = await checks.next(); // and its last check, before it publishes
+  const second = download("att-report-0001");
+  (await checks.next()).release();
+  const secondLastCheck = await checks.next();
+  assert.equal(firstLastCheck.sawFile, false);
+  assert.equal(secondLastCheck.sawFile, false, "both downloads passed the last existence check");
+
+  firstLastCheck.release();
+  const firstOutcome = await first;
+  secondLastCheck.release();
+  const secondOutcome = await second;
+  return { destination: path.join(await realDirectory(workspace), "shared.bin"), firstOutcome, secondOutcome };
+}
+
+test("room files: of two downloads that both pass the last existence check, the second refuses and keeps the first's file", { timeout: 30_000 }, async (t) => {
+  await withWorkspace("room-files-race", async ({ workspace }) => {
+    const fake = installFakeApi();
+    try {
+      const { destination, firstOutcome, secondOutcome } = await downloadTwicePastTheLastCheck(t, workspace);
+      assert.ifError(firstOutcome.error);
+      assert.equal(firstOutcome.saved.path, destination);
+      assert.equal(sha256(await readFile(destination)), sha256(IMAGE), "the destination keeps the first download's bytes exactly");
+      assert.ok(secondOutcome.error instanceof RoomFileError, "the second download refuses instead of replacing the file");
+      assert.equal(secondOutcome.error.code, "destination_exists");
+      assert.match(secondOutcome.error.message, /appeared during the download; pass --force to overwrite it\./);
+      assert.deepEqual(await readdir(workspace), ["shared.bin"], "no temporary file is left behind");
+    } finally {
+      fake.restore();
+    }
+  });
+});
+
+test("room files: where hard links are refused, a download is copied into place and still never replaces a file", { timeout: 30_000 }, async (t) => {
+  await withWorkspace("room-files-race-copy", async ({ workspace }) => {
+    const link = t.mock.method(fsp, "link", async () => {
+      throw Object.assign(new Error("EPERM: operation not permitted, link"), { code: "EPERM" });
+    });
+    const fake = installFakeApi();
+    try {
+      const { destination, firstOutcome, secondOutcome } = await downloadTwicePastTheLastCheck(t, workspace);
+      assert.ifError(firstOutcome.error);
+      assert.equal(firstOutcome.saved.path, destination);
+      assert.equal(sha256(await readFile(destination)), sha256(IMAGE), "the destination keeps the first download's bytes exactly");
+      assert.ok(secondOutcome.error instanceof RoomFileError, "the second download refuses instead of replacing the file");
+      assert.equal(secondOutcome.error.code, "destination_exists");
+      assert.equal(link.mock.callCount(), 2, "each download tried a hard link first");
+      assert.deepEqual(await readdir(workspace), ["shared.bin"], "no temporary file is left behind");
     } finally {
       fake.restore();
     }

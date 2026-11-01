@@ -9,7 +9,8 @@
 // (GET /api/v1/sessions/{id}/attachments/{attachmentId}?download=true), fetches the link from
 // the file store WITHOUT API credentials, streams it into a temporary file next to the
 // destination while hashing it, checks the size and sha256 the API reported, and only then
-// renames the temporary file into place. An expired link is fetched again once.
+// moves the temporary file into place, replacing an existing file only with force. An expired
+// link is fetched again once.
 
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
@@ -366,6 +367,30 @@ function verifyingCounter(expectedBytes, state) {
   });
 }
 
+function destinationAppeared(destination) {
+  return new RoomFileError("destination_exists", `${destination} appeared during the download; pass --force to overwrite it.`);
+}
+
+// Puts the verified temporary file at destination unless something is already there. rename()
+// would replace a file created after the last existence check, so this hard-links instead:
+// link() fails with EEXIST rather than replacing. A filesystem without hard links refuses link()
+// with an error that varies by platform, so any other link() error falls back to copying the
+// bytes into a newly created file (COPYFILE_EXCL), which never replaces either. The caller
+// removes the temporary file.
+async function publishWithoutReplacing(temporary, destination) {
+  try {
+    await fsp.link(temporary, destination);
+    return;
+  } catch (error) {
+    if (error?.code === "EEXIST") throw destinationAppeared(destination);
+  }
+  try {
+    await fsp.copyFile(temporary, destination, fs.constants.COPYFILE_EXCL);
+  } catch (error) {
+    throw error?.code === "EEXIST" ? destinationAppeared(destination) : error;
+  }
+}
+
 /**
  * Download one published room file to disk, verified and atomic.
  *
@@ -462,11 +487,13 @@ export async function downloadRoomFile(
         { expectedSha256: attachment.sha256, actualSha256: sha256, expectedBytes: attachment.sizeBytes, actualBytes: state.bytes },
       );
     }
-    if (!force && (await existingEntry(destination))) {
-      throw new RoomFileError("destination_exists", `${destination} appeared during the download; pass --force to overwrite it.`);
+    if (force) {
+      await fsp.rename(temporary, destination);
+      renamed = true;
+    } else {
+      if (await existingEntry(destination)) throw destinationAppeared(destination);
+      await publishWithoutReplacing(temporary, destination);
     }
-    await fsp.rename(temporary, destination);
-    renamed = true;
     return {
       ok: true,
       path: destination,
@@ -478,6 +505,7 @@ export async function downloadRoomFile(
       attachment,
     };
   } finally {
+    // A renamed temporary file is gone; after a link or copy, or a failure, its name is removed here.
     if (!renamed) await fsp.rm(temporary, { force: true }).catch(() => {});
   }
 }
