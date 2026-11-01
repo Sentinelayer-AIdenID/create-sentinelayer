@@ -1,18 +1,9 @@
-// Exercises the REAL receipt/reception block from a wrapper source file.
+// Exercises the REAL receipt/reception code exported by the shipped wrapper.
 // This code is the recovery path: if it is wrong, a lost buffer stays lost and the safety net
 // cannot see the hole. It had two defects already (string compare, throttle with no trailing edge).
-const fs = require("fs");
-const path = process.argv[2] || require("path").join(__dirname, "listen-wrapper.cjs");
-const src = fs.readFileSync(path, "utf8");
-const MARK = "RECEIPT BLOCK START (sliced verbatim by test-receipt.js) ──";
-const m0 = src.indexOf(MARK);
-const start = m0 < 0 ? -1 : m0 + MARK.length;   // begin AFTER the marker text, not inside the comment
-const end = src.indexOf("RECEIPT BLOCK END");   // trailing "// " is a comment to EOF: valid
-if (start < 0 || end < 0 || end <= start) throw new Error("could not slice the receipt region from " + path);
-const region = src.slice(start, end);
-for (const need of ["function tsMs(", "function receipt(", "function observe(", "function writeState("]) {
-  if (!region.includes(need)) throw new Error("sliced region missing " + need + " -- test would be vacuous");
-}
+const path = require("path");
+const { createClassifier } = require(path.resolve(process.argv[2] || path.join(__dirname, "listen-wrapper.cjs")));
+if (typeof createClassifier !== "function") throw new Error("wrapper is missing createClassifier -- test would be vacuous");
 
 let written = [];
 let timers = [];
@@ -20,23 +11,15 @@ const fakeFs = {
   readFileSync: () => { throw new Error("no prior receipt"); },
   writeFileSync: (_p, body) => written.push(JSON.parse(body)),
 };
-// The bundled wrapper DERIVES its own RECEIPT path from CWD; mine declares it outside the slice.
-// Injecting a name the region also declares is a redeclaration error, so adapt to the source.
-const declaresReceipt = /const\s+RECEIPT\s*=/.test(region);
-const names = declaresReceipt
-  ? ["fs", "CWD", "broadcastBuf", "setTimeout", "clearTimeout"]
-  : ["fs", "RECEIPT", "CWD", "broadcastBuf", "setTimeout", "clearTimeout"];
-const harness = new Function(...names, `
-  ${region}
-  return { tsMs, newerThanDelivered, receipt, observe, writeState,
-           state: () => ({ deliveredMaxTs, observedMaxTs }) };
-`);
-const buf = [];
-const fakeTimer = (fn) => { timers.push(fn); return timers.length; };
-const args = declaresReceipt
-  ? [fakeFs, "fake-cwd", buf, fakeTimer, () => {}]
-  : [fakeFs, "fake", "fake-cwd", buf, fakeTimer, () => {}];
-const api = harness(...args);
+const api = createClassifier({
+  me: "agent-listener", cwd: "fake-cwd", fs: fakeFs,
+  now: () => 10000,
+  setTimeout: (fn) => { timers.push(fn); return timers.length; },
+  clearTimeout: () => {}, log: () => {},
+});
+for (const name of ["tsMs", "newerThanDelivered", "receipt", "observe", "writeState", "state"]) {
+  if (typeof api?.[name] !== "function") throw new Error("classifier is missing " + name + " -- test would be vacuous");
+}
 
 let fails = 0;
 const check = (n, got, want) => { const ok = got === want; if (!ok) fails++; console.log(`${ok?"PASS":"FAIL"}  ${n}  (got ${got}, want ${want})`); };

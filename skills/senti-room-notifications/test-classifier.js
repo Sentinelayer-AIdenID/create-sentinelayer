@@ -1,30 +1,20 @@
-const fs = require("fs");
-const src = fs.readFileSync(process.argv[2] || require("path").join(__dirname, "listen-wrapper.cjs"), "utf8");
-
-// Slice the REAL shipped region so this certifies the running code, not a retyped copy.
-const start = src.indexOf("const BROADCAST_FLUSH_MS");
-const end = src.indexOf("function wanted(who) {");
-if (start < 0 || end < 0 || end <= start) throw new Error("could not slice classifier region");
-const region = src.slice(start, end);
-// Vacuity guard: if the slice silently shrank, every test below passes against nothing.
-if (!/function deliver\(/.test(region) || !/function addressedToMe\(/.test(region)) {
-  throw new Error("sliced region is missing deliver/addressedToMe -- test would be vacuous");
-}
+const path = require("path");
+const { createClassifier } = require(path.resolve(process.argv[2] || path.join(__dirname, "listen-wrapper.cjs")));
+if (typeof createClassifier !== "function") throw new Error("wrapper is missing createClassifier -- test would be vacuous");
 
 const printed = [];
-const harness = new Function("ME", "preview", "clip", "receipt", "console", "setTimeout", `
-  ${region}
-  return { deliver, addressedToMe, isHuman, mentionCount, rememberMine, flushBroadcasts,
-           bufLen: () => broadcastBuf.length };
-`);
-const api = harness(
-  "agent-listener",
-  (t) => String(t).slice(0, 80),
-  (t) => String(t).slice(0, 80),
-  () => {},
-  { log: (l) => printed.push(l) },
-  () => 1,                      // never actually fire the timer; flush manually
-);
+const api = createClassifier({
+  me: "agent-listener", cwd: "fake-cwd",
+  fs: { readFileSync: () => { throw new Error("no prior receipt"); }, writeFileSync: () => {} },
+  now: () => 10000,
+  log: (line) => printed.push(line),
+  setTimeout: () => 1, // never actually fire the timer; flush manually
+  clearTimeout: () => {},
+});
+// Fail before any assertions if the shipped factory stops exposing the code under test.
+for (const name of ["deliver", "addressedToMe", "isHuman", "mentionCount", "rememberMine", "flushBroadcasts", "bufLen"]) {
+  if (typeof api?.[name] !== "function") throw new Error("classifier is missing " + name + " -- test would be vacuous");
+}
 
 function immediate(fn) { const before = printed.length; fn(); return printed.length > before; }
 let fails = 0;

@@ -186,6 +186,10 @@ test("skills: empty destination refuses and unrecognized operations remain gated
 
 test("skills: every shipped document and helper passes the public-content check", async () => {
   const forbidden = [
+    /\bnew\s+Function\s*\(/,
+    /\beval\s*\(/,
+    /\bvm\.run/,
+    /child_process/,
     /\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b/i,
     /\b(?:10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2})\b/,
     /\b(?:f[cd][0-9a-f]{2}|fe80):[0-9a-f:]+/i,
@@ -237,6 +241,70 @@ test("skills: bundled classifier and receipt checks execute the shipped wrapper"
   }
 });
 
+test("skills: importing the wrapper needs no configuration and starts no listener", async (t) => {
+  const { home } = await fixture(t);
+  const wrapper = path.join(root, "skills", "senti-room-notifications", "listen-wrapper.cjs");
+  for (const configured of [false, true]) {
+    const env = { ...process.env, HOME: home, USERPROFILE: home };
+    for (const key of ["SENTI_AGENT_ID", "SENTI_SESSION_ID", "SENTI_CLI_PATH"]) delete env[key];
+    if (configured) Object.assign(env, {
+      SENTI_AGENT_ID: "agent-listener", SENTI_SESSION_ID: "example-room", SENTI_CLI_PATH: "missing-cli.js",
+    });
+    const result = spawnSync(process.execPath, ["-e", 'const api = require(process.argv[1]); require("node:assert/strict").equal(typeof api.createClassifier, "function"); console.log("imported");', wrapper], {
+      cwd: home, env, encoding: "utf8", timeout: 5000,
+    });
+    assert.equal(result.status, 0, result.error?.message || result.stderr);
+    assert.equal(result.stdout, "imported\n");
+    assert.equal(result.stderr, "");
+    await missing(path.join(home, ".sentinelayer"));
+  }
+});
+
+test("skills: self-tests reject missing factory and classifier exports", async (t) => {
+  const { home } = await fixture(t);
+  const wrapper = path.join(home, "incomplete-wrapper.cjs");
+  const required = {
+    "test-classifier.js": ["deliver", "addressedToMe", "isHuman", "mentionCount", "rememberMine", "flushBroadcasts", "bufLen"],
+    "test-receipt.js": ["tsMs", "newerThanDelivered", "receipt", "observe", "writeState", "state"],
+  };
+  for (const [script, names] of Object.entries(required)) {
+    for (const omitted of ["createClassifier", ...names]) {
+      const methods = names.filter((name) => name !== omitted).map((name) => `${name}: () => {}`).join(",");
+      await fs.writeFile(wrapper, omitted === "createClassifier" ? "module.exports = {};" : `module.exports = { createClassifier: () => ({${methods}}) };`);
+      const result = spawnSync(process.execPath, [path.join(root, "skills", "senti-room-notifications", script), path.relative(home, wrapper)], {
+        cwd: home, encoding: "utf8", timeout: 5000,
+      });
+      assert.equal(result.status, 1, result.stdout + result.stderr);
+      assert.ok(result.stderr.includes(`missing ${omitted} -- test would be vacuous`), result.stderr);
+      assert.doesNotMatch(result.stdout, /ALL PASS/);
+    }
+  }
+});
+
+test("skills: direct wrapper preserves stream, poll, recovery, restart and shutdown behavior", async (t) => {
+  const { home } = await fixture(t);
+  const cliPath = path.join(root, "bin", "sentinelayer-cli.js");
+  const alias = path.join(home, "cli-alias.js");
+  await fs.symlink(cliPath, alias);
+  const result = spawnSync(process.execPath, [
+    "--require", path.join(root, "tests", "fixtures", "skills-listener-preload.cjs"),
+    path.join(root, "skills", "senti-room-notifications", "listen-wrapper.cjs"),
+  ], {
+    cwd: home, encoding: "utf8", timeout: 5000,
+    env: { ...process.env, HOME: home, USERPROFILE: home, SENTI_AGENT_ID: "agent-listener", SENTI_SESSION_ID: "example-room", SENTI_CLI_PATH: alias },
+  });
+  assert.equal(result.status, 0, result.error?.message || result.stderr || result.stdout);
+  assert.equal(result.stderr, "");
+  assert.match(result.stdout, /\[listener-started\]/);
+  assert.match(result.stdout, /reply without mention/);
+  assert.match(result.stdout, /recovered poll message/);
+  assert.match(result.stdout, /\[room-digest\] 1 broadcast\(s\)/);
+  assert.match(result.stdout, /CLIPPED/);
+  assert.match(result.stdout, /PROBE PASS/);
+  assert.equal(result.stdout.match(/reply without mention/g)?.length, 1);
+  assert.doesNotMatch(result.stdout, /own post|old history/);
+});
+
 test("skills: npm pack includes every skill and referenced helper", () => {
   // npm.cmd needs a shell on Windows; all arguments here are fixed literals, not caller input.
   const result = spawnSync(process.platform === "win32" ? "npm.cmd" : "npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
@@ -244,5 +312,6 @@ test("skills: npm pack includes every skill and referenced helper", () => {
   });
   assert.equal(result.status, 0, result.error?.message || result.stderr);
   const files = JSON.parse(result.stdout)[0].files.map((file) => file.path);
+  assert.ok(files.includes("src/skills/listener-runtime.cjs"), "Package missing listener runtime");
   for (const file of expectedFiles) assert.ok(files.includes(`skills/${file}`), `Package missing ${file}`);
 });
