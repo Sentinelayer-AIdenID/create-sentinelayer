@@ -75,6 +75,10 @@
     },
     "puppeteer-core": {
       "ws": "8.21.0"
+    },
+    "test-exclude": {
+      "glob": "14.0.3",
+      "minimatch": "11.0.3"
     }
   }
 }

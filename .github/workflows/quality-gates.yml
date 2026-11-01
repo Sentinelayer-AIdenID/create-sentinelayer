@@ -658,7 +658,7 @@ jobs:
           - os: ubuntu-22.04
             label: ubuntu
             node: "22"
-          - os: macos-14
+          - os: macos-15
             label: macos
             node: "22"
           - os: windows-2022
