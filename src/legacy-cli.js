@@ -219,6 +219,10 @@ function printUsage() {
   console.log("");
   console.log("Usage: sl <command> [options]");
   console.log("");
+  console.log("Agent Skills:");
+  console.log("  sl skills install [--dir <path>] [--force] [--json]  Install bundled Senti skills");
+  console.log("  sl skills list [--dir <path>] [--json]  Show bundled and installed versions/hashes");
+  console.log("");
   console.log("Scaffold:");
   console.log("  sl [project-name]                  Create a new project with SentinelLayer scaffolding");
   console.log("  sl init [project-name]             Same as above (interactive or --non-interactive)");

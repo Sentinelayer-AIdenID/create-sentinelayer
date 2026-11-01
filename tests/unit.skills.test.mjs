@@ -40,6 +40,9 @@ async function missing(file) {
 
 test("skills: fresh HOME install is offline, complete and a repeat preserves files", async (t) => {
   const { home, directory } = await fixture(t);
+  const help = cli(home, ["--help"]);
+  assert.match(help, /sl skills install/);
+  assert.match(help, /sl skills list/);
   const before = cli(home, ["skills", "list", "--json"]);
   assert.equal(before.directory, directory);
   assert.deepEqual(before.skills.map((s) => s.name), names);
