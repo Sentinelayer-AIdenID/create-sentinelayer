@@ -128,6 +128,10 @@ function main() {
     console.error("Set SENTI_AGENT_ID, SENTI_SESSION_ID and SENTI_CLI_PATH before starting the listener.");
     process.exit(1);
   }
+  if (!path.isAbsolute(CLI)) {
+    console.error("SENTI_CLI_PATH must be an absolute path to sentinelayer-cli/bin/sentinelayer-cli.js.");
+    process.exit(1);
+  }
   const CWD = path.join(os.homedir(), ".sentinelayer", "skill-listeners", SID, ME);
   const POLL_CWD = path.join(CWD, "reply-poll");
   const WAKE = null;

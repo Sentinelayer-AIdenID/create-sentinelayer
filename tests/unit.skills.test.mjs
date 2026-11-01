@@ -186,9 +186,11 @@ test("skills: empty destination refuses and unrecognized operations remain gated
 
 test("skills: every shipped document and helper passes the public-content check", async () => {
   const forbidden = [
-    /\bnew\s+Function\s*\(/,
+    /\bFunction\s*\(/,
     /\beval\s*\(/,
     /\bvm\.run/,
+    /\brequire\s*\(\s*(["'])(?:node:)?vm\1\s*\)/,
+    /\bvm\s*\.\s*Script\b/,
     /child_process/,
     /\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b/i,
     /\b(?:10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2})\b/,
@@ -206,7 +208,14 @@ test("skills: every shipped document and helper passes the public-content check"
     [8, 4, 4, 4, 12].map((n) => "a".repeat(n)).join("-"),
     [192, 168, 4, 8].join("."), ["build", "internal"].join("."),
     ["fd00", "", "1"].join(":"), "gh" + "p_" + "x".repeat(24),
+    'Function("return 1")', 'new Function("return 1")', 'Function \n ("return 1")',
+    'require("vm")', "require('vm')", 'require ( "node:vm" )', "require( 'node:vm' )",
+    'vm.Script("1")', 'new vm.Script("1")', 'new vm . Script("1")',
+    'eval("1")', 'vm.runInNewContext("1")', 'require("node:child_process")',
   ]) assert.ok(forbidden.some((pattern) => pattern.test(example)), "Public-content detector must reject its controls");
+  for (const example of [
+    "function format() {}", "formatFunction()", 'require("node:fs")', 'require("vm-tools")', "vm.ScriptRunner()",
+  ]) assert.ok(!forbidden.some((pattern) => pattern.test(example)), "Public-content detector must allow harmless controls");
   const allFiles = await fs.readdir(path.join(root, "skills"), { recursive: true, withFileTypes: true });
   const files = allFiles.filter((entry) => entry.isFile());
   assert.ok(files.length >= expectedFiles.length);
@@ -303,6 +312,21 @@ test("skills: direct wrapper preserves stream, poll, recovery, restart and shutd
   assert.match(result.stdout, /PROBE PASS/);
   assert.equal(result.stdout.match(/reply without mention/g)?.length, 1);
   assert.doesNotMatch(result.stdout, /own post|old history/);
+});
+
+test("skills: direct wrapper refuses relative CLI paths before creating listener state", async (t) => {
+  const { home } = await fixture(t);
+  const wrapper = path.join(root, "skills", "senti-room-notifications", "listen-wrapper.cjs");
+  for (const cliPath of ["sentinelayer-cli.js", "./sentinelayer-cli.js", "../sentinelayer-cli.js"]) {
+    const result = spawnSync(process.execPath, [wrapper], {
+      cwd: home, encoding: "utf8", timeout: 5000,
+      env: { ...process.env, HOME: home, USERPROFILE: home, SENTI_AGENT_ID: "agent-listener", SENTI_SESSION_ID: "example-room", SENTI_CLI_PATH: cliPath },
+    });
+    assert.equal(result.status, 1, result.error?.message || result.stderr || result.stdout);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "SENTI_CLI_PATH must be an absolute path to sentinelayer-cli/bin/sentinelayer-cli.js.\n");
+    await missing(path.join(home, ".sentinelayer"));
+  }
 });
 
 test("skills: npm pack includes every skill and referenced helper", () => {

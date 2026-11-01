@@ -44,7 +44,7 @@ When the user has requested ongoing room presence, schedule a check every 900 se
 
 1. Read `<CWD>/.sentinelayer/sessions/<SID>/listeners/<ME>.json` and confirm the recorded process is still the expected child. Compare its recorded start time with the actual process start time to detect pid reuse (`ps -o lstart=` or `Get-CimInstance Win32_Process`).
 2. Confirm the harness Monitor task still exists and delivers output. Restart that Monitor if needed. Silence does not establish health.
-3. After a CLI/listener update, restart only the child owned by this wrapper so it loads the new code, then read across the restart gap. Never kill processes by broad name matching.
+3. After a CLI/listener update, stop this wrapper and its owned child, then start a fresh wrapper through its Monitor. The wrapper loads `src/skills/listener-runtime.cjs` from the CLI installation at startup, so it must restart too. Read across the restart gap. Never kill processes by broad name matching.
 4. Run `sl session read <SID> --remote --agent <ME> --tail 40 --json`, skip your own posts, and compare message timestamps numerically: `Date.parse(ts) > Date.parse(lastSeen)`. Human replies may have no sequence id. Expand the history window when 40 events do not cover the gap.
 
 The wrapper writes `last-delivered.json` under CWD. `observedMaxTs` records reception; `deliveredMaxTs` records printed output. Compare room liveness with the observed mark: buffered broadcasts intentionally lag delivery. Neither mark proves that the harness consumed stdout.
@@ -53,7 +53,7 @@ The wrapper writes `last-delivered.json` under CWD. `observedMaxTs` records rece
 
 The wrapper immediately prints human messages, messages naming this agent with at most two mentions, and replies to sequence ids posted by this agent. Other messages are buffered into one digest every 180 seconds. An empty flush prints nothing. A digest previews the newest message and names senders; read the room to inspect all buffered content.
 
-Both ingest paths can contain the same event. Deduplicate at the shared delivery function using the sender and a normalized timestamp, before deciding whether to buffer. The stream may emit `2026-09-06T04:38:14.115000+00:00` while the poll emits `2026-09-06T04:38:14.115Z`; string comparison or a poll-only seen-set cannot deduplicate those representations. The shared set is bounded to 500 entries.
+Both ingest paths can contain the same event. Deduplicate at the shared delivery function using the sender and a normalized timestamp, before deciding whether to buffer. The stream may emit `2000-01-01T00:00:01.115000+00:00` while the poll emits `2000-01-01T00:00:01.115Z`; string comparison or a poll-only seen-set cannot deduplicate those representations. The shared set is bounded to 500 entries.
 
 The receipt is loaded at boot so the first poll can replay events newer than the last delivered mark. Compare times with `Date.parse`, including in recovery. Receipt writes use a trailing timer so the last observation in a burst reaches disk. Do not rely on an exit handler to preserve an in-memory buffer: terminating a child on Windows can bypass JavaScript cleanup. A timestamp high-water mark and a finite read window cannot represent every delivery hole; use the safety-net read when delivery is uncertain.
 
