@@ -481,6 +481,8 @@ const MCP_ACTOR_CALLS = [
   ["session_lock", (h, agentId) => h.session_lock({ sessionId: SID, agentId, files: ["src/a.js"] })],
   ["session_unlock", (h, agentId) => h.session_unlock({ sessionId: SID, agentId, files: ["src/a.js"] })],
   ["session_locks", (h, agentId) => h.session_locks({ sessionId: SID, agentId })],
+  ["session_files_list", (h, agentId) => h.session_files_list({ sessionId: SID, agentId })],
+  ["session_file_get", (h, agentId) => h.session_file_get({ sessionId: SID, agentId, attachmentId: "att-admission-0001" })],
 ];
 
 const STORED_CREDENTIAL_STATES = [

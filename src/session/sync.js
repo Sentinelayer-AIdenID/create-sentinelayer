@@ -2860,6 +2860,91 @@ export async function fetchSessionPinnedMessages(
   };
 }
 
+// An attachment id as the API accepts it in a path.
+const SESSION_ATTACHMENT_ID_PATTERN = /^[A-Za-z0-9._:-]{8,120}$/;
+
+/**
+ * Read one room attachment's metadata and a short-lived signed download link:
+ * `GET /api/v1/sessions/{id}/attachments/{attachmentId}?download=true`, which answers
+ * `{ ok, attachment, download: { url, method, expiresIn, expiresAt } }`. The link points at the
+ * file store and carries its own signature; fetch it without API credentials. Someone other
+ * than the uploader gets 404 for a file no sent message has published yet.
+ *
+ * Never throws; a refusal reports the HTTP status and the API error code.
+ */
+export async function fetchSessionAttachment(
+  sessionId,
+  attachmentId,
+  {
+    targetPath = process.cwd(),
+    timeoutMs = DEFAULT_SYNC_TIMEOUT_MS,
+    resolveAuthSession = resolveActiveAuthSession,
+    fetchImpl = fetchWithTimeout,
+    nowMs = Date.now,
+  } = {}
+) {
+  const normalizedSessionId = normalizeString(sessionId);
+  const normalizedAttachmentId = normalizeString(attachmentId);
+  if (!isUrlPathSegment(normalizedSessionId)) {
+    return { ok: false, reason: "invalid_session_id", status: null };
+  }
+  if (!SESSION_ATTACHMENT_ID_PATTERN.test(normalizedAttachmentId) || normalizedAttachmentId.includes("..")) {
+    return { ok: false, reason: "invalid_attachment_id", status: null };
+  }
+
+  let session = null;
+  try {
+    session = await resolveAuthSession({
+      cwd: targetPath,
+      env: process.env,
+      autoRotate: false,
+    });
+  } catch {
+    return { ok: false, reason: "no_session", status: null };
+  }
+  if (!isAuthenticated(session)) {
+    return { ok: false, reason: "not_authenticated", status: null };
+  }
+
+  const apiBaseUrl = resolveApiBaseUrl(session);
+  const endpoint =
+    `${apiBaseUrl}/api/v1/sessions/${urlPathSegment(normalizedSessionId, { label: "sessionId" })}` +
+    `/attachments/${urlPathSegment(normalizedAttachmentId, { label: "attachmentId" })}?download=true`;
+  try {
+    const { response, payload } = await fetchJsonWithFullTimeout(
+      endpoint,
+      {
+        method: "GET",
+        credential: await credentialFor(session),
+      },
+      normalizePositiveInteger(timeoutMs, DEFAULT_SYNC_TIMEOUT_MS),
+      fetchImpl,
+      { readErrorBody: true },
+    );
+    if (!response || !response.ok) {
+      const status = response ? response.status : null;
+      return {
+        ok: false,
+        reason: `api_${status ?? "no_response"}`,
+        status,
+        errorCode: normalizeString(payload?.error?.code) || null,
+        retryAfterMs: isRateLimitResponse(response, payload)
+          ? retryAfterMsFromResponse(response, payload, Number(nowMs()) || Date.now())
+          : null,
+      };
+    }
+    return {
+      ok: true,
+      reason: "",
+      status: response.status,
+      attachment: payload?.attachment && typeof payload.attachment === "object" ? payload.attachment : null,
+      download: payload?.download && typeof payload.download === "object" ? payload.download : null,
+    };
+  } catch (error) {
+    return { ok: false, reason: normalizeString(error?.message) || "attachment_read_failed", status: null };
+  }
+}
+
 // Native edits never fall back to POST /events or mutate an optimistic local row.
 export async function editSessionMessage(sessionId, {
   targetSequenceId = null,

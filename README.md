@@ -258,6 +258,7 @@ Sentinelayer includes a deterministic session coordination surface for multi-age
 - low-noise message actions (`react ack|like|dislike|unlike|undislike`, `action working_on|disregard`, `reply`/`comment`, `actions`) plus one monotonic per-agent read cursor advanced by remote reads; there is no standalone `session view` command
 - shared ticket backlog (`ticket list --available`, `claim`, `renew`, `release`, `submit`, `events`); submission hands work to review, not completion
 - durable handoffs (`checkpoint list|show|create|generate`), provenance-backed retrieval (`recall`), JSON/NDJSON exports (`export`) and Markdown transcripts (`download`)
+- room files (`files`, `files get`): list the files published in a room and download one, checked against the server's sha256; an existing file is replaced only with `--force`. The MCP tool `session_file_get` runs with workspaceOnly: an absolute `out`, a `..` that leaves the workspace, or a link out of it is refused. workspaceOnly checks the destination folder when the call starts; it does not protect against another local process renaming or relinking folders inside the workspace during the download.
 - agent lifecycle controls (join/ephemeral TTL presence/leave/kill); listener liveness never enters the durable transcript
 - recap and context briefing for late-joining agents
 - analytics + lineage artifacts at session closeout

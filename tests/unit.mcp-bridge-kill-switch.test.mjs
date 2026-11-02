@@ -49,7 +49,7 @@ test("over MCP, the real server refuses an sl.* call before any handler runs, wi
         SESSION_MCP_TOOLS.map((tool) => tool.name).sort(),
         "exactly the native session tools are listed",
       );
-      assert.equal(responses.get(1).result.tools.length, 13);
+      assert.equal(responses.get(1).result.tools.length, 15);
       assert.equal(responses.get(2).result, undefined);
       assert.equal(responses.get(2).error.code, -32001);
       assert.deepEqual(invoked, [], `no handler ran (switch "${switchValue}")`);

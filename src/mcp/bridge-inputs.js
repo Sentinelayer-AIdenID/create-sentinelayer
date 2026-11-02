@@ -183,6 +183,11 @@ export const BRIDGE_ALLOWED_INPUTS = Object.freeze({
   "watch.run-events": "runId path outputDir pollSeconds maxIdleSeconds saveArtifacts json",
 });
 
+// Room file downloads write to disk: agents use the native session_file_get tool, which keeps
+// the file inside the workspace and returns its path, so the bridge does not run this command.
+const ROOM_FILE_DOWNLOAD_VIA_NATIVE_TOOL =
+  "room file downloads go through the native session_file_get MCP tool, which keeps the file inside the workspace";
+
 /** Command path -> { input: why it is not exposed }. */
 export const BRIDGE_DENIED_INPUTS = Object.freeze({
   "ai.identity.lineage": {
@@ -206,6 +211,14 @@ export const BRIDGE_DENIED_INPUTS = Object.freeze({
   },
   "ring-owner": {
     gatewayUrl: "the gateway that receives the user's token",
+  },
+  "session.files.get": {
+    sessionId: ROOM_FILE_DOWNLOAD_VIA_NATIVE_TOOL,
+    attachmentId: ROOM_FILE_DOWNLOAD_VIA_NATIVE_TOOL,
+    out: ROOM_FILE_DOWNLOAD_VIA_NATIVE_TOOL,
+    force: ROOM_FILE_DOWNLOAD_VIA_NATIVE_TOOL,
+    path: ROOM_FILE_DOWNLOAD_VIA_NATIVE_TOOL,
+    json: ROOM_FILE_DOWNLOAD_VIA_NATIVE_TOOL,
   },
   "session.join": {
     recoverAdmission: "restores an agent credential using the delegator's retained private key; CLI control only",
