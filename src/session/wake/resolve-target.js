@@ -101,11 +101,12 @@ function defaultFormatMessage(event, agentId) {
   const author = agentIdOf(event) || "unknown";
   const text = event?.payload?.message ?? event?.message ?? "";
   const body = typeof text === "string" ? text : "";
-  const head = `Senti wake for ${agentId}: ${event.event === "session_message_edited" ? "edited message" : "new message"} from ${author}.`;
-  const combined = body ? `${head}\n\n${body}` : head;
-  const attachments = formatAttachmentSummary(event);
-  const budget = Math.max(0, MAX_WAKE_MESSAGE_CHARS - (attachments ? attachments.length + 2 : 0));
-  return [combined.slice(0, budget), attachments].filter(Boolean).join("\n\n");
+  const head = `Senti wake for ${agentId}: ${event.event === "session_message_edited" ? "edited message" : "new message"} from ${author}.`
+    .slice(0, MAX_WAKE_MESSAGE_CHARS);
+  const attachmentBudget = Math.max(0, MAX_WAKE_MESSAGE_CHARS - head.length - 2);
+  const attachments = formatAttachmentSummary(event).slice(0, attachmentBudget);
+  const bodyBudget = Math.max(0, MAX_WAKE_MESSAGE_CHARS - head.length - 2 - (attachments ? attachments.length + 2 : 0));
+  return [head, body.slice(0, bodyBudget), attachments].filter(Boolean).join("\n\n");
 }
 
 /**

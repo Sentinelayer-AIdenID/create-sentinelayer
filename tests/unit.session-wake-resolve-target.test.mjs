@@ -91,3 +91,34 @@ test("Unit resolve-target: oversized message is capped by default formatter", ()
   const t = r(msg({ payload: { to: "claude-mythos", message: "z".repeat(20000) } }));
   assert.ok(t.message.length <= 16000);
 });
+
+test("Unit resolve-target: 80 attachments retain the header, first files and overflow count", () => {
+  const resolve = createResolveTarget({ agentId: "reader", host: "claude", sessionId: "host-test" });
+  const target = resolve({
+    event: "session_message", sessionId: "room-test", agentId: "sender",
+    payload: {
+      message: "Body text ".repeat(2000),
+      attachments: Array.from({ length: 80 }, (_, index) => ({
+        filename: `file-${index}-` + "a".repeat(240), attachmentId: `att-file-${index}`,
+      })),
+    },
+  });
+  assert.ok(target.message.startsWith("Senti wake for reader: new message from sender.\n\nBody text "));
+  assert.ok(target.message.length <= 16000);
+  assert.equal((target.message.match(/\[attachment:/g) || []).length, 5);
+  assert.ok(target.message.endsWith("+75 more"));
+});
+
+test("Unit resolve-target: attachment budget cannot truncate the wake header", () => {
+  const resolve = createResolveTarget({ agentId: "reader", host: "claude", sessionId: "host-test" });
+  const author = "sender-" + "a".repeat(15000);
+  const target = resolve({
+    event: "session_message", sessionId: "room-test", agentId: author,
+    payload: {
+      message: "Body text ".repeat(2000),
+      attachments: Array.from({ length: 5 }, () => ({ filename: "a".repeat(255) })),
+    },
+  });
+  assert.ok(target.message.startsWith(`Senti wake for reader: new message from ${author}.\n\n`));
+  assert.ok(target.message.length <= 16000);
+});
