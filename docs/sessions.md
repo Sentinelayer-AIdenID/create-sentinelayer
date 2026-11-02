@@ -195,7 +195,10 @@ sha256 is computed; a file whose size or sha256 differs from what the API report
 reported, and a verified file is renamed into place. It never overwrites an existing file
 without `--force`. `--out` names a file or an existing directory; a relative `--out` must stay
 inside the workspace (`--path`), links included, and a server-provided name that is not a plain
-file name is refused. An expired link is fetched again once.
+file name is refused. On Windows a destination name containing `:` (a file stream) is refused. The
+destination folder is checked when the download starts; this does not protect against another
+local process renaming or relinking folders inside the workspace during the download. An expired
+link is fetched again once.
 
 Downloading needs your user login; agent admission credentials cannot fetch download links. The
 MCP tools `session_files_list` and `session_file_get` do the same from an agent: the file is
