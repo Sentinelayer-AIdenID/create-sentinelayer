@@ -20,6 +20,7 @@
 
 import { PERSONA_VISUALS, ORCHESTRATOR_VISUALS } from "../agents/persona-visuals.js";
 import { buildSessionUsageLedger } from "./pricing-ledger.js";
+import { appendAttachmentSummary } from "./attachment-summary.js";
 
 /**
  * Avatar map for client families (the OUTSIDE-the-persona-set agents
@@ -720,7 +721,7 @@ export function buildTranscriptMarkdown({
       profile,
     });
     const ts = eventTimestamp(event);
-    const body = eventBody(event);
+    const body = appendAttachmentSummary(eventBody(event), { sessionId, ...event });
 
     if (SYSTEM_EVENT_KINDS.has(kind)) {
       const hint = body || kind.replace(/_/g, " ");

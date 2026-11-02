@@ -6,6 +6,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { spawn as defaultSpawn } from "node:child_process";
 
 import pc from "picocolors";
+import { appendAttachmentSummary, withAttachmentSummary } from "../session/attachment-summary.js";
 
 import { credentialFor, isAuthenticated } from "../auth/credential-destinations.js";
 import { SentinelayerApiError, requestJsonMutation } from "../auth/http.js";
@@ -864,7 +865,7 @@ function formatHumanAskLine(event = {}) {
   const message = humanAskMessage(event);
   const shortMessage = message.length > 220 ? `${message.slice(0, 217)}...` : message;
   const suffix = shortMessage ? `: ${shortMessage}` : "";
-  return `${sequenceLabel} ${humanAskAgentId(event)}${ts ? ` ${ts}` : ""}${suffix}`;
+  return appendAttachmentSummary(`${sequenceLabel} ${humanAskAgentId(event)}${ts ? ` ${ts}` : ""}${suffix}`, event);
 }
 
 function formatRemoteHydrateAppendWarning(result = {}) {
@@ -2466,6 +2467,10 @@ function formatFileSize(bytes) {
 }
 
 function formatEventLine(event = {}) {
+  return appendAttachmentSummary(formatEventText(event), event);
+}
+
+function formatEventText(event = {}) {
   const ts = normalizeString(event.ts || event.timestamp);
   const type = normalizeString(event.event || event.type) || "event";
   const agentId = normalizeString(event.agent?.id || event.agentId || "unknown");
@@ -5962,7 +5967,7 @@ export function registerSessionCommand(program) {
           },
           onEvent: async (event) => {
             if (emitFormat === "ndjson") {
-              console.log(JSON.stringify(event));
+              console.log(JSON.stringify(withAttachmentSummary(event)));
             } else {
               console.log(formatEventLine(event));
             }
@@ -6876,11 +6881,11 @@ export function registerSessionCommand(program) {
           tail,
           beforeSequence,
           count: events.length,
-          events,
+          events: events.map(withAttachmentSummary),
           includeControlEvents,
           hiddenControlEventCount,
           unacknowledgedHumanMessageCount: unacknowledgedHumanMessages.length,
-          unacknowledgedHumanMessages,
+          unacknowledgedHumanMessages: unacknowledgedHumanMessages.map(withAttachmentSummary),
           recentHumanActivityCount: recentHumanActivity.length,
           recentHumanActivity,
           autoView,
@@ -6982,7 +6987,7 @@ export function registerSessionCommand(program) {
             if (item.event) {
               if (!includeControlEvents && isSessionControlEvent(item.event)) continue;
               if (emitJson) {
-                console.log(JSON.stringify({ source: item.source, event: item.event }));
+                console.log(JSON.stringify({ source: item.source, event: withAttachmentSummary(item.event) }));
               } else {
                 const sourceTag = item.source === "sse" ? pc.cyan("[sse]") : pc.gray("[fs] ");
                 console.log(`${sourceTag} ${formatEventLine(item.event)}`);
@@ -7013,7 +7018,7 @@ export function registerSessionCommand(program) {
           continue;
         }
         if (emitJson) {
-          console.log(JSON.stringify(event));
+          console.log(JSON.stringify(withAttachmentSummary(event)));
         } else {
           console.log(formatEventLine(event));
         }

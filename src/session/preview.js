@@ -7,6 +7,7 @@
  */
 
 import { readStream } from "./stream.js";
+import { appendAttachmentSummary, formatAttachmentSummary } from "./attachment-summary.js";
 
 const PREVIEW_EVENTS = new Set([
   "session_message",
@@ -52,7 +53,7 @@ export function pickLatestPreview(events = []) {
       payload.alert ||
       payload.reason ||
       payload.text;
-    if (!text) continue;
+    if (!text && !formatAttachmentSummary(event)) continue;
     return {
       ts: event.ts || event.timestamp || null,
       agentId:
@@ -61,7 +62,9 @@ export function pickLatestPreview(events = []) {
         payload.agentId ||
         null,
       kind,
-      message: trim(text),
+      message: appendAttachmentSummary(trim(text), event),
+      ...(Array.isArray(payload.attachments) && payload.attachments.length
+        ? { attachments: payload.attachments } : {}),
     };
   }
   return { ts: null, agentId: null, kind: null, message: null };

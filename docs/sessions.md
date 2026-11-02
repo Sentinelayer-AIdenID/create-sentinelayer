@@ -189,6 +189,15 @@ sl session files get <session-id> <attachment-id> --out downloads/ --force
 uploader, upload time, the message that published it, and its attachment id. Raise `--limit` or
 `--max-pages` to look further back.
 
+Room messages show one marker per attachment, including in listen/read output, history
+previews, pinned messages, recaps, host wake messages, and Markdown downloads. For example:
+`[attachment: image photo-0001.png, 1.6 MB, sha256 1a2b3c4d…, status uploaded]`.
+Each marker includes a `sl session files get <sessionId> <attachmentId>` fetch hint;
+when the attachment id is unavailable, it points to `sl session files <sessionId>`.
+Markers use metadata only and never include the attachment pointer or download link.
+JSON retains attachment fields; listen/read and local MCP `read_history` and `poll_inbox` also add
+an `attachmentSummary` on each event with attachments, including with `includeRaw`.
+
 `session files get` asks the API for a short-lived signed download link and fetches it without
 API credentials. The file streams into a temporary file next to its destination while its
 sha256 is computed; a file whose size or sha256 differs from what the API reported is deleted and
