@@ -8,9 +8,11 @@
 
 import { readStream } from "./stream.js";
 import { appendAttachmentSummary, formatAttachmentSummary } from "./attachment-summary.js";
+import { formatEditSummary } from "./edit-summary.js";
 
 const PREVIEW_EVENTS = new Set([
   "session_message",
+  "session_message_edited",
   "session_say",
   "agent_response",
   "session_observation",
@@ -46,7 +48,9 @@ export function pickLatestPreview(events = []) {
     const kind = String(event.event || event.type || "").trim();
     if (!kind || !PREVIEW_EVENTS.has(kind)) continue;
     const payload = event.payload && typeof event.payload === "object" ? event.payload : {};
+    const editSummary = formatEditSummary(event);
     const text =
+      editSummary ||
       payload.summary ||
       payload.message ||
       payload.response ||
@@ -63,6 +67,7 @@ export function pickLatestPreview(events = []) {
         null,
       kind,
       message: appendAttachmentSummary(trim(text), event),
+      ...(editSummary ? { editSummary, event } : {}),
       ...(Array.isArray(payload.attachments) && payload.attachments.length
         ? { attachments: payload.attachments } : {}),
     };

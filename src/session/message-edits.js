@@ -1,6 +1,7 @@
 import { createAgentEvent } from "../events/schema.js";
 import { enrichEventWithMentions } from "./mentions.js";
 import { sessionEventIdentityKeys } from "./event-identity.js";
+import { sessionMessageEditText } from "./edit-summary.js";
 
 export function messageRevision(value = {}) {
   const revision = Number(value.messageRevision ?? value.message_revision ?? 1);
@@ -79,11 +80,11 @@ export function sessionMessageRoutingEvent(event = {}) {
   if (!snapshot) return event;
   const parentPayload = event.payload?.event?.payload || {};
   const payload = { ...parentPayload, ...snapshot.payload };
-  if (event.payload?.reply) payload.message = String(event.payload.reply.note ?? "");
+  payload.message = sessionMessageEditText(event);
   for (const key of ["to", "recipient", "recipients", "targetAgent", "targetAgentId", "broadcast", "mentions"]) {
     if (event.payload[key] !== undefined) payload[key] = event.payload[key];
   }
-  const routed = enrichEventWithMentions({ ...snapshot, agent: event.agent || snapshot.agent, payload });
-  if (routed.payload?.mentions?.broadcast?.length) routed.payload.broadcast = true;
-  return routed;
+  // Use the same recipient precedence as a new message. Broadcast mentions
+  // are metadata; only an explicit routing flag can widen the audience.
+  return enrichEventWithMentions({ ...snapshot, agent: event.agent || snapshot.agent, payload });
 }
