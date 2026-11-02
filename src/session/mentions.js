@@ -99,13 +99,17 @@ export function enrichEventWithMentions(event) {
     : null;
   if (!payload) return event;
 
+  // An edit's immutable snapshot retains the original explicit audience.
+  const routingPayload = event.event === "session_message_edited"
+    ? { ...payload.event?.payload, ...payload }
+    : payload;
   // Already routed by an explicit caller — don't second-guess.
   const hasExplicitTo =
-    Array.isArray(payload.to) ||
-    Array.isArray(payload.recipients) ||
-    typeof payload.recipient === "string" ||
-    typeof payload.targetAgent === "string" ||
-    typeof payload.targetAgentId === "string";
+    Array.isArray(routingPayload.to) ||
+    Array.isArray(routingPayload.recipients) ||
+    typeof routingPayload.recipient === "string" ||
+    typeof routingPayload.targetAgent === "string" ||
+    typeof routingPayload.targetAgentId === "string";
 
   // We pull text from the standard fields the renderer already uses,
   // matching the priority in `Session.tsx:payloadText`.

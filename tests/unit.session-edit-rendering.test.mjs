@@ -168,7 +168,15 @@ for (const tool of ["read_history", "poll_inbox"]) {
 
 for (const reply of [false, true]) {
   test(`Edit rendering: ${reply ? "reply" : "message"} edit mentions reach the new recipient once`, async () => {
+    const targeted = edit({ reply, text: "please review @reviewer" });
+    for (const event of [targeted, enrichEventWithMentions(targeted)]) {
+      assert.equal(eventMatchesAgent(event, "reader"), true);
+      assert.equal(eventMatchesAgent(event, "reviewer"), false);
+      assert.equal(createResolveTarget({ agentId: "reviewer", host: "test", sessionId: "host-test" })(event), null);
+    }
+    // Direct mentions route otherwise untargeted edits, preserving explicit audiences above.
     const source = edit({ reply, text: "please review @reviewer" });
+    delete source.payload.event.payload.to;
     const before = structuredClone(source);
     const enriched = enrichEventWithMentions(source);
     assert.deepEqual(enriched.payload.mentions?.handles, ["reviewer"]);
