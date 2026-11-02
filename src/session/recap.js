@@ -7,6 +7,7 @@ import { createAgentEvent } from "../events/schema.js";
 import { dedupeSessionEvents } from "./event-identity.js";
 import { resolveSessionPaths } from "./paths.js";
 import { readStream } from "./stream.js";
+import { appendAttachmentSummary, formatAttachmentSummary } from "./attachment-summary.js";
 import { getSession } from "./store.js";
 import { aggregateSessionUsage } from "./usage.js";
 
@@ -381,11 +382,11 @@ function summarizeRecentActivity(events = [], { forAgentId = "", limit = 2 } = {
     const message = normalizeString(
       payload.message || payload.response || payload.recap || payload.alert || payload.reason
     );
-    if (!message) {
+    if (!message && !formatAttachmentSummary(event)) {
       continue;
     }
     snippets.push(
-      `${agentId}${formatSequenceMarker(event)}: ${shortActivitySnippetText(message)}`,
+      `${agentId}${formatSequenceMarker(event)}: ${appendAttachmentSummary(shortActivitySnippetText(message), event)}`,
     );
     if (snippets.length >= Math.max(1, limit)) {
       break;

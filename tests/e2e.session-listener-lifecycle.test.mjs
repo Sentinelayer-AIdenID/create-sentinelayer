@@ -58,12 +58,15 @@ async function runCli({ cwd, env, args = [] }) {
   });
 }
 
-async function withMockSessionEvents(payload, callback) {
+async function withMockSessionEvents(payload, callback, extraRoutes = {}) {
   const sessionId = "listen-lifecycle-e2e";
   const requests = [];
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url || "/", "http://127.0.0.1");
+      if (req.method === "GET" && extraRoutes[url.pathname]) {
+        return jsonResponse(res, 200, extraRoutes[url.pathname]);
+      }
       if (req.method === "GET" && url.pathname === `/api/v1/sessions/${sessionId}/events`) {
         requests.push({
           after: url.searchParams.get("after"),
@@ -122,6 +125,85 @@ function baseListenArgs(sessionId, tempRoot, extra = []) {
     tempRoot,
     ...extra,
   ];
+}
+
+for (const command of ["read", "search", "events", "pins"]) {
+  test(`Attachment visibility: remote CLI ${command} renders files and fetch instructions`, async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "sl-remote-attachments-"));
+    const sessionId = "listen-lifecycle-e2e";
+    const message = {
+      event: "session_message", sessionId, sequenceId: 3, cursor: "cursor-3",
+      ts: "2026-11-02T12:00:00.000Z", agent: { id: "human-owner" },
+      payload: { message: "Read this file ".repeat(40), attachments: [{
+        attachmentId: "att-image-0001", kind: "image", filename: "photo-0001.png",
+        contentType: "image/png", sizeBytes: 1677722, sha256: "1a2b3c4d" + "a".repeat(56),
+        status: "uploaded", pointer: "/attachments/att-image-0001",
+      }] },
+    };
+    const page = { events: [message], has_more: false, partial: false, next_before_sequence: null };
+    const prefix = `/api/v1/sessions/${sessionId}`;
+    try {
+      await withMockSessionEvents(page, async ({ apiUrl }) => {
+        const extra = command === "search" ? ["file"] : ["read", "events"].includes(command) ? ["--remote"] : [];
+        const result = await runCli({
+          cwd: tempRoot, env: { SENTINELAYER_API_URL: apiUrl },
+          args: ["session", command, sessionId, ...extra, "--path", tempRoot],
+        });
+        assert.equal(result.code, 0, result.stderr);
+        assert.match(result.stdout, /\[attachment: image photo-0001\.png, 1\.6 MB, sha256 1a2b3c4d…/);
+        assert.ok(result.stdout.includes(`sl session files get ${sessionId} att-image-0001`));
+        if (command === "read") {
+          assert.match(result.stdout, /- #3 human-owner[^\n]+\[attachment: image photo-0001\.png/);
+        }
+      }, {
+        [`${prefix}/events/before`]: page,
+        [`${prefix}/events/search`]: { results: [{ event: message, sequenceId: 3 }] },
+        [`${prefix}/actions`]: { actions: [], projection: {
+          unacknowledgedHumanMessages: [message], pinnedMessages: [{ targetSequenceId: 3 }], pinLimit: 10,
+        } },
+      });
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+}
+
+for (const emit of ["text", "ndjson"]) {
+  test(`Attachment visibility: CLI listen ${emit} retains attachment metadata and summaries`, async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "sl-listen-attachments-"));
+    const attachments = [{
+      attachmentId: "att-image-0001", kind: "image", filename: "photo-0001.png",
+      contentType: "image/png", sizeBytes: 1677722, sha256: "1a2b3c4d" + "a".repeat(56),
+      status: "uploaded", pointer: "/attachments/att-image-0001",
+    }];
+    try {
+      await withMockSessionEvents({
+        events: [{
+          stream: "sl_event", event: "session_message", cursor: "cursor-3",
+          sessionId: "listen-lifecycle-e2e", ts: "2999-01-01T00:00:00.000Z",
+          agent: { id: "human-owner" }, payload: { message: "", attachments, to: "codex-e2e" },
+        }],
+        cursor: "cursor-3",
+      }, async ({ apiUrl, sessionId }) => {
+        const result = await runCli({
+          cwd: tempRoot, env: { SENTINELAYER_API_URL: apiUrl },
+          args: baseListenArgs(sessionId, tempRoot, ["--emit", emit]),
+        });
+        assert.equal(result.code, 0, result.stderr);
+        let text = result.stdout;
+        if (emit === "ndjson") {
+          const rows = result.stdout.trim().split(/\r?\n/).map((line) => JSON.parse(line));
+          const message = rows.find((row) => row.event === "session_message");
+          assert.deepEqual(message.payload.attachments, attachments);
+          text = message.attachmentSummary;
+        }
+        assert.match(text, /\[attachment: image photo-0001\.png, 1\.6 MB, sha256 1a2b3c4d…/);
+        assert.ok(text.includes(`sl session files get ${sessionId} att-image-0001`));
+      });
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
 }
 
 test("E2E session listener lifecycle: stale stop does not abort a restarted listener", async () => {

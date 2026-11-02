@@ -10,6 +10,7 @@ import {
   selfProvisioningMcpInputSchema,
 } from "./cli-command-tools.js";
 import { appendToStream, readStream } from "../session/stream.js";
+import { formatAttachmentSummary, withAttachmentSummary } from "../session/attachment-summary.js";
 import { listFileLocks, lockFile, unlockFile } from "../session/file-locks.js";
 import {
   DEFAULT_ROOM_FILES_LIMIT,
@@ -211,6 +212,7 @@ function summarizeSessionEvent(event = {}) {
         })
       : undefined,
     payload: safePayload(event.payload),
+    attachmentSummary: formatAttachmentSummary(event) || undefined,
     eventId: normalizeString(event.eventId),
     idempotencyToken: normalizeString(event.idempotencyToken),
   });
@@ -1083,7 +1085,7 @@ export function createSessionMcpToolHandlers({
               count: Array.isArray(actionResult.actions) ? actionResult.actions.length : 0,
             }
           : null,
-        events: includeRaw ? events : events.map((event) => summarizeSessionEvent(event)),
+        events: events.map((event) => includeRaw ? withAttachmentSummary(event) : summarizeSessionEvent(event)),
       };
     },
 
@@ -1176,7 +1178,7 @@ export function createSessionMcpToolHandlers({
               count: Array.isArray(actionResult.actions) ? actionResult.actions.length : 0,
             }
           : null,
-        events: includeRaw ? events : events.map((event) => summarizeSessionEvent(event)),
+        events: events.map((event) => includeRaw ? withAttachmentSummary(event) : summarizeSessionEvent(event)),
       };
     },
 

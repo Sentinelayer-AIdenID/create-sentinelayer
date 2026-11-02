@@ -17,6 +17,7 @@
 // here is small enough to own.
 
 import { messageRevision, sessionMessageEditSnapshot, sessionMessageRoutingEvent } from "../message-edits.js";
+import { formatAttachmentSummary } from "../attachment-summary.js";
 
 const BROADCAST_RECIPIENTS = new Set(["*", "all", "broadcast", "everyone", "anyone", "agents", "all-agents"]);
 const DEFAULT_WAKE_EVENT_TYPES = new Set(["session_message", "help_request", "session_message_edited"]);
@@ -100,9 +101,12 @@ function defaultFormatMessage(event, agentId) {
   const author = agentIdOf(event) || "unknown";
   const text = event?.payload?.message ?? event?.message ?? "";
   const body = typeof text === "string" ? text : "";
-  const head = `Senti wake for ${agentId}: ${event.event === "session_message_edited" ? "edited message" : "new message"} from ${author}.`;
-  const combined = body ? `${head}\n\n${body}` : head;
-  return combined.length > MAX_WAKE_MESSAGE_CHARS ? combined.slice(0, MAX_WAKE_MESSAGE_CHARS) : combined;
+  const head = `Senti wake for ${agentId}: ${event.event === "session_message_edited" ? "edited message" : "new message"} from ${author}.`
+    .slice(0, MAX_WAKE_MESSAGE_CHARS);
+  const attachmentBudget = Math.max(0, MAX_WAKE_MESSAGE_CHARS - head.length - 2);
+  const attachments = formatAttachmentSummary(event).slice(0, attachmentBudget);
+  const bodyBudget = Math.max(0, MAX_WAKE_MESSAGE_CHARS - head.length - 2 - (attachments ? attachments.length + 2 : 0));
+  return [head, body.slice(0, bodyBudget), attachments].filter(Boolean).join("\n\n");
 }
 
 /**

@@ -10,6 +10,7 @@ import { createAgentEvent } from "../events/schema.js";
 import { isSessionControlEvent } from "./control-events.js";
 import { createSessionMutationHeaders } from "./invitations.js";
 import { messageRevision } from "./message-edits.js";
+import { appendAttachmentSummary } from "./attachment-summary.js";
 import { readAdmissionCredentialState } from "./admission.js";
 import { installTestEgressGuard } from "../net/test-egress-guard.js";
 import { isUrlPathSegment, urlPathSegment } from "../net/url-path.js";
@@ -2842,7 +2843,10 @@ export async function fetchSessionPinnedMessages(
           null;
         if (match) {
           base.author = pinnedEventAuthorId(match);
-          base.content = pinnedEventContentText(match);
+          base.content = appendAttachmentSummary(pinnedEventContentText(match), { sessionId: normalizedSessionId, ...match });
+          if (Array.isArray(match.payload?.attachments) && match.payload.attachments.length) {
+            base.attachments = match.payload.attachments;
+          }
           base.resolved = true;
         }
       }
