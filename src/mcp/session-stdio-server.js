@@ -1758,7 +1758,7 @@ export const SESSION_MCP_TOOLS = Object.freeze([
     name: "session_file_get",
     title: "Download Senti Room File",
     description:
-      "Download one published room file into the workspace: streamed to disk, checked against the server's sha256, and written atomically. Returns the saved path and the file's metadata, never its bytes. Refuses to overwrite an existing file unless force is true, and refuses an out path outside the workspace.",
+      "Download one published room file into the workspace: streamed to disk, checked against the server's sha256, and written atomically. Returns the saved path and the file's metadata, never its bytes. Refuses to overwrite an existing file unless force is true, and refuses an out path outside the workspace. workspaceOnly checks the destination folder when the call starts; it does not protect against another local process renaming or relinking folders inside the workspace during the download.",
     inputSchema: {
       type: "object",
       additionalProperties: false,

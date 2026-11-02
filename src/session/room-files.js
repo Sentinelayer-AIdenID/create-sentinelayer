@@ -253,6 +253,14 @@ export async function resolveRoomFileDestination({ targetPath = process.cwd(), o
     const namesDirectory = Boolean(existing?.isDirectory()) || /[\\/]$/.test(requested);
     destination = namesDirectory ? path.join(resolved, requirePlainFileName(filename)) : resolved;
   }
+  // On Windows "name:stream" names a data stream of the file "name", not a file. A download to one
+  // fails only after it has left empty files next to it, so it is refused before anything is written.
+  if (process.platform === "win32" && path.basename(destination).includes(":")) {
+    throw new RoomFileError(
+      "unsafe_file_name",
+      `${JSON.stringify(path.basename(destination))} is not a plain file name: on Windows a ":" names a file stream. Choose another name with --out.`,
+    );
+  }
 
   const directory = path.dirname(destination);
   const realDirectory = await fsp.realpath(directory).catch(() => null);

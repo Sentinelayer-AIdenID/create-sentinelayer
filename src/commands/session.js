@@ -4873,6 +4873,10 @@ export function registerSessionCommand(program) {
     .option("--force", "Overwrite an existing file")
     .option("--path <path>", "Workspace path; a relative --out must stay inside it", ".")
     .option("--json", "Emit machine-readable output")
+    .addHelpText(
+      "after",
+      "\nworkspaceOnly checks the destination folder when the call starts; it does not protect against another local process renaming or relinking folders inside the workspace during the download.",
+    )
     .action(async (sessionId, attachmentId, options, command) => {
       const normalizedSessionId = normalizeString(sessionId);
       const normalizedAttachmentId = normalizeString(attachmentId);

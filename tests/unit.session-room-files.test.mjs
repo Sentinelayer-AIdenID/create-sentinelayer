@@ -489,6 +489,30 @@ test("room files: a link out of the workspace is refused for a relative --out", 
   });
 });
 
+test("room files: on Windows an out that names a file stream is refused and leaves no file behind", { skip: process.platform !== "win32" && "file streams (name:stream) exist only on Windows" }, async () => {
+  await withWorkspace("room-files-stream", async ({ workspace }) => {
+    const existing = path.join(workspace, "review-notes.md");
+    await writeFile(existing, "my local edits", "utf-8");
+    const fake = installFakeApi();
+    try {
+      for (const out of ["review-notes.md:hidden", "fresh.md:hidden"]) {
+        for (const force of [false, true]) {
+          await assert.rejects(
+            () => downloadRoomFile(SESSION_ID, "att-report-0001", { targetPath: workspace, out, force, workspaceOnly: true }),
+            (error) => error instanceof RoomFileError && error.code === "unsafe_file_name",
+            `${out} (force ${force})`,
+          );
+        }
+      }
+      assert.equal(fake.calls.some((call) => call.url.startsWith(STORE)), false, "nothing is downloaded");
+      assert.deepEqual(await readdir(workspace), ["review-notes.md"], "no empty file is left in the workspace");
+      assert.equal(await readFile(existing, "utf-8"), "my local edits");
+    } finally {
+      fake.restore();
+    }
+  });
+});
+
 test("room files: a checksum mismatch saves nothing and leaves no partial file", async () => {
   await withWorkspace("room-files-checksum", async ({ workspace }) => {
     const tampered = Buffer.from(REPORT);
@@ -520,6 +544,35 @@ test("room files: a failed forced download leaves the existing file untouched", 
       );
       assert.equal(await readFile(existing, "utf-8"), "my local edits");
       assert.deepEqual(await readdir(workspace), ["review-notes.md"]);
+    } finally {
+      fake.restore();
+    }
+  });
+});
+
+test("room files: the temporary file is removed when a forced download cannot be moved into place", async (t) => {
+  await withWorkspace("room-files-rename-fails", async ({ workspace }) => {
+    const existing = path.join(workspace, "review-notes.md");
+    await writeFile(existing, "my local edits", "utf-8");
+    const rename = fsp.rename;
+    const renames = t.mock.method(fsp, "rename", async (from, to) => {
+      if (String(from).endsWith(".part")) {
+        throw Object.assign(new Error("EBUSY: resource busy or locked, rename"), { code: "EBUSY" });
+      }
+      return rename.call(fsp, from, to);
+    });
+    const fake = installFakeApi();
+    try {
+      await assert.rejects(
+        () => downloadRoomFile(SESSION_ID, "att-report-0001", { targetPath: workspace, force: true }),
+        (error) => error?.code === "EBUSY",
+      );
+      assert.ok(
+        renames.mock.calls.some((call) => String(call.arguments[0]).endsWith(".part")),
+        "the verified download was moved toward its destination",
+      );
+      assert.equal(await readFile(existing, "utf-8"), "my local edits");
+      assert.deepEqual(await readdir(workspace), ["review-notes.md"], "the temporary file is removed");
     } finally {
       fake.restore();
     }
@@ -680,6 +733,55 @@ test("room files: MCP session_files_list and session_file_get save into the work
       const tools = new Set(SESSION_MCP_TOOLS.map((tool) => tool.name));
       assert.equal(tools.has("session_files_list"), true);
       assert.equal(tools.has("session_file_get"), true);
+    } finally {
+      fake.restore();
+    }
+  });
+});
+
+test("room files: session_file_get (workspaceOnly) refuses an absolute out, a .. out of the workspace and a link that exists at the check, with or without force", async (t) => {
+  await withWorkspace("room-files-workspace-only", async ({ workspace }) => {
+    const outside = path.join(path.dirname(workspace), "outside");
+    await mkdir(outside);
+    await writeFile(path.join(outside, "target.md"), "outside file", "utf-8");
+    const refusals = [
+      [path.join(workspace, "inside-but-absolute.md"), "out_outside_workspace"],
+      [path.join(outside, "absolute.md"), "out_outside_workspace"],
+      ["../outside/dotdot.md", "out_outside_workspace"],
+      ["sub/../../outside/nested-dotdot.md", "out_outside_workspace"],
+    ];
+    const linkInWorkspace = (target, name, type) =>
+      symlink(target, path.join(workspace, name), type).then(
+        () => true,
+        (error) => {
+          t.diagnostic(`cannot create a ${type} link here (${error.code}); its cases are not run`);
+          return false;
+        },
+      );
+    if (await linkInWorkspace(outside, "escape", process.platform === "win32" ? "junction" : "dir")) {
+      refusals.push(["escape/linked.md", "out_outside_workspace"], ["escape", "out_outside_workspace"]);
+    }
+    if (await linkInWorkspace(path.join(outside, "target.md"), "file-link.md", "file")) {
+      refusals.push(["file-link.md", "destination_is_link"]);
+    }
+    if (await linkInWorkspace(path.join(outside, "missing.md"), "dangling-link.md", "file")) {
+      refusals.push(["dangling-link.md", "destination_is_link"]);
+    }
+    const workspaceBefore = (await readdir(workspace)).sort();
+    const fake = installFakeApi();
+    try {
+      const handlers = createSessionMcpToolHandlers({ targetPath: workspace });
+      for (const [out, reason] of refusals) {
+        for (const force of [false, true]) {
+          const { result } = await callTool(handlers, "session_file_get", { sessionId: SESSION_ID, attachmentId: "att-report-0001", out, force });
+          assert.equal(result.ok, false, `${out} (force ${force}) is refused`);
+          assert.equal(result.reason, reason, `${out} (force ${force})`);
+        }
+      }
+      assert.equal(fake.calls.some((call) => call.url.startsWith(STORE)), false, "nothing is downloaded");
+      assert.deepEqual(await readdir(outside), ["target.md"], "nothing is written outside the workspace");
+      assert.equal(await readFile(path.join(outside, "target.md"), "utf-8"), "outside file");
+      assert.deepEqual((await readdir(workspace)).sort(), workspaceBefore, "nothing is written in the workspace");
     } finally {
       fake.restore();
     }
