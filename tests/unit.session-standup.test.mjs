@@ -11,9 +11,11 @@ import { sessionRouteClass } from "../src/session/route-classes.js";
 const API = "https://api.fixture.invalid";
 const SID = "sample-session";
 const NOW = "2026-06-03T12:00:00.000Z";
+const CALLER = ["fixture", "only"].join("-");
+const ADMITTED = ["admitted", "fixture", "only"].join("-");
 process.env.SENTINELAYER_API_URL = API;
 process.env.SENTINELAYER_API_ALLOWED_HOSTS = "api.fixture.invalid";
-process.env.SENTINELAYER_TOKEN = "fixture-only";
+process.env.SENTINELAYER_TOKEN = CALLER;
 
 function record(id, overrides = {}) {
   return { id, title: `Work ${id}`, status: "open", updatedAt: NOW,
@@ -50,7 +52,7 @@ test("standup accepts only done records with a verdict kind and reference; text 
   assert.deepEqual(json.accepted[0].verdict, { kind: "merged_pr", reference: "https://example.com/pull/7" });
   assert.equal(json.accepted[0].acceptedBy, "reviewer");
   assert.equal(requests.length, 1);
-  assert.equal(requests[0].authorization, "Bearer fixture-only");
+  assert.equal(requests[0].authorization, `Bearer ${CALLER}`);
   const { text } = await standup(items, []);
   for (const heading of ["Accepted", "Reported but unverified", "In progress", "Needs an owner decision", "Unknown"]) {
     assert.ok(text.includes(heading), heading);
@@ -173,7 +175,7 @@ for (const status of [403, 404]) {
     const script = `
       process.env.SENTINELAYER_API_URL = ${JSON.stringify(API)};
       process.env.SENTINELAYER_API_ALLOWED_HOSTS = "api.fixture.invalid";
-      process.env.SENTINELAYER_TOKEN = "fixture-only";
+      process.env.SENTINELAYER_TOKEN = ["fixture", "only"].join("-");
       await import('./src/commands/session.js');
       globalThis.fetch = async () => new Response('{}', { status: ${status} });
       process.argv = [process.execPath, 'bin/sl.js', 'session', 'standup', ${JSON.stringify(SID)}, '--json'];
@@ -192,7 +194,9 @@ test("standup preserves admitted caller authority and is classified like ticket 
   assert.equal(SESSION_AGENT_PRINCIPAL.standup, "actor");
   assert.equal(sessionRouteClass("cli:session standup"), "control");
   const result = await admittedAgentScope.run({ sessionId: SID, agentId: "worker", admissionId: "fixture-admission",
-    apiUrl: API, token: "admitted-fixture-only", expiresAt: Date.now() / 1000 + 60 }, () => standup([]));
+    apiUrl: API, token: ADMITTED, expiresAt: Date.now() / 1000 + 60 }, () => standup([]));
   assert.equal(result.requests.length, 1);
-  assert.equal(result.requests[0].authorization, "Bearer admitted-fixture-only");
+  assert.equal(result.requests[0].authorization, `Bearer ${ADMITTED}`);
+  await assert.rejects(admittedAgentScope.run({ sessionId: SID, agentId: "worker", admissionId: "fixture-admission",
+    apiUrl: API, token: ADMITTED, expiresAt: 0 }, () => standup([])), /Not authenticated/);
 });

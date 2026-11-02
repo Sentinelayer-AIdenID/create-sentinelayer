@@ -106,12 +106,11 @@ export async function sessionStandup(sessionId, {
   resolveAuthSession = resolveActiveAuthSession, requestRead = requestJson,
 } = {}) {
   const cutoff = sinceTime(since, now); // Invalid windows refuse before any request.
-  const sid = urlPathSegment(sessionId, { label: "sessionId" });
   const auth = await resolveAuthSession({ cwd: targetPath, env: process.env, autoRotate: false });
   if (!isAuthenticated(auth) || !auth?.apiUrl) throw new Error("Not authenticated for this session.");
   let body;
   try {
-    body = await checkedTransport(requestRead)(`${auth.apiUrl.replace(/\/+$/, "")}/api/v1/sessions/${sid}/tickets`, {
+    body = await checkedTransport(requestRead)(`${auth.apiUrl.replace(/\/+$/, "")}/api/v1/sessions/${urlPathSegment(sessionId, { label: "sessionId" })}/tickets`, {
       method: "GET", credential: await credentialFor(auth),
     });
   } catch (error) {

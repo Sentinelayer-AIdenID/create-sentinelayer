@@ -147,6 +147,7 @@ export const BRIDGE_ALLOWED_INPUTS = Object.freeze({
   "session.search": "sessionId query beforeSequence limit path json",
   "session.set-title": "sessionId title path json",
   "session.setup-guides": "sessionId path json",
+  "session.standup": "sessionId since agent path json",
   "session.start": "path title template ttlSeconds forceNew force resume reuseWindowSeconds daemon json",
   "session.status": "sessionId path json",
   "session.stop-listener": "sessionId agent path json",
