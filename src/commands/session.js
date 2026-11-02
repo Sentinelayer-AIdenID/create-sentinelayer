@@ -7,6 +7,7 @@ import { spawn as defaultSpawn } from "node:child_process";
 
 import pc from "picocolors";
 import { appendAttachmentSummary, withAttachmentSummary } from "../session/attachment-summary.js";
+import { formatEditSummary, withEditSummary } from "../session/edit-summary.js";
 
 import { credentialFor, isAuthenticated } from "../auth/credential-destinations.js";
 import { SentinelayerApiError, requestJsonMutation } from "../auth/http.js";
@@ -167,7 +168,7 @@ import {
   downloadRoomFile,
   listRoomFiles,
 } from "../session/room-files.js";
-import { messageRevision, replyRevisionEvent, sessionMessageRoutingEvent } from "../session/message-edits.js";
+import { messageRevision, replyRevisionEvent } from "../session/message-edits.js";
 import { runSessionRecall } from "../session/recall/index.js";
 import { mergeLiveSources } from "../session/live-source.js";
 import { listenSessionEvents } from "../session/listener.js";
@@ -2475,9 +2476,7 @@ function formatEventText(event = {}) {
   const type = normalizeString(event.event || event.type) || "event";
   const agentId = normalizeString(event.agent?.id || event.agentId || "unknown");
   if (type === "session_message_edited") {
-    const routed = sessionMessageRoutingEvent(event);
-    const target = event.payload?.targetActionId ? `reply ${event.payload.targetActionId}` : `#${event.payload?.targetSequenceId || "?"}`;
-    return `${ts} ${agentId} ${type} ${target} revision ${event.payload?.messageRevision || "?"}: ${normalizeString(routed.payload?.message || routed.payload?.text || "")}`;
+    return `${ts} ${agentId} ${formatEditSummary(event)}`;
   }
   const payload = event.payload && typeof event.payload === "object" ? event.payload : {};
   if (type === "session_action" || type === "session_reply" || type === "session_reaction") {
@@ -5967,7 +5966,7 @@ export function registerSessionCommand(program) {
           },
           onEvent: async (event) => {
             if (emitFormat === "ndjson") {
-              console.log(JSON.stringify(withAttachmentSummary(event)));
+              console.log(JSON.stringify(withEditSummary(withAttachmentSummary(event))));
             } else {
               console.log(formatEventLine(event));
             }
@@ -6881,11 +6880,11 @@ export function registerSessionCommand(program) {
           tail,
           beforeSequence,
           count: events.length,
-          events: events.map(withAttachmentSummary),
+          events: events.map(withAttachmentSummary).map(withEditSummary),
           includeControlEvents,
           hiddenControlEventCount,
           unacknowledgedHumanMessageCount: unacknowledgedHumanMessages.length,
-          unacknowledgedHumanMessages: unacknowledgedHumanMessages.map(withAttachmentSummary),
+          unacknowledgedHumanMessages: unacknowledgedHumanMessages.map(withAttachmentSummary).map(withEditSummary),
           recentHumanActivityCount: recentHumanActivity.length,
           recentHumanActivity,
           autoView,
@@ -6987,7 +6986,7 @@ export function registerSessionCommand(program) {
             if (item.event) {
               if (!includeControlEvents && isSessionControlEvent(item.event)) continue;
               if (emitJson) {
-                console.log(JSON.stringify({ source: item.source, event: withAttachmentSummary(item.event) }));
+                console.log(JSON.stringify({ source: item.source, event: withEditSummary(withAttachmentSummary(item.event)) }));
               } else {
                 const sourceTag = item.source === "sse" ? pc.cyan("[sse]") : pc.gray("[fs] ");
                 console.log(`${sourceTag} ${formatEventLine(item.event)}`);
@@ -7018,7 +7017,7 @@ export function registerSessionCommand(program) {
           continue;
         }
         if (emitJson) {
-          console.log(JSON.stringify(withAttachmentSummary(event)));
+          console.log(JSON.stringify(withEditSummary(withAttachmentSummary(event))));
         } else {
           console.log(formatEventLine(event));
         }

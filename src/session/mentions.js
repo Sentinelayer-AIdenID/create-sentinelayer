@@ -21,6 +21,8 @@
  *    punctuation + cap length)
  */
 
+import { sessionMessageEditText } from "./edit-summary.js";
+
 // `@handle` is one or more identifier characters. We allow letters,
 // digits, `._-` so `@codex-1`, `@human-mrrcarter`, `@claude.verifier`
 // all work. Word boundary on the front avoids matching `you@example.com`.
@@ -107,10 +109,12 @@ export function enrichEventWithMentions(event) {
 
   // We pull text from the standard fields the renderer already uses,
   // matching the priority in `Session.tsx:payloadText`.
-  const text = normalizeString(payload.message)
-    || normalizeString(payload.text)
-    || normalizeString(payload.detail)
-    || normalizeString(payload.title);
+  const text = event.event === "session_message_edited"
+    ? sessionMessageEditText(event)
+    : normalizeString(payload.message)
+      || normalizeString(payload.text)
+      || normalizeString(payload.detail)
+      || normalizeString(payload.title);
   if (!text) return event;
 
   const parsed = parseMentions(text);

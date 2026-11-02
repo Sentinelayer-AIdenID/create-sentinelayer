@@ -1,6 +1,7 @@
 import { createAgentEvent } from "../events/schema.js";
-import { enrichEventWithMentions } from "./mentions.js";
+import { enrichEventWithMentions, parseMentions } from "./mentions.js";
 import { sessionEventIdentityKeys } from "./event-identity.js";
+import { sessionMessageEditText } from "./edit-summary.js";
 
 export function messageRevision(value = {}) {
   const revision = Number(value.messageRevision ?? value.message_revision ?? 1);
@@ -79,11 +80,16 @@ export function sessionMessageRoutingEvent(event = {}) {
   if (!snapshot) return event;
   const parentPayload = event.payload?.event?.payload || {};
   const payload = { ...parentPayload, ...snapshot.payload };
-  if (event.payload?.reply) payload.message = String(event.payload.reply.note ?? "");
+  payload.message = sessionMessageEditText(event);
   for (const key of ["to", "recipient", "recipients", "targetAgent", "targetAgentId", "broadcast", "mentions"]) {
     if (event.payload[key] !== undefined) payload[key] = event.payload[key];
   }
   const routed = enrichEventWithMentions({ ...snapshot, agent: event.agent || snapshot.agent, payload });
+  // An edit can mention a new recipient while retaining the parent's routing.
+  const mentions = parseMentions(payload.message);
+  if (mentions.handles.length) {
+    routed.payload = { ...routed.payload, recipients: [routed.payload.recipients, ...mentions.handles].filter(Boolean) };
+  }
   if (routed.payload?.mentions?.broadcast?.length) routed.payload.broadcast = true;
   return routed;
 }
