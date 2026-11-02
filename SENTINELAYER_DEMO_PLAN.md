@@ -17,7 +17,7 @@
 ## Prerequisites
 
 ```bash
-# Node.js 18+
+# Node.js 22.19.0 or later (the CLI's package engines: >=22.19.0)
 node --version
 
 # GitHub CLI authenticated
