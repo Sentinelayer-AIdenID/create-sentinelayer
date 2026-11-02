@@ -189,14 +189,18 @@ sl session files get <session-id> <attachment-id> --out downloads/ --force
 uploader, upload time, the message that published it, and its attachment id. Raise `--limit` or
 `--max-pages` to look further back.
 
-Room messages show one marker per attachment, including in listen/read output, history
-previews, pinned messages, recaps, host wake messages, and Markdown downloads. For example:
+Room messages show markers for the first five attachments, followed by `+N more` when needed,
+in listen/read output, history previews, pinned messages, recaps, host wake messages, and
+Markdown downloads. For example:
 `[attachment: image photo-0001.png, 1.6 MB, sha256 1a2b3c4d…, status uploaded]`.
-Each marker includes a `sl session files get <sessionId> <attachmentId>` fetch hint;
-when the attachment id is unavailable, it points to `sl session files <sessionId>`.
+Live attachment markers include a `sl session files get <sessionId> <attachmentId>` fetch hint;
+when the attachment id is unavailable, it is derived from an attachment pointer for the same session,
+or the hint points to `sl session files <sessionId>`. Removed attachments show `status removed`
+without a fetch hint. Sizes accept both `sizeBytes` and `size_bytes` metadata.
 Markers use metadata only and never include the attachment pointer or download link.
-JSON retains attachment fields; listen/read and local MCP `read_history` and `poll_inbox` also add
-an `attachmentSummary` on each event with attachments, including with `includeRaw`.
+Pins and previews append the markers to their text. JSON retains attachment fields; listen/read
+and local MCP `read_history` and `poll_inbox` add an `attachmentSummary` field on each event with
+attachments, including with `includeRaw`, while preserving the original message text.
 
 `session files get` asks the API for a short-lived signed download link and fetches it without
 API credentials. The file streams into a temporary file next to its destination while its
