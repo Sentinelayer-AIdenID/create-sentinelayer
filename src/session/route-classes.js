@@ -70,6 +70,7 @@ export const SESSION_ROUTE_CLASSES = Object.freeze({
   "cli:session ticket claim": "control",
   "cli:session ticket events": "control",
   "cli:session ticket list": "control",
+  "cli:session standup": "control",
   "cli:session ticket release": "control",
   "cli:session ticket renew": "control",
   "cli:session ticket submit": "control",

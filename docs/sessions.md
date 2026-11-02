@@ -142,6 +142,47 @@ If you cannot continue, return the ticket with a reason:
 sl session ticket release <session-id> <ticket-id> --agent codex-1 --reason "handoff"
 ```
 
+## Ticket Standups
+
+```bash
+sl session standup <session-id>
+sl session standup <session-id> --since 24h --json
+sl session standup <session-id> --since 2026-06-02T12:00:00Z
+```
+
+Standup makes one authenticated `GET /api/v1/sessions/<id>/tickets` request and
+summarizes only its returned `items`. This is the bounded board read, not a
+complete backlog or an event history. It makes no model calls, reads no chat
+messages and does not fetch or independently verify verdict references. Existing
+caller permissions apply; an admitted agent can use `--agent <id>`. A 403 or 404
+prints a refusal and exits nonzero, with no local fallback.
+
+The text headings correspond to these JSON arrays:
+
+| Heading | JSON key | Evidence required |
+| --- | --- | --- |
+| Accepted | `accepted` | `status: done`, `hasDoneVerdict: true`, and `lastVerdict.kind` plus `ref` (or `reference`); displays the kind and reference |
+| Reported but unverified | `reportedButUnverified` | `status: done` without that verdict evidence; a completion flag alone is insufficient |
+| In progress | `inProgress` | `status: working` or `in_progress`; shows assignee, `claimedAt`, and the server's `staleClaim` flag |
+| Needs an owner decision | `needsOwnerDecision` | `unaccepted: true`; takes precedence, ordered by `createdAt`, oldest first, unknown ages last |
+| Unknown | `unknown` | Missing ticket identity, ambiguous duplicate evidence, unsupported/missing status, or an unknown update time with a window |
+
+Each entry retains the available ticket fields and an `unknown` list of missing
+evidence; unknown scalar values are `null` in JSON and `unknown` in text. Work is
+never inferred from titles, assignment alone or gaps between records. Records
+with an explicit working status can still show unknown assignee or claim time.
+
+Without `--since`, all returned records are considered. `24h` means the previous
+24 hours at invocation; an ISO timestamp must include a timezone. The inclusive
+cutoff uses `updatedAt`, not creation or claim time. Records with no valid
+`updatedAt` stay in Unknown when a window is used, without asserting they fall
+inside it. The resolved cutoff is returned as `since` (`null` without a window).
+
+Duplicate ticket IDs appear once, using the newest whole record by `updatedAt`.
+Old evidence is never copied into it. Identical records coalesce; conflicting
+records with equal or missing timestamps become Unknown. Other sections sort
+by ticket ID for deterministic output.
+
 ## Checkpoints, Recall and Exports
 
 Checkpoints preserve a summary and its canonical source sequence range. List

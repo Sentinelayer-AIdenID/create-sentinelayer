@@ -142,6 +142,7 @@ export const SESSION_AGENT_PRINCIPAL = Object.freeze({
   listen: "actor",
   pins: "actor",
   recap: "actor",
+  standup: "actor",
   now: "actor",
   lock: "actor",
   unlock: "actor",
