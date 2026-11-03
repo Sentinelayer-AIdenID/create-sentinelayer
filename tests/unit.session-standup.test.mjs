@@ -27,7 +27,7 @@ async function standup(items, args = ["--json"], { body = { items }, status = 20
   const requests = [], lines = [];
   globalThis.fetch = async (url, init) => {
     requests.push({ url: String(url), method: init.method, authorization: new Headers(init.headers).get("authorization") });
-    assert.equal(String(url), `${API}/api/v1/sessions/${SID}/tickets`);
+    assert.equal(String(url), `${API}/api/v1/sessions/${SID}/tickets?limit=200`);
     assert.equal(init.method, "GET");
     return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
   };
@@ -44,24 +44,27 @@ async function standup(items, args = ["--json"], { body = { items }, status = 20
   }
 }
 
-test("standup accepts only done records with a verdict kind and reference; text matches JSON", async () => {
+test("standup accepts done records with evidence claims; text matches JSON", async () => {
   const items = [record("verified", { status: "done", hasDoneVerdict: true,
-    acceptedBy: "reviewer", lastVerdict: { kind: "merged_pr", ref: "https://example.com/pull/7" } })];
+    acceptedBy: "worker", lastVerdict: { verdict: "done", checkedAt: null },
+    doneVerdict: { verdict: "done", evidence: [{ kind: "pr-merged", url: "https://example.com/pull/7" }] } })];
   const { json, requests } = await standup(items);
   assert.equal(json.accepted.length, 1);
-  assert.deepEqual(json.accepted[0].verdict, { kind: "merged_pr", reference: "https://example.com/pull/7" });
-  assert.equal(json.accepted[0].acceptedBy, "reviewer");
+  assert.deepEqual(json.accepted[0].verdict, { kind: "pr-merged", reference: "https://example.com/pull/7",
+    evidence: [{ kind: "pr-merged", reference: "https://example.com/pull/7" }] });
+  assert.equal(json.accepted[0].acceptedBy, "worker");
   assert.equal(requests.length, 1);
   assert.equal(requests[0].authorization, `Bearer ${CALLER}`);
   const { text } = await standup(items, []);
   for (const heading of ["Accepted", "Reported but unverified", "In progress", "Needs an owner decision", "Unknown"]) {
     assert.ok(text.includes(heading), heading);
   }
-  assert.match(text, /merged_pr.*https:\/\/example.com\/pull\/7/);
+  assert.match(text, /pr-merged.*https:\/\/example.com\/pull\/7/);
+  assert.doesNotMatch(text, /accepted by:/);
   assert.match(text, /verified.*Work verified/);
 });
 
-test("standup keeps manual completion and verdicts without references unverified", async () => {
+test("standup keeps manual completion and verdicts without evidence unverified", async () => {
   const { json } = await standup([
     record("manual", { status: "done", hasDoneVerdict: false, completion: { verified: false } }),
     record("flag-only", { status: "done", hasDoneVerdict: true, lastVerdict: { kind: "merged_pr" } }),
@@ -139,7 +142,8 @@ test("standup resolves 24h once and has no implicit window when since is omitted
 
 test("standup coalesces by id using the newest whole record, independently of input order", async () => {
   const old = record("same", { status: "done", updatedAt: "2026-06-01T00:00:00Z", hasDoneVerdict: true,
-    lastVerdict: { kind: "merged_pr", ref: "https://example.com/pull/1" } });
+    lastVerdict: { verdict: "done", checkedAt: null },
+    doneVerdict: { verdict: "done", evidence: [{ kind: "pr-merged", url: "https://example.com/pull/1" }] } });
   const current = record("same", { status: "done", hasDoneVerdict: true });
   const items = [old, current, { ...current }];
   const first = await standup(items);
