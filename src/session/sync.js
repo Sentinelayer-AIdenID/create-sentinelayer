@@ -662,9 +662,12 @@ async function readResponseJsonWithTimeout(
   }
 }
 
-async function readResponseJsonSafely(response, timeoutMs = DEFAULT_SYNC_TIMEOUT_MS) {
+async function readResponseJsonSafely(response, timeoutMs = DEFAULT_SYNC_TIMEOUT_MS, controller = null) {
   try {
-    return await readResponseJsonWithTimeout(response, timeoutMs, { fallback: null });
+    return await readResponseJsonWithTimeout(response, timeoutMs, {
+      fallback: null,
+      onTimeout: () => abortRequestController(controller, "response_body_timeout"),
+    });
   } catch {
     return null;
   }
@@ -716,7 +719,7 @@ export async function fetchJsonWithFullTimeout(
     // Older callers discard refusal bodies. Inspect only the invitation signal,
     // within the request deadline; unreadable bodies keep the existing refusal.
     const remainingMs = Math.max(1, resolvedTimeoutMs - (Date.now() - startedAtMs));
-    payload = await readResponseJsonSafely(response, remainingMs);
+    payload = await readResponseJsonSafely(response, remainingMs, controller);
   } else {
     cancelResponseBody(response);
   }
@@ -2279,6 +2282,7 @@ export async function streamSessionEvents(
   const controller = new AbortController();
   const normalizedTimeoutMs = normalizePositiveInteger(timeoutMs, DEFAULT_SYNC_TIMEOUT_MS);
   const normalizedIdleTimeoutMs = normalizePositiveInteger(idleTimeoutMs, 0);
+  const deadlineMs = Date.now() + normalizedTimeoutMs;
   const timeoutHandle = setTimeout(() => controller.abort(), normalizedTimeoutMs);
   if (typeof timeoutHandle.unref === "function") {
     timeoutHandle.unref();
@@ -2371,7 +2375,9 @@ export async function streamSessionEvents(
   try {
     if (!response || !response.ok || !response.body) {
       if (response?.status === 403 || response?.status === 404) {
-        throwIfPendingSessionInvitation(await readResponseJsonSafely(response, normalizedTimeoutMs), response.status);
+        const remainingMs = Math.max(1, deadlineMs - Date.now());
+        const payload = await readResponseJsonSafely(response, remainingMs, controller);
+        throwIfPendingSessionInvitation(payload, response.status);
       }
       return {
         ok: false,
