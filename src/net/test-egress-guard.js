@@ -103,8 +103,20 @@ export function installTestEgressGuard({ env = process.env, force = false } = {}
   if (typeof nativeFetch !== "function" || typeof NativeRequest !== "function") return false;
   if (nativeFetch[GUARD_MARKER]) return true; // idempotent
 
-  async function followChecked(thisArg, request, hops) {
-    const response = await nativeFetch.call(thisArg, new NativeRequest(request, { redirect: "manual" }));
+  const requestOwners = new WeakMap();
+  async function dispatch(thisArg, request, ancestors = []) {
+    const response = await nativeFetch.call(thisArg, request);
+    // Undici follows cloned Requests through weak AbortController references. Keep
+    // the owners alive through body consumption, including after headers arrive.
+    const owners = [...ancestors, request];
+    requestOwners.set(response, owners);
+    if (response.body) requestOwners.set(response.body, owners);
+    return response;
+  }
+
+  async function followChecked(thisArg, request, hops, ancestors = []) {
+    const owners = [...ancestors, request];
+    const response = await dispatch(thisArg, new NativeRequest(request, { redirect: "manual" }), owners);
     const location = response.headers.get("location");
     if (!REDIRECT_STATUSES.has(response.status) || location === null) return response;
     let next;
@@ -134,7 +146,7 @@ export function installTestEgressGuard({ env = process.env, force = false } = {}
       signal: request.signal,
       redirect: "manual",
     });
-    return followChecked(thisArg, nextRequest, hops + 1);
+    return followChecked(thisArg, nextRequest, hops + 1, owners);
   }
 
   const guarded = function guardedTestFetch(input, init) {
@@ -145,7 +157,7 @@ export function installTestEgressGuard({ env = process.env, force = false } = {}
       return Promise.reject(error); // the same TypeError native fetch would raise
     }
     if (!isAllowedTestDestination(request.url)) return Promise.reject(block(request.url));
-    if (request.redirect !== "follow") return nativeFetch.call(this, request);
+    if (request.redirect !== "follow") return dispatch(this, request);
     return followChecked(this, request, 0);
   };
   Object.defineProperty(guarded, GUARD_MARKER, { value: true });

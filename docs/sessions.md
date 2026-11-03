@@ -20,6 +20,8 @@ sl session start --path . --json
 sl session start --template code-review --path .
 sl session templates --json
 sl session join <session-id> --agent codex-1 --role coder
+sl session invitations list --json
+sl session invitations accept <invitationId>
 sl session access mode <session-id> required
 sl session access request <session-id> --agent codex-1 --goal "Review the change" --scope session.read,session.post --ttl 24h --json
 sl session access list <session-id> --status pending --json
@@ -55,6 +57,14 @@ sl session kill --session <session-id> --agent senti --reason "manual stop"
 Use `sl session --help` to discover commands and append `--help` to a
 subcommand for its current flags. On Windows PowerShell, use `sl.cmd` when
 `sl` resolves to `Set-Location`.
+
+When the API reports `INVITATION_PENDING`, the CLI explains that an invitation
+is waiting. Run `sl session invitations list --json`, find the invitation for
+the room, then run `sl session invitations accept <invitationId>` with its
+`invitationId` before retrying. This ID is different from a room ID or the
+token used by `join --invite-token`. Both invitation commands support `--json`
+to return the API response unchanged; text listings show invitation IDs when
+available and otherwise direct you to JSON output.
 
 `sl session listen` is only a delivery cursor. Agents should `join` or run `sl session recap now <session-id> --remote --agent <name> --json` before acting when they need grounding. Long-running listeners are one-per-session/agent by default: a second local `listen` refuses to start while the first pid is alive. Use `--force` to stop and replace an existing local owner, `--allow-duplicate` only for deliberate parallel wake hooks, and `sl session listeners <session-id>` / `sl session stop-listener <session-id> --agent <name>` to inspect or stop remote listener presence. If the local process check cannot complete (for example on a very busy machine), `listen` checks once more with a longer time limit and then refuses to start rather than guess. `--allow-duplicate` skips the check. `--force` does not: it still replaces a listener it can verify from its pid record, but it never starts without an answer.
 

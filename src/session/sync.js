@@ -8,7 +8,7 @@ import { credentialedRequest, credentialFor, isAuthenticated } from "../auth/cre
 import { resolveActiveAuthSession } from "../auth/service.js";
 import { createAgentEvent } from "../events/schema.js";
 import { isSessionControlEvent } from "./control-events.js";
-import { createSessionMutationHeaders } from "./invitations.js";
+import { createSessionMutationHeaders, throwIfPendingSessionInvitation } from "./invitations.js";
 import { messageRevision } from "./message-edits.js";
 import { appendAttachmentSummary } from "./attachment-summary.js";
 import { readAdmissionCredentialState } from "./admission.js";
@@ -662,9 +662,12 @@ async function readResponseJsonWithTimeout(
   }
 }
 
-async function readResponseJsonSafely(response, timeoutMs = DEFAULT_SYNC_TIMEOUT_MS) {
+async function readResponseJsonSafely(response, timeoutMs = DEFAULT_SYNC_TIMEOUT_MS, controller = null) {
   try {
-    return await readResponseJsonWithTimeout(response, timeoutMs, { fallback: null });
+    return await readResponseJsonWithTimeout(response, timeoutMs, {
+      fallback: null,
+      onTimeout: () => abortRequestController(controller, "response_body_timeout"),
+    });
   } catch {
     return null;
   }
@@ -703,6 +706,7 @@ export async function fetchJsonWithFullTimeout(
     },
   );
 
+  const sessionRequest = new URL(url).pathname.startsWith("/api/v1/sessions/");
   let payload = {};
   if ((response?.ok && readSuccessBody) || readErrorBody || errorBodyStatuses.includes(response?.status)) {
     const elapsedMs = Math.max(0, Date.now() - startedAtMs);
@@ -711,9 +715,15 @@ export async function fetchJsonWithFullTimeout(
       fallback: {},
       onTimeout: () => abortRequestController(controller, "response_body_timeout"),
     });
+  } else if (sessionRequest && (response?.status === 403 || response?.status === 404)) {
+    // Older callers discard refusal bodies. Inspect only the invitation signal,
+    // within the request deadline; unreadable bodies keep the existing refusal.
+    const remainingMs = Math.max(1, resolvedTimeoutMs - (Date.now() - startedAtMs));
+    payload = await readResponseJsonSafely(response, remainingMs, controller);
   } else {
     cancelResponseBody(response);
   }
+  if (sessionRequest) throwIfPendingSessionInvitation(payload, response?.status);
   return { response, payload };
 }
 
@@ -1133,6 +1143,7 @@ export async function syncSessionEventToApi(
             remainingMs(), fetchImpl, { readSuccessBody: false },
           ));
         } catch (grantError) {
+          if (grantError?.code === "INVITATION_PENDING") throw grantError;
           recordCircuitFailure(outboundCircuit, normalizedNowMs);
           return {
             synced: false,
@@ -1159,6 +1170,7 @@ export async function syncSessionEventToApi(
             endpoint, requestInit, remainingMs(), fetchImpl, { readSuccessBody: false },
           ));
         } catch (retryError) {
+          if (retryError?.code === "INVITATION_PENDING") throw retryError;
           recordCircuitFailure(outboundCircuit, normalizedNowMs);
           return {
             synced: false,
@@ -1187,6 +1199,7 @@ export async function syncSessionEventToApi(
       reason: `api_${response ? response.status : "no_response"}`,
     };
   } catch (error) {
+    if (error?.code === "INVITATION_PENDING") throw error;
     recordCircuitFailure(outboundCircuit, normalizedNowMs);
     return {
       synced: false,
@@ -1283,6 +1296,7 @@ async function syncSessionAuxPayload(
       status: response.status,
     };
   } catch (error) {
+    if (error?.code === "INVITATION_PENDING") throw error;
     recordCircuitFailure(outboundCircuit, normalizedNowMs);
     return {
       synced: false,
@@ -1446,6 +1460,7 @@ export async function pollHumanMessages(
       dropped,
     };
   } catch (error) {
+    if (error?.code === "INVITATION_PENDING") throw error;
     recordCircuitFailure(inboundCircuit, normalizedNowMs);
     return {
       ok: false,
@@ -1632,6 +1647,7 @@ export async function pollSessionEvents(
       scanExhausted: typeof rawScanExhausted === "boolean" ? rawScanExhausted : null,
     };
   } catch (error) {
+    if (error?.code === "INVITATION_PENDING") throw error;
     recordCircuitFailure(inboundCircuit, normalizedNowMs);
     return {
       ok: false,
@@ -1774,6 +1790,7 @@ export async function fetchSessionPresence(
       present,
     };
   } catch (error) {
+    if (error?.code === "INVITATION_PENDING") throw error;
     recordCircuitFailure(inboundCircuit, normalizedNowMs);
     return {
       ok: false,
@@ -1929,6 +1946,7 @@ export async function renewSessionPresence(
       ttlSeconds: normalizePositiveInteger(payload?.ttlSeconds || payload?.ttl_seconds, null),
     };
   } catch (error) {
+    if (error?.code === "INVITATION_PENDING") throw error;
     recordCircuitFailure(outboundCircuit, normalizedNowMs);
     return {
       ok: false,
@@ -2049,6 +2067,7 @@ export async function requestSessionListenerStop(
       control,
     };
   } catch (error) {
+    if (error?.code === "INVITATION_PENDING") throw error;
     recordCircuitFailure(outboundCircuit, normalizedNowMs);
     return {
       ok: false,
@@ -2171,6 +2190,7 @@ export async function updateSessionReadCursor(
       ),
     };
   } catch (error) {
+    if (error?.code === "INVITATION_PENDING") throw error;
     recordCircuitFailure(outboundCircuit, normalizedNowMs);
     return {
       ok: false,
@@ -2262,6 +2282,7 @@ export async function streamSessionEvents(
   const controller = new AbortController();
   const normalizedTimeoutMs = normalizePositiveInteger(timeoutMs, DEFAULT_SYNC_TIMEOUT_MS);
   const normalizedIdleTimeoutMs = normalizePositiveInteger(idleTimeoutMs, 0);
+  const deadlineMs = Date.now() + normalizedTimeoutMs;
   const timeoutHandle = setTimeout(() => controller.abort(), normalizedTimeoutMs);
   if (typeof timeoutHandle.unref === "function") {
     timeoutHandle.unref();
@@ -2353,6 +2374,11 @@ export async function streamSessionEvents(
 
   try {
     if (!response || !response.ok || !response.body) {
+      if (response?.status === 403 || response?.status === 404) {
+        const remainingMs = Math.max(1, deadlineMs - Date.now());
+        const payload = await readResponseJsonSafely(response, remainingMs, controller);
+        throwIfPendingSessionInvitation(payload, response.status);
+      }
       return {
         ok: false,
         reason: `api_${response ? response.status : "no_response"}`,
@@ -2379,6 +2405,7 @@ export async function streamSessionEvents(
       await processSseBlock(buffer, handlers);
     }
   } catch (error) {
+    if (error?.code === "INVITATION_PENDING") throw error;
     return {
       ok: false,
       reason: idleTimedOut
@@ -2533,6 +2560,7 @@ export async function pollSessionEventsBefore(
       rawNextBeforeSequence: payload?.next_before_sequence ?? null,
     };
   } catch (error) {
+    if (error?.code === "INVITATION_PENDING") throw error;
     recordCircuitFailure(inboundCircuit, normalizedNowMs);
     return {
       ok: false,
@@ -2643,6 +2671,7 @@ export async function listSessionMessageActions(
         : null,
     };
   } catch (error) {
+    if (error?.code === "INVITATION_PENDING") throw error;
     recordCircuitFailure(inboundCircuit, normalizedNowMs);
     return {
       ok: false,
@@ -2734,6 +2763,7 @@ export async function fetchSessionUsageLedger(
       payload: payload && typeof payload === "object" ? payload : {},
     };
   } catch (error) {
+    if (error?.code === "INVITATION_PENDING") throw error;
     recordCircuitFailure(inboundCircuit, normalizedNowMs);
     return {
       ok: false,
@@ -2945,6 +2975,7 @@ export async function fetchSessionAttachment(
       download: payload?.download && typeof payload.download === "object" ? payload.download : null,
     };
   } catch (error) {
+    if (error?.code === "INVITATION_PENDING") throw error;
     return { ok: false, reason: normalizeString(error?.message) || "attachment_read_failed", status: null };
   }
 }
@@ -3036,6 +3067,7 @@ export async function editSessionMessage(sessionId, {
     recordCircuitSuccess(outboundCircuit);
     return { ok: true, changed: Boolean(payload.changed), replayed: Boolean(payload.replayed), event: payload.event || null, reply: payload.reply || null, notification: payload.notification || null };
   } catch (error) {
+    if (error?.code === "INVITATION_PENDING") throw error;
     recordCircuitFailure(outboundCircuit, timestamp);
     return { ok: false, reason: normalizeString(error?.message) || "message_edit_failed" };
   }
@@ -3187,6 +3219,7 @@ export async function createSessionMessageAction(
       action: payload?.action && typeof payload.action === "object" ? payload.action : null,
     };
   } catch (error) {
+    if (error?.code === "INVITATION_PENDING") throw error;
     recordCircuitFailure(outboundCircuit, normalizedNowMs);
     return {
       ok: false,
@@ -3313,6 +3346,7 @@ export async function searchSessionEvents(
       nextBeforeSequence: Number(payload?.next_before_sequence ?? payload?.nextBeforeSequence) || null,
     };
   } catch (error) {
+    if (error?.code === "INVITATION_PENDING") throw error;
     recordCircuitFailure(inboundCircuit, normalizedNowMs);
     return {
       ok: false,
@@ -3418,6 +3452,7 @@ export async function listSessionsFromApi({
         fetchImpl,
       ));
     } catch (err) {
+      if (err?.code === "INVITATION_PENDING") throw err;
       return {
         ok: false,
         reason: normalizeString(err?.message) || "list_failed",
@@ -3538,6 +3573,7 @@ export async function fetchSessionFromApi(
       fetchImpl,
     ));
   } catch (err) {
+    if (err?.code === "INVITATION_PENDING") throw err;
     return {
       ok: false,
       reason: normalizeString(err?.message) || "fetch_failed",
@@ -3606,13 +3642,15 @@ export async function probeSessionAccess(
 
   let response;
   try {
-    response = await credentialedRequest(
-      await credentialFor(session),
+    ({ response } = await fetchJsonWithFullTimeout(
       endpoint,
-      { method: "GET" },
-      { fetchImpl: (target, init) => fetchImpl(target, init, normalizePositiveInteger(timeoutMs, DEFAULT_SYNC_TIMEOUT_MS)) },
-    );
+      { method: "GET", credential: await credentialFor(session) },
+      normalizePositiveInteger(timeoutMs, DEFAULT_SYNC_TIMEOUT_MS),
+      fetchImpl,
+      { readSuccessBody: false },
+    ));
   } catch (err) {
+    if (err?.code === "INVITATION_PENDING") throw err;
     return {
       accessible: false,
       reason: normalizeString(err?.message) || "probe_failed",

@@ -4,7 +4,7 @@ import path from "node:path";
 import process from "node:process";
 
 import { checkedTransport, credentialFor, credentialHmac, isAuthenticated, isCredential } from "../auth/credential-destinations.js";
-import { requestJsonMutation } from "../auth/http.js";
+import { requestJson, requestJsonMutation } from "../auth/http.js";
 import { resolveActiveAuthSession } from "../auth/service.js";
 import { renderCoordinationBulletList } from "./coordination-guidance.js";
 import { resolveSessionPaths } from "./paths.js";
@@ -12,7 +12,19 @@ import { urlPathSegment } from "../net/url-path.js";
 
 export const SESSION_INVITATION_ACCEPT_ROUTE_ID =
   "POST /api/v1/sessions/{session_id}/invitations/accept";
+export const PENDING_INVITATION_ACCEPT_ROUTE_ID =
+  "POST /api/v1/sessions/invitations/{invitation_id}/accept";
 export const SESSION_MUTATION_ORIGIN = "https://sentinelayer.com";
+
+export function throwIfPendingSessionInvitation(payload, status) {
+  if ((status !== 403 && status !== 404) || payload?.error?.code !== "INVITATION_PENDING") return;
+  const error = new Error(
+    "An invitation to this room is waiting. Run `sl session invitations list --json`, then `sl session invitations accept <invitationId>` using its invitationId.",
+  );
+  error.code = "INVITATION_PENDING";
+  error.status = status;
+  throw error;
+}
 
 function normalizeString(value) {
   return String(value || "").trim();
@@ -83,6 +95,58 @@ export function createSessionMutationIdempotencyKey(operationName = "invitation-
     .replace(/^-+|-+$/g, "")
     .slice(0, 32) || "session-mutation";
   return `sl-cli-${operation}-${randomUUID()}`;
+}
+
+export async function listPendingSessionInvitations({
+  targetPath = process.cwd(),
+  resolveAuthSession = resolveActiveAuthSession,
+  request = requestJson,
+} = {}) {
+  const auth = await resolveAuthSession({ cwd: targetPath, env: process.env, autoRotate: false });
+  if (!isAuthenticated(auth) || !auth?.apiUrl) {
+    throw new Error("Not authenticated. Run `sl auth login` first.");
+  }
+  const apiUrl = normalizeString(auth.apiUrl).replace(/\/+$/, "");
+  return checkedTransport(request)(`${apiUrl}/api/v1/sessions/invitations/pending`, {
+    method: "GET",
+    credential: await credentialFor(auth),
+  });
+}
+
+export async function acceptPendingSessionInvitation(invitationId, {
+  targetPath = process.cwd(),
+  idempotencyKey = "",
+  origin = SESSION_MUTATION_ORIGIN,
+  resolveAuthSession = resolveActiveAuthSession,
+  requestMutation = requestJsonMutation,
+} = {}) {
+  const normalizedInvitationId = typeof invitationId === "string" ? invitationId.trim() : "";
+  if (!normalizedInvitationId) throw new Error("invitation id is required.");
+  const invitationPath = `/api/v1/sessions/invitations/${urlPathSegment(normalizedInvitationId, { label: "invitationId" })}/accept`;
+  const auth = await resolveAuthSession({ cwd: targetPath, env: process.env, autoRotate: false });
+  if (!isAuthenticated(auth) || !auth?.apiUrl) {
+    throw new Error("Not authenticated. Run `sl auth login` first.");
+  }
+  const credential = await credentialFor(auth);
+  const resolvedIdempotencyKey = normalizeString(idempotencyKey)
+    || createSessionMutationIdempotencyKey("session-invite-accept");
+  const apiUrl = normalizeString(auth.apiUrl).replace(/\/+$/, "");
+  return checkedTransport(requestMutation)(
+    `${apiUrl}${invitationPath}`,
+    {
+      method: "POST",
+      operationName: "session.invitation_accept_by_id",
+      idempotencyKey: resolvedIdempotencyKey,
+      credential,
+      headers: createSessionMutationHeaders({
+        credential,
+        routeId: PENDING_INVITATION_ACCEPT_ROUTE_ID,
+        idempotencyKey: resolvedIdempotencyKey,
+        origin,
+      }),
+      body: {},
+    },
+  );
 }
 
 export async function acceptSessionInvitation(
