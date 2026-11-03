@@ -64,6 +64,7 @@ import {
   setupSessionGuides,
 } from "../session/setup-guides.js";
 import { listSessionTasks } from "../session/tasks.js";
+import { formatSessionStandup, sessionStandup } from "../session/standup.js";
 import {
   createSession,
   DEFAULT_TTL_SECONDS,
@@ -7672,6 +7673,20 @@ function pageContractViolation(requestedSessionId, beforeSequence, limit, result
         { command: "session access revoke", sessionId: sid, idempotencyKey: revoked.idempotencyKey, admission: revoked.result },
         () => console.log(`Revoked ${terminalText(revoked.result.admissionId, 64) || aid}.`),
       );
+    });
+
+  session
+    .command("standup <sessionId>")
+    .description("Summarize returned ticket records and their evidence without a model call")
+    .option("--since <24h|ISO>", "Include records updated since this time (inclusive)")
+    .option("--agent <id>", "Agent reading the tickets (defaults to the joined session agent)")
+    .option("--path <path>", "Workspace path for the session", ".")
+    .option("--json", "Emit machine-readable output")
+    .action(async (sessionId, options, command) => {
+      const result = await sessionStandup(normalizeString(sessionId), {
+        since: options.since, targetPath: path.resolve(process.cwd(), String(options.path || ".")),
+      });
+      console.log(shouldEmitJson(options, command) ? JSON.stringify(result, null, 2) : formatSessionStandup(result));
     });
 
   // ---------------------------------------------------------------- tickets
