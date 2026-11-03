@@ -92,6 +92,8 @@ import {
 } from "../session/control-events.js";
 import {
   acceptSessionInvitation,
+  acceptPendingSessionInvitation,
+  listPendingSessionInvitations,
   normalizeSessionOnboarding,
   writeSessionOnboardingBrief,
 } from "../session/invitations.js";
@@ -1473,6 +1475,7 @@ async function fetchRemoteSessionDetail(endpoint, credential) {
       endpoint, { method: "GET", credential, redirect: "error" }, 2_000,
     ));
   } catch (err) {
+    if (err?.code === "INVITATION_PENDING") throw err;
     return {
       ok: false,
       response: null,
@@ -2965,6 +2968,37 @@ export function registerSessionCommand(program) {
   const session = program
     .command("session")
     .description("Multi-agent ephemeral coordination sessions");
+
+  const invitations = session.command("invitations").description("List and accept pending room invitations");
+  invitations
+    .command("list")
+    .description("List your pending room invitations")
+    .option("--path <path>", "Workspace path for authentication", ".")
+    .option("--json", "Emit the raw API response")
+    .action(async (options, command) => {
+      const result = await listPendingSessionInvitations({ targetPath: path.resolve(options.path) });
+      if (shouldEmitJson(options, command)) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+      const entries = Array.isArray(result) ? result : result?.invitations;
+      if (!Array.isArray(entries) || entries.some((entry) => !normalizeString(entry?.invitationId))) {
+        console.log("Pending invitations retrieved. Use `sl session invitations list --json` to inspect the response.");
+        return;
+      }
+      if (entries.length === 0) console.log("No pending invitations.");
+      for (const entry of entries) console.log(`Invitation: ${entry.invitationId}`);
+    });
+  invitations
+    .command("accept <invitationId>")
+    .description("Accept a pending invitation using its invitationId from invitations list")
+    .option("--path <path>", "Workspace path for authentication", ".")
+    .option("--json", "Emit the raw API response")
+    .action(async (invitationId, options, command) => {
+      const result = await acceptPendingSessionInvitation(invitationId, { targetPath: path.resolve(options.path) });
+      if (shouldEmitJson(options, command)) console.log(JSON.stringify(result, null, 2));
+      else console.log("Invitation accepted.");
+    });
 
   session
     .command("start")

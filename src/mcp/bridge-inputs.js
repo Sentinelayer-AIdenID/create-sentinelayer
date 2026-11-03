@@ -128,6 +128,8 @@ export const BRIDGE_ALLOWED_INPUTS = Object.freeze({
   "session.guard-uninstall": "sessionId agent path json",
   "session.history": "limit preview path json",
   "session.inject-guide": "sessionId path json",
+  "session.invitations.accept": "invitationId path json",
+  "session.invitations.list": "path json",
   "session.join": "sessionId name agent inviteToken seatKey idempotencyKey role model path goal deliverable stopWhen scope ttl provider wait waitSeconds cancelAdmission autoGrant json",
   "session.leave": "sessionId agent reason path json",
   "session.list": "remote includeArchived limit path json",
