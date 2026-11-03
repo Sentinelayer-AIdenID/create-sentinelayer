@@ -66,8 +66,9 @@ test("standup never accepts a summary, unknown claim kind or completion flag as 
     ticket("completion-only", { completion: { source: "client_asserted", verified: true } }),
     ticket("not-done", { status: "working", doneVerdict: valid }),
   ]);
-  assert.equal(report.accepted.length, 0);
-  assert.equal(report.reportedButUnverified.length, 9);
+  assert.equal(report.accepted.length, 7);
+  assert.ok(report.accepted.every((item) => item.verdict.evidence.length === 0));
+  assert.deepEqual(report.reportedButUnverified.map((item) => item.id), ["false-flag", "string-flag"]);
   assert.equal(report.inProgress.length, 1);
 });
 

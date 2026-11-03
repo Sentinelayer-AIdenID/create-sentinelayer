@@ -62,6 +62,8 @@ function ticketRecord(raw) {
     assignee: text(t.assignee), acceptedBy: text(t.acceptedBy),
     claimedAt: timestamp(t.claimedAt), createdAt: timestamp(t.createdAt), updatedAt: timestamp(t.updatedAt),
     hasDoneVerdict: boolean(t.hasDoneVerdict), unaccepted: boolean(t.unaccepted), staleClaim: boolean(t.staleClaim),
+    lastVerdict: t.lastVerdict && typeof t.lastVerdict === "object"
+      ? { verdict: text(t.lastVerdict.verdict), checkedAt: timestamp(t.lastVerdict.checkedAt) } : null,
     completion: t.completion && typeof t.completion === "object"
       ? { source: text(t.completion.source), verified: boolean(t.completion.verified) } : null,
     verdict: { kind: evidence[0]?.kind || null, reference: evidence[0]?.reference || null, evidence },
@@ -107,14 +109,13 @@ export function buildSessionStandup(items, { sessionId, since, now = Date.now(),
     if (!item.id || item.unknown.includes("conflicting duplicate records") || (cutoff && !item.updatedAt)) {
       // There is not enough evidence to identify or date this work.
     } else if (item.status === "done") {
-      if (item.ownerAttestation) {
+      if (item.hasDoneVerdict === true && item.ownerAttestation) {
         section = "ownerAttested";
         for (const field of ["statement", "attestedBy", "attestedAt"]) {
           if (item.ownerAttestation[field] === null) item.unknown.push(`ownerAttestation.${field}`);
         }
       } else {
-        section = item.hasDoneVerdict === true && item.verdict.evidence.length
-          ? "accepted" : "reportedButUnverified";
+        section = item.hasDoneVerdict === true ? "accepted" : "reportedButUnverified";
         if (item.hasDoneVerdict === null) item.unknown.push("hasDoneVerdict");
         if (!item.verdict.kind) item.unknown.push("verdict.kind");
         if (!item.verdict.evidence.length || item.verdict.evidence.some((claim) => !claim.reference)) item.unknown.push("verdict.reference");
@@ -162,7 +163,7 @@ export async function sessionStandup(sessionId, {
     throw error;
   }
   if (!Array.isArray(body?.items)) throw new Error("The ticket response has no items array; refusing to invent a standup.");
-  const truncated = body.hasMore === true || Boolean(text(body.nextCursor) || text(body.nextAfterId));
+  const truncated = body.hasMore === true || Boolean(text(body.nextBeforeId) || text(body.nextCursor) || text(body.nextAfterId));
   return buildSessionStandup(body.items, { sessionId, ...(cutoff ? { since: cutoff } : {}), now, truncated });
 }
 
@@ -176,8 +177,10 @@ export function formatSessionStandup(report) {
     if (!report[key].length) lines.push("  (none)");
     for (const item of report[key]) {
       let detail = "";
-      if (key === "accepted") detail = ` · verdict: ${item.verdict.evidence.map((claim) => `${display(claim.kind)} ${display(claim.reference)}`).join("; ")}`;
-      if (key === "ownerAttested") detail = ` · owner statement by ${display(item.ownerAttestation.attestedBy)} (unverified): ${display(item.ownerAttestation.statement)}`;
+      if (key === "accepted") detail = item.verdict.evidence.length
+        ? ` · verdict: ${item.verdict.evidence.map((claim) => `${display(claim.kind)} ${display(claim.reference)}`).join("; ")}`
+        : ` · re-checkable verdict on record (details not in this read; checked ${display(item.lastVerdict?.checkedAt)})`;
+      if (key === "ownerAttested") detail = ` · owner statement by ${display(item.ownerAttestation.attestedBy)} (unverified): ${display(item.ownerAttestation.statement ?? "statement not in this read")}`;
       if (key === "reportedButUnverified") detail = " · no re-checkable done verdict";
       if (key === "inProgress") detail = ` · assignee: ${display(item.assignee)} · since: ${display(item.claimedAt)}${item.staleClaim === true ? " · STALE claim" : ""}`;
       if (key === "needsOwnerDecision") detail = ` · created: ${display(item.createdAt)}`;

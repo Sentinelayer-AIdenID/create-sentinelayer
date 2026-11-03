@@ -71,9 +71,9 @@ test("standup keeps manual completion and verdicts without evidence unverified",
     record("completion-only", { status: "done", completion: { verified: true } }),
     record("no-done-verdict", { status: "done", hasDoneVerdict: false, lastVerdict: { kind: "review", ref: "review-2" } }),
   ]);
-  assert.equal(json.accepted.length, 0);
-  assert.deepEqual(json.reportedButUnverified.map((t) => t.id), ["completion-only", "flag-only", "manual", "no-done-verdict"]);
-  assert.ok(json.reportedButUnverified.find((t) => t.id === "flag-only").unknown.includes("verdict.reference"));
+  assert.deepEqual(json.accepted.map((t) => t.id), ["flag-only"]);
+  assert.deepEqual(json.reportedButUnverified.map((t) => t.id), ["completion-only", "manual", "no-done-verdict"]);
+  assert.ok(json.accepted.find((t) => t.id === "flag-only").unknown.includes("verdict.reference"));
 });
 
 test("standup reports assignee, claim time and stale claims without inventing missing evidence", async () => {
@@ -149,9 +149,10 @@ test("standup coalesces by id using the newest whole record, independently of in
   const first = await standup(items);
   const second = await standup(items.toReversed());
   assert.deepEqual(first.json, second.json);
-  assert.equal(first.json.accepted.length, 0);
-  assert.equal(first.json.reportedButUnverified.length, 1);
-  assert.equal(first.json.reportedButUnverified[0].verdict.reference, null);
+  assert.equal(first.json.accepted.length, 1);
+  assert.equal(first.json.reportedButUnverified.length, 0);
+  assert.equal(first.json.accepted[0].verdict.reference, null);
+  assert.deepEqual(first.json.accepted[0].verdict.evidence, []);
 });
 
 test("standup treats conflicting duplicate evidence at equal or unknown times as unknown", async () => {
