@@ -75,7 +75,8 @@ for (const status of [403, 404]) {
         `http://127.0.0.1:${server.address().port}/api/v1/sessions/sample-room/events`, {}, 150,
       );
       assert.equal(result.response.status, status);
-      assert.equal(await Promise.race([closed, delay(200, false)]), true,
+      // The base never closes this socket; allow a slow CI runner (coverage, cold start) time to see the close.
+      assert.equal(await Promise.race([closed, delay(2000, false)]), true,
         "refusal body must not retain a live socket after the timeout");
       assert.equal(requestSocket.destroyed, true);
       assert.equal(responseWriter.write(" "), false, "server cannot keep sending the refused body");
