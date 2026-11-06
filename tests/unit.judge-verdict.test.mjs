@@ -119,17 +119,70 @@ test("judge verdict: block extraction takes exactly one block and ignores everyt
   assert.deepEqual(extractJudgeVerdictBlock(twice), { status: "ambiguous", document: null });
 });
 
+test("judge verdict: the block scanner agrees with every shared vector", async () => {
+  const blocks = JSON.parse(await fs.readFile(path.join(root, "tests", "fixtures", "judge-verdict-block-cases.json"), "utf8"));
+  assert.equal(blocks.schema, "judge-verdict-block-cases/v1");
+  const disagreements = blocks.cases.filter((item) => {
+    const found = extractJudgeVerdictBlock(item.message);
+    return found.status !== item.status || (item.status === "one" && found.document.round !== item.round);
+  }).map((item) => item.name);
+  assert.deepEqual(disagreements, []);
+});
+
+test("judge verdict: a block over 64 KiB is skipped unparsed; one just under is read", () => {
+  const filler = (bytes) => ({ ...caseDoc("accept-no-comments"), summary: "s".repeat(bytes) });
+  const message = (doc) => `\`\`\`judge-verdict\n${JSON.stringify(doc)}\n\`\`\``;
+  const under = filler(65_536 - JSON.stringify(filler(0)).length);
+  assert.equal(JSON.stringify(under).length, 65_536);
+  assert.equal(extractJudgeVerdictBlock(message(under)).status, "one");
+  assert.equal(extractJudgeVerdictBlock(message(filler(65_537 - JSON.stringify(filler(0)).length))).status, "none");
+  // Whitespace after a valid document is still valid JSON; the cap, not a parse error, is what refuses it.
+  const padded = `\`\`\`judge-verdict\n${JSON.stringify(caseDoc("accept-no-comments"))}\n${" ".repeat(70_000)}\n\`\`\``;
+  assert.equal(extractJudgeVerdictBlock(padded).status, "none");
+});
+
+test("judge verdict: scanning a maximum-size hostile post stays linear (unclosed and many fences)", async () => {
+  const limit = 128_000;
+  const hostile = [
+    ("judge-verdict\n" + "```json\n".repeat(20_000)).slice(0, limit),
+    ("judge-verdict\n" + "```json\n{ \"a\": [1,\n".repeat(20_000)).slice(0, limit),
+    ("judge-verdict\n" + "```json\n{bad\n```\n".repeat(20_000)).slice(0, limit),
+    ("judge-verdict\n```json\n" + "x".repeat(limit)).slice(0, limit),
+    ("```json\n" + "{".repeat(limit)).slice(0, limit),
+  ];
+  for (const text of hostile) {
+    const started = performance.now();
+    assert.notEqual(extractJudgeVerdictBlock(text).status, "one");
+    assert.ok(performance.now() - started < 250, `scan took ${performance.now() - started} ms`);
+  }
+  // The coder's inbox reads five such posts in one poll.
+  const events = hostile.slice(0, 5).map((text, index) => evt(`c${index}`, "judge-1", { message: text, to: ["coder-1"] }));
+  const handlers = createSessionMcpToolHandlers({
+    targetPath: "workspace",
+    pollSessionEventsFn: async () => ({ ok: true, cursor: "c9", events }),
+    listSessionMessageActionsFn: async () => ({ ok: true, actions: [], projection: { recentActivity: [] } }),
+    updateSessionReadCursorFn: async () => ({ ok: true, updated: true }),
+  });
+  const started = performance.now();
+  const inbox = await handlers.poll_inbox({ sessionId: "sess-1", agentId: "coder-1", cursor: "c0" });
+  assert.equal(inbox.ok, true);
+  assert.ok(performance.now() - started < 1000, `poll took ${performance.now() - started} ms`);
+});
+
 // ---------------------------------------------------------------------------------- MCP tool
 
 function evt(cursor, agentId, payload) {
   return { event: "session_message", cursor, sessionId: "sess-1", ts: "2026-11-06T00:00:00.000Z", agent: { id: agentId }, payload };
 }
 
-function judgeHarness({ api = null } = {}) {
+// `admitted` stands for the admission scope the tool runs in (null: the person's own token). A harness
+// with an API stub runs as judge-1's own admission unless told otherwise.
+function judgeHarness({ api = null, admitted = api ? { sessionId: "sess-1", agentId: "judge-1" } : null } = {}) {
   const calls = [];
   const synced = [];
   const handlers = createSessionMcpToolHandlers({
     targetPath: "workspace",
+    currentAdmittedAgentFn: () => admitted,
     uuidFn: () => "uuid-1",
     now: () => "2026-11-06T00:00:00.000Z",
     postJudgeVerdictToApiFn: async (sessionId, verdict) => {
@@ -282,6 +335,26 @@ test("judge_verdict tool: an escalation to named people goes as a room message, 
   const viaApi = await ownerOnly.handlers.judge_verdict({ sessionId: "sess-1", agentId: "judge-1", verdict });
   assert.equal(viaApi.transport, "api");
   assert.deepEqual(ownerOnly.calls, ["api"]);
+});
+
+test("judge_verdict tool: without the agent's own admission the verdict goes as a room message, never the route", async () => {
+  const apiOk = async () => ({ ok: true, status: 201, code: "", body: {}, reason: "" });
+  const input = { sessionId: "sess-1", agentId: "judge-1", verdict: caseDoc("changes-pr-basic") };
+  // The person's own token (no admission scope), another agent's admission, another room's admission.
+  for (const admitted of [null, { sessionId: "sess-1", agentId: "coder-1" }, { sessionId: "sess-2", agentId: "judge-1" }]) {
+    const harness = judgeHarness({ api: apiOk, admitted });
+    const result = await harness.handlers.judge_verdict(input);
+    assert.equal(result.ok, true, JSON.stringify(admitted));
+    assert.equal(result.transport, "room");
+    assert.equal(result.roomBecause, "no_agent_credential");
+    assert.deepEqual(harness.calls, ["anchor", "sync", "confirm", "cache"], "the route is never called");
+    assert.equal(harness.synced[0].event.agent.id, "judge-1", "the post is the agent's, checked against its grant");
+
+    const forced = judgeHarness({ api: apiOk, admitted });
+    const refused = await forced.handlers.judge_verdict({ ...input, via: "api" });
+    assert.deepEqual([refused.ok, refused.reason], [false, "api_needs_agent_credential"]);
+    assert.deepEqual(forced.calls, [], "refused before any request");
+  }
 });
 
 test("judge_verdict tool: auto uses the API route when the server has it", async () => {

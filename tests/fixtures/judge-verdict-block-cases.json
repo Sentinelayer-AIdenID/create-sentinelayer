@@ -1,0 +1,129 @@
+{
+ "schema": "judge-verdict-block-cases/v1",
+ "note": "Shared vectors for the judge-verdict fenced-block scanner. Keep byte-identical in both repos. Size and timing cases are built in each repo's tests.",
+ "cases": [
+  {
+   "name": "empty",
+   "message": "",
+   "status": "none"
+  },
+  {
+   "name": "plain-text",
+   "message": "no fences here, judge-verdict mentioned in prose",
+   "status": "none"
+  },
+  {
+   "name": "judge-verdict-fence",
+   "message": "@coder-1 verdict\n\n```judge-verdict\n{\"kind\":\"judge-verdict\",\"version\":1,\"verdict\":\"ACCEPT\",\"round\":1,\"target\":{\"type\":\"ticket\",\"ref\":\"T-1\"},\"coder\":\"coder-1\",\"summary\":\"Fine.\",\"comments\":[]}\n```",
+   "status": "one",
+   "round": 1
+  },
+  {
+   "name": "json-fence-with-kind",
+   "message": "see\n```json\n{\n  \"kind\": \"judge-verdict\",\n  \"version\": 1,\n  \"verdict\": \"ACCEPT\",\n  \"round\": 2,\n  \"target\": {\n    \"type\": \"ticket\",\n    \"ref\": \"T-1\"\n  },\n  \"coder\": \"coder-1\",\n  \"summary\": \"Fine.\",\n  \"comments\": []\n}\n```\nthanks",
+   "status": "one",
+   "round": 2
+  },
+  {
+   "name": "json-fence-other-kind",
+   "message": "```json\n{\"kind\":\"other\",\"note\":\"judge-verdict\"}\n```",
+   "status": "none"
+  },
+  {
+   "name": "python-fence",
+   "message": "```python\n{\"kind\":\"judge-verdict\",\"version\":1,\"verdict\":\"ACCEPT\",\"round\":1,\"target\":{\"type\":\"ticket\",\"ref\":\"T-1\"},\"coder\":\"coder-1\",\"summary\":\"Fine.\",\"comments\":[]}\n```",
+   "status": "none"
+  },
+  {
+   "name": "mid-line-fence",
+   "message": "text ```judge-verdict\n{\"kind\":\"judge-verdict\",\"version\":1,\"verdict\":\"ACCEPT\",\"round\":1,\"target\":{\"type\":\"ticket\",\"ref\":\"T-1\"},\"coder\":\"coder-1\",\"summary\":\"Fine.\",\"comments\":[]}\n```",
+   "status": "none"
+  },
+  {
+   "name": "crlf-lines",
+   "message": "hi\r\n```judge-verdict\r\n{\"kind\":\"judge-verdict\",\"version\":1,\"verdict\":\"ACCEPT\",\"round\":3,\"target\":{\"type\":\"ticket\",\"ref\":\"T-1\"},\"coder\":\"coder-1\",\"summary\":\"Fine.\",\"comments\":[]}\r\n```\r\n",
+   "status": "one",
+   "round": 3
+  },
+  {
+   "name": "trailing-spaces-on-fences",
+   "message": "```judge-verdict  \t\n{\"kind\":\"judge-verdict\",\"version\":1,\"verdict\":\"ACCEPT\",\"round\":4,\"target\":{\"type\":\"ticket\",\"ref\":\"T-1\"},\"coder\":\"coder-1\",\"summary\":\"Fine.\",\"comments\":[]}\n``` \t",
+   "status": "one",
+   "round": 4
+  },
+  {
+   "name": "indented-fence",
+   "message": "  ```judge-verdict\n{\"kind\":\"judge-verdict\",\"version\":1,\"verdict\":\"ACCEPT\",\"round\":1,\"target\":{\"type\":\"ticket\",\"ref\":\"T-1\"},\"coder\":\"coder-1\",\"summary\":\"Fine.\",\"comments\":[]}\n```",
+   "status": "none"
+  },
+  {
+   "name": "info-with-extra-word",
+   "message": "```judge-verdict extra\n{\"kind\":\"judge-verdict\",\"version\":1,\"verdict\":\"ACCEPT\",\"round\":1,\"target\":{\"type\":\"ticket\",\"ref\":\"T-1\"},\"coder\":\"coder-1\",\"summary\":\"Fine.\",\"comments\":[]}\n```",
+   "status": "none"
+  },
+  {
+   "name": "invalid-json",
+   "message": "```judge-verdict\n{not json\n```",
+   "status": "none"
+  },
+  {
+   "name": "array-json",
+   "message": "```judge-verdict\n[{\"kind\":\"judge-verdict\",\"version\":1,\"verdict\":\"ACCEPT\",\"round\":1,\"target\":{\"type\":\"ticket\",\"ref\":\"T-1\"},\"coder\":\"coder-1\",\"summary\":\"Fine.\",\"comments\":[]}]\n```",
+   "status": "none"
+  },
+  {
+   "name": "unclosed-fence",
+   "message": "```judge-verdict\n{\"kind\":\"judge-verdict\",\"version\":1,\"verdict\":\"ACCEPT\",\"round\":1,\"target\":{\"type\":\"ticket\",\"ref\":\"T-1\"},\"coder\":\"coder-1\",\"summary\":\"Fine.\",\"comments\":[]}",
+   "status": "none"
+  },
+  {
+   "name": "closing-fence-with-text",
+   "message": "```judge-verdict\n{\"kind\":\"judge-verdict\",\"version\":1,\"verdict\":\"ACCEPT\",\"round\":1,\"target\":{\"type\":\"ticket\",\"ref\":\"T-1\"},\"coder\":\"coder-1\",\"summary\":\"Fine.\",\"comments\":[]}\n``` trailing",
+   "status": "none"
+  },
+  {
+   "name": "unclosed-json-swallows-next",
+   "message": "```json\n{ \"open\": \n```judge-verdict\n{\"kind\":\"judge-verdict\",\"version\":1,\"verdict\":\"ACCEPT\",\"round\":1,\"target\":{\"type\":\"ticket\",\"ref\":\"T-1\"},\"coder\":\"coder-1\",\"summary\":\"Fine.\",\"comments\":[]}\n```",
+   "status": "none"
+  },
+  {
+   "name": "block-after-other-code",
+   "message": "```python\nprint(1)\n```\n```judge-verdict\n{\"kind\":\"judge-verdict\",\"version\":1,\"verdict\":\"ACCEPT\",\"round\":5,\"target\":{\"type\":\"ticket\",\"ref\":\"T-1\"},\"coder\":\"coder-1\",\"summary\":\"Fine.\",\"comments\":[]}\n```",
+   "status": "one",
+   "round": 5
+  },
+  {
+   "name": "two-blocks",
+   "message": "```judge-verdict\n{\"kind\":\"judge-verdict\",\"version\":1,\"verdict\":\"ACCEPT\",\"round\":1,\"target\":{\"type\":\"ticket\",\"ref\":\"T-1\"},\"coder\":\"coder-1\",\"summary\":\"Fine.\",\"comments\":[]}\n```\n```json\n{\"kind\":\"judge-verdict\",\"version\":1,\"verdict\":\"ACCEPT\",\"round\":2,\"target\":{\"type\":\"ticket\",\"ref\":\"T-1\"},\"coder\":\"coder-1\",\"summary\":\"Fine.\",\"comments\":[]}\n```",
+   "status": "ambiguous"
+  },
+  {
+   "name": "three-blocks",
+   "message": "```judge-verdict\n{\"kind\":\"judge-verdict\",\"version\":1,\"verdict\":\"ACCEPT\",\"round\":1,\"target\":{\"type\":\"ticket\",\"ref\":\"T-1\"},\"coder\":\"coder-1\",\"summary\":\"Fine.\",\"comments\":[]}\n```\n```judge-verdict\n{\"kind\":\"judge-verdict\",\"version\":1,\"verdict\":\"ACCEPT\",\"round\":2,\"target\":{\"type\":\"ticket\",\"ref\":\"T-1\"},\"coder\":\"coder-1\",\"summary\":\"Fine.\",\"comments\":[]}\n```\n```judge-verdict\n{\"kind\":\"judge-verdict\",\"version\":1,\"verdict\":\"ACCEPT\",\"round\":3,\"target\":{\"type\":\"ticket\",\"ref\":\"T-1\"},\"coder\":\"coder-1\",\"summary\":\"Fine.\",\"comments\":[]}\n```",
+   "status": "ambiguous"
+  },
+  {
+   "name": "one-valid-one-invalid",
+   "message": "```judge-verdict\n{bad\n```\n```judge-verdict\n{\"kind\":\"judge-verdict\",\"version\":1,\"verdict\":\"ACCEPT\",\"round\":6,\"target\":{\"type\":\"ticket\",\"ref\":\"T-1\"},\"coder\":\"coder-1\",\"summary\":\"Fine.\",\"comments\":[]}\n```",
+   "status": "one",
+   "round": 6
+  },
+  {
+   "name": "empty-block",
+   "message": "```judge-verdict\n\n```",
+   "status": "none"
+  },
+  {
+   "name": "block-at-end-without-newline",
+   "message": "x\n```judge-verdict\n{\"kind\":\"judge-verdict\",\"version\":1,\"verdict\":\"ACCEPT\",\"round\":7,\"target\":{\"type\":\"ticket\",\"ref\":\"T-1\"},\"coder\":\"coder-1\",\"summary\":\"Fine.\",\"comments\":[]}\n```",
+   "status": "one",
+   "round": 7
+  },
+  {
+   "name": "multi-line-pretty-json",
+   "message": "```judge-verdict\n{\n    \"kind\": \"judge-verdict\",\n    \"version\": 1,\n    \"verdict\": \"ACCEPT\",\n    \"round\": 8,\n    \"target\": {\n        \"type\": \"ticket\",\n        \"ref\": \"T-1\"\n    },\n    \"coder\": \"coder-1\",\n    \"summary\": \"Fine.\",\n    \"comments\": []\n}\n```",
+   "status": "one",
+   "round": 8
+  }
+ ]
+}

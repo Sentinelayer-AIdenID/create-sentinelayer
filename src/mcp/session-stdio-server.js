@@ -31,6 +31,7 @@ import {
   AdmissionCredentialRefused,
   assertCanonicalAgentId,
   canonicalAgentId,
+  currentAdmittedAgent,
   withAgentAdmission,
 } from "../session/admission-auth.js";
 import { hasStoredAdmissionCredentials, storedAdmissionAgentsForSession } from "../session/admission.js";
@@ -1001,6 +1002,7 @@ export function createSessionMcpToolHandlers({
   downloadRoomFileFn = downloadRoomFile,
   syncSessionEventToApiFn = syncSessionEventToApi,
   postJudgeVerdictToApiFn = postJudgeVerdictToApi,
+  currentAdmittedAgentFn = currentAdmittedAgent,
   appendToStreamFn = appendToStream,
   sleepFn = sleep,
   uuidFn = randomUUID,
@@ -1249,6 +1251,15 @@ export function createSessionMcpToolHandlers({
       if (namedEscalation && via === "api") {
         return { ok: false, reason: "escalate_to_needs_room_transport", sessionId, agentId, escalateTo };
       }
+      // The route records whoever the credential is. Only this agent's own admission makes that the agent;
+      // under the person's token the route would record the person. The room message is checked against the
+      // agent's grant instead, so without the admission the verdict goes as a room message.
+      const admitted = currentAdmittedAgentFn();
+      const agentCredential = Boolean(admitted && admitted.sessionId === sessionId &&
+        normalizeAgentId(admitted.agentId, "") === agentId);
+      if (via === "api" && !agentCredential) {
+        return { ok: false, reason: "api_needs_agent_credential", sessionId, agentId };
+      }
       const message = renderJudgeVerdictMessage(verdict, { escalateTo });
       if (message.length > JUDGE_MESSAGE_MAX_CHARS) {
         return { ok: false, reason: "verdict_message_too_long", sessionId, agentId, limit: JUDGE_MESSAGE_MAX_CHARS };
@@ -1259,7 +1270,7 @@ export function createSessionMcpToolHandlers({
       }
 
       let api = null;
-      if (via !== "room" && !namedEscalation) {
+      if (via !== "room" && !namedEscalation && agentCredential) {
         api = await postJudgeVerdictToApiFn(sessionId, verdict, { targetPath });
         const apiSummary = { status: api?.status || 0, code: api?.code || "", reason: api?.reason || "" };
         if (api?.ok) {
@@ -1309,7 +1320,8 @@ export function createSessionMcpToolHandlers({
         ...posted,
         transport: "room",
         ...(api ? { fellBackFrom: "api_route_absent" } : {}),
-        ...(namedEscalation && via === "auto" ? { roomBecause: "escalate_to_named_handles" } : {}),
+        ...(via === "auto" && namedEscalation ? { roomBecause: "escalate_to_named_handles" } : {}),
+        ...(via === "auto" && !namedEscalation && !agentCredential ? { roomBecause: "no_agent_credential" } : {}),
         sessionId,
         agentId,
         verdict,
@@ -1692,7 +1704,7 @@ export const SESSION_MCP_TOOLS = Object.freeze([
     name: "judge_verdict",
     title: "Post Judge Verdict",
     description:
-      "Send a judge-verdict back to the coding agent: ACCEPT, or CHANGES with numbered file:line comments (severity P0-P3, one-line fix). Validates the verdict first, then uses the room's judge-verdicts API route when the server has it and otherwise posts a room message that mentions the coder and carries the verdict block. via=room always posts the message; dryRun returns the rendered message.",
+      "Send a judge-verdict back to the coding agent: ACCEPT, or CHANGES with numbered file:line comments (severity P0-P3, one-line fix). Validates the verdict first. When the agent acts under its own admission for the room and the server has the judge-verdicts route, the route records it; otherwise it posts a room message that mentions the coder and carries the verdict block (the server checks the agent's grant on that post). via=room always posts the message; dryRun returns the rendered message.",
     inputSchema: {
       type: "object",
       additionalProperties: false,

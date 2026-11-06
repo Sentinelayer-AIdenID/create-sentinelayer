@@ -89,8 +89,21 @@ async function inspectPath(root, destination) {
   }
 }
 
-async function loadBundle() {
-  return Promise.all(SKILL_NAMES.map(async (name) => {
+function selectNames(names) {
+  if (names === undefined || names === null || (Array.isArray(names) && names.length === 0)) return SKILL_NAMES;
+  const wanted = (Array.isArray(names) ? names : [names]).map((name) => String(name).trim());
+  const unknown = wanted.filter((name) => !SKILL_NAMES.includes(name));
+  if (unknown.length) {
+    throw Object.assign(new Error(`Unknown skill: ${unknown.join(", ")}. Bundled skills: ${SKILL_NAMES.join(", ")}`), {
+      code: "SKILLS_UNKNOWN",
+    });
+  }
+  // Bundle order, each once.
+  return SKILL_NAMES.filter((name) => wanted.includes(name));
+}
+
+async function loadBundle(names = SKILL_NAMES) {
+  return Promise.all(names.map(async (name) => {
     const files = await readTree(path.join(BUNDLE_ROOT, name));
     if (!files?.some((file) => file.name === "SKILL.md")) {
       throw new Error(`Bundled skill is missing SKILL.md: ${name}`);
@@ -140,9 +153,10 @@ export async function listSkills({ dir } = {}) {
   return { directory, skills };
 }
 
-export async function installSkills({ dir, force = false } = {}) {
+export async function installSkills({ dir, force = false, names } = {}) {
   const directory = resolveDirectory(dir);
-  const bundles = await loadBundle();
+  // Named skills only: a local edit to one skill never blocks installing another.
+  const bundles = await loadBundle(selectNames(names));
   const plan = [];
   const conflicts = [];
   // Preflight the entire bundle so a conflict in the last skill cannot leave a partial install.

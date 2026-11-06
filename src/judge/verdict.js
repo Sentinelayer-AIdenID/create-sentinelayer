@@ -28,7 +28,11 @@ const AGENT_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const ANY_CONTROL_RE = /[\u0000-\u001f\u007f]/;
 const TEXT_CONTROL_RE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
 const ASCII_EDGE_WHITESPACE_RE = /^[ \t\n\r\f\v]+|[ \t\n\r\f\v]+$/g;
-const FENCE_RE = /(?:^|\n)```(judge-verdict|json)[ \t]*\r?\n([\s\S]*?)\r?\n```[ \t]*(?=\r?\n|$)/g;
+// The fenced-block scanner works line by line, so its cost is linear in the message whatever the
+// message holds (an unclosed fence included). Each pattern is tested on one line, never the text.
+const FENCE_OPEN_RE = /^```(?:judge-verdict|json)[ \t]*$/;
+const FENCE_CLOSE_RE = /^```[ \t]*$/;
+export const JUDGE_VERDICT_BLOCK_MAX_BYTES = 64 * 1024;
 
 function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -259,21 +263,43 @@ export function renderJudgeVerdictMessage(verdict, { escalateTo = [] } = {}) {
  * Find the judge-verdict block in a room message. Returns `{ status, document }` where status
  * is "none", "one" or "ambiguous" (more than one block: nothing is taken). The document is
  * returned unvalidated; pass it to validateJudgeVerdict.
+ *
+ * A block opens at a line that is exactly ```judge-verdict or ```json (trailing spaces or tabs
+ * allowed) and closes at the next line that is exactly ```. An opener with no closing line ends
+ * the scan. A block body over JUDGE_VERDICT_BLOCK_MAX_BYTES (UTF-8) is skipped unparsed, and the
+ * scan stops at the second candidate. The API runs the same algorithm against the same vectors
+ * (tests/fixtures/judge-verdict-block-cases.json).
  */
 export function extractJudgeVerdictBlock(message) {
   const text = typeof message === "string" ? message : "";
-  if (!text.includes("```")) return { status: "none", document: null };
-  const found = [];
-  for (const match of text.matchAll(FENCE_RE)) {
+  // Every candidate carries "kind": "judge-verdict", so a message without the word has none.
+  if (!text.includes(JUDGE_VERDICT_KIND)) return { status: "none", document: null };
+  const lines = text.split("\n");
+  const line = (index) => (lines[index].endsWith("\r") ? lines[index].slice(0, -1) : lines[index]);
+  let document = null;
+  for (let index = 0; index < lines.length; index += 1) {
+    if (!FENCE_OPEN_RE.test(line(index))) continue;
+    const body = [];
+    let bytes = 0;
+    let close = index + 1;
+    for (; close < lines.length; close += 1) {
+      const current = line(close);
+      if (FENCE_CLOSE_RE.test(current)) break;
+      bytes += Buffer.byteLength(current, "utf8") + (close > index + 1 ? 1 : 0);
+      if (bytes <= JUDGE_VERDICT_BLOCK_MAX_BYTES) body.push(current);
+    }
+    if (close >= lines.length) break;
+    index = close;
+    if (bytes > JUDGE_VERDICT_BLOCK_MAX_BYTES) continue;
     let parsed;
     try {
-      parsed = JSON.parse(match[2]);
+      parsed = JSON.parse(body.join("\n"));
     } catch {
       continue;
     }
-    if (isPlainObject(parsed) && parsed.kind === JUDGE_VERDICT_KIND) found.push(parsed);
+    if (!isPlainObject(parsed) || parsed.kind !== JUDGE_VERDICT_KIND) continue;
+    if (document) return { status: "ambiguous", document: null };
+    document = parsed;
   }
-  if (found.length === 0) return { status: "none", document: null };
-  if (found.length > 1) return { status: "ambiguous", document: null };
-  return { status: "one", document: found[0] };
+  return document ? { status: "one", document } : { status: "none", document: null };
 }

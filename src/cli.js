@@ -286,7 +286,7 @@ export async function runCli(rawArgs = process.argv.slice(2)) {
     await runLegacyCliWithErrorHandling(normalizedArgs);
     if (["--help", "-h", "help"].includes(normalizedArgs[0])) {
       console.log("\nAgent Skills:");
-      console.log("  sl skills install [--dir <path>] [--force] [--json]  Install bundled Senti skills");
+      console.log("  sl skills install [names...] [--dir <path>] [--force] [--json]  Install bundled Senti skills (all, or the named ones)");
       console.log("  sl skills list [--dir <path>] [--json]  Show bundled and installed versions/hashes");
       console.log("\nJudge Loop:");
       console.log("  sl judge check --file <verdict.json> [--json]  Validate a verdict offline and preview the message");

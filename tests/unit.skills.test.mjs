@@ -173,6 +173,25 @@ test("skills: forced replacement retries transient filesystem contention", async
   assert.deepEqual(await fs.readdir(path.dirname(file)), ["SKILL.md"]);
 });
 
+test("skills: named install touches only the named skills, so one local edit does not block another", async (t) => {
+  const { home, directory } = await fixture(t);
+  const edited = path.join(directory, "sentinelayer-cli", "SKILL.md");
+  await fs.mkdir(path.dirname(edited), { recursive: true });
+  await fs.writeFile(edited, "my local edits\n");
+  assert.equal(cli(home, ["skills", "install", "--json"], 1).error.code, "SKILLS_CONFLICT");
+  const named = cli(home, ["skills", "install", "omar-gate-setup", "senti-judge", "--json"]);
+  assert.deepEqual(named.skills.map((s) => s.name), ["senti-judge", "omar-gate-setup"]);
+  for (const name of ["senti-judge", "omar-gate-setup"]) {
+    assert.deepEqual(await fs.readFile(path.join(directory, name, "SKILL.md")), await fs.readFile(path.join(root, "skills", name, "SKILL.md")));
+  }
+  assert.equal(await fs.readFile(edited, "utf8"), "my local edits\n");
+  await missing(path.join(directory, "senti-agent-identity"));
+  const unknown = cli(home, ["skills", "install", "senti-judge", "no-such-skill", "--json"], 1);
+  assert.equal(unknown.error.code, "SKILLS_UNKNOWN");
+  assert.match(unknown.error.message, /no-such-skill/);
+  await missing(path.join(directory, "senti-agent-identity"));
+});
+
 test("skills: empty destination refuses and unrecognized operations remain gated", async (t) => {
   const { home } = await fixture(t);
   assert.match(cli(home, ["skills", "install", "--dir", "", "--json"], 1).error.message, /nonempty path/);
