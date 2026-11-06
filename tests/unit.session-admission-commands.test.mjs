@@ -460,12 +460,19 @@ test("MCP reactions run on the agent's admission and refuse a tombstone before a
   }
 });
 
+const JUDGE_VERDICT = {
+  kind: "judge-verdict", version: 1, verdict: "CHANGES", round: 1,
+  target: { type: "ticket", ref: "ticket-admission-1" }, coder: "coder-under-review",
+  summary: "One fix needed.", comments: [{ file: "src/a.js", line: 3, severity: "P2", text: "Rename.", fix: "Call it total." }],
+};
+
 // Every actor-bearing local MCP tool, in every stored-credential state. The user's own
 // credential stays configured throughout, so any request made with it would be visible.
 const MCP_ACTOR_CALLS = [
   ["poll_inbox", (h, agentId) => h.poll_inbox({ sessionId: SID, agentId })],
   ["read_history", (h, agentId) => h.read_history({ sessionId: SID, agentId })],
   ["send_message", (h, agentId) => h.send_message({ sessionId: SID, agentId, message: "status update" })],
+  ["judge_verdict", (h, agentId) => h.judge_verdict({ sessionId: SID, agentId, verdict: JUDGE_VERDICT })],
   ["attention_request", (h, agentId) => h.attention_request({ sessionId: SID, agentId, message: "please look" })],
   ["session_action ack", (h, agentId) => h.session_action({ sessionId: SID, agentId, actionType: "ack", targetSequenceId: 1 })],
   ["session_action working_on", (h, agentId) =>

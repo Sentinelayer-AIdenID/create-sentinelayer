@@ -93,10 +93,10 @@ export function registerJudgeCommand(program) {
         const agentId = String(options.agent || process.env.SENTINELAYER_AGENT_ID || "").trim();
         if (!agentId) throw new Error("Name your judge agent with --agent <id> or SENTINELAYER_AGENT_ID.");
         const targetPath = path.resolve(process.cwd(), String(options.path || "."));
-        // One implementation for the CLI and MCP: the native judge_verdict tool, under the same
-        // admission policy every local session tool uses.
-        const { createSessionMcpToolHandlers, routeAgentToolsThroughAdmission } = await import("../mcp/session-stdio-server.js");
-        const handlers = routeAgentToolsThroughAdmission(createSessionMcpToolHandlers({ targetPath }));
+        // One implementation for the CLI and MCP: the native judge_verdict tool, which already runs
+        // under the admission policy every local session tool uses.
+        const { createSessionMcpToolHandlers } = await import("../mcp/session-stdio-server.js");
+        const handlers = createSessionMcpToolHandlers({ targetPath });
         const result = await handlers.judge_verdict({
           sessionId,
           agentId,
