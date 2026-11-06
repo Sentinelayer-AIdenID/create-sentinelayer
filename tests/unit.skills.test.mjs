@@ -9,12 +9,13 @@ import { spawnSync } from "node:child_process";
 import { parse } from "yaml";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-const names = ["senti-agent-identity", "senti-room-notifications", "sentinelayer-cli"];
+const names = ["senti-agent-identity", "senti-room-notifications", "sentinelayer-cli", "senti-judge", "omar-gate-setup"];
 const expectedFiles = [
   "senti-agent-identity/SKILL.md", "sentinelayer-cli/SKILL.md",
   "senti-room-notifications/SKILL.md", "senti-room-notifications/listen-wrapper.cjs",
   "senti-room-notifications/test-classifier.js", "senti-room-notifications/test-receipt.js",
   "senti-room-notifications/package.json",
+  "senti-judge/SKILL.md", "omar-gate-setup/SKILL.md",
 ];
 
 async function fixture(t) {
@@ -170,6 +171,25 @@ test("skills: forced replacement retries transient filesystem contention", async
   assert.equal(attempts, 2);
   assert.deepEqual(await fs.readFile(file), await fs.readFile(path.join(root, "skills", names[0], "SKILL.md")));
   assert.deepEqual(await fs.readdir(path.dirname(file)), ["SKILL.md"]);
+});
+
+test("skills: named install touches only the named skills, so one local edit does not block another", async (t) => {
+  const { home, directory } = await fixture(t);
+  const edited = path.join(directory, "sentinelayer-cli", "SKILL.md");
+  await fs.mkdir(path.dirname(edited), { recursive: true });
+  await fs.writeFile(edited, "my local edits\n");
+  assert.equal(cli(home, ["skills", "install", "--json"], 1).error.code, "SKILLS_CONFLICT");
+  const named = cli(home, ["skills", "install", "omar-gate-setup", "senti-judge", "--json"]);
+  assert.deepEqual(named.skills.map((s) => s.name), ["senti-judge", "omar-gate-setup"]);
+  for (const name of ["senti-judge", "omar-gate-setup"]) {
+    assert.deepEqual(await fs.readFile(path.join(directory, name, "SKILL.md")), await fs.readFile(path.join(root, "skills", name, "SKILL.md")));
+  }
+  assert.equal(await fs.readFile(edited, "utf8"), "my local edits\n");
+  await missing(path.join(directory, "senti-agent-identity"));
+  const unknown = cli(home, ["skills", "install", "senti-judge", "no-such-skill", "--json"], 1);
+  assert.equal(unknown.error.code, "SKILLS_UNKNOWN");
+  assert.match(unknown.error.message, /no-such-skill/);
+  await missing(path.join(directory, "senti-agent-identity"));
 });
 
 test("skills: empty destination refuses and unrecognized operations remain gated", async (t) => {

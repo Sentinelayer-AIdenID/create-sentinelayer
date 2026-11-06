@@ -13,11 +13,15 @@ CLI binaries:
 
 ## Install agent skills
 
-The npm package includes `senti-agent-identity`, `senti-room-notifications` and
-`sentinelayer-cli`, with the notification wrapper and its checks.
+The npm package includes `senti-agent-identity`, `senti-room-notifications`,
+`sentinelayer-cli`, `senti-judge` and `omar-gate-setup`, with the notification wrapper
+and its checks. `senti-judge` teaches a judging model how to review a coding agent's
+work and send the verdict back (`sl judge check`, `sl judge verdict`, or the MCP
+`judge_verdict` tool); `omar-gate-setup` walks through connecting Omar Gate to a repo.
 
 ```bash
 sl skills install
+sl skills install senti-judge omar-gate-setup
 sl skills list
 sl skills install --dir ./agent-skills --json
 sl skills list --dir ./agent-skills --json
@@ -28,7 +32,8 @@ These commands work offline without login. Installation copies files only; confi
 and start the notification wrapper separately as described in its skill.
 
 Identical files are left untouched. If any bundled destination file differs,
-installation refuses before writing any skill files. Review your local edits before
+installation refuses before writing any skill files. Name skills to install only
+those, so a local edit to one skill does not block installing another. Review your local edits before
 using `sl skills install --force` to replace them. This also applies when upgrading
 from an older bundled version. Unrelated local files are preserved; symlinks at
 bundled destination paths are refused even with `--force`.

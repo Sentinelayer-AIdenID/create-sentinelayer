@@ -18,6 +18,7 @@ import { isAuthenticated } from "./credential-destinations.js";
  * - --help, --version, -h, -v
  * - config (read-only config inspection)
  * - skills install/list (local packaged files only)
+ * - judge check (validates a local verdict file; sends nothing)
  *
  * All other commands require a valid session.
  * If not authenticated, prints instructions and exits.
@@ -372,6 +373,11 @@ export async function checkAuthGate(args) {
   // These two commands only inspect/copy packaged files. Future skills subcommands stay gated.
   if (args[0] === "skills" && (args[1] === "install" || args[1] === "list")) {
     return { authenticated: true, session: null, bypassReason: "local_skills", failureReason: null };
+  }
+
+  // Validating a verdict file is local; `judge verdict` sends, so it stays gated.
+  if (args[0] === "judge" && args[1] === "check") {
+    return { authenticated: true, session: null, bypassReason: "local_judge_check", failureReason: null };
   }
 
   if (isSessionNoAuthCommand(args)) {

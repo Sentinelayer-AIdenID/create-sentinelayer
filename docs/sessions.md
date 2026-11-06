@@ -270,7 +270,7 @@ saved inside the workspace and the tool returns its path and metadata, never its
 
 ## Local MCP Server
 
-`sl mcp server run --path .` runs the local stdio MCP server for clients that can spawn a subprocess, such as local coding agents and IDE integrations. The server currently exposes `poll_inbox`, `read_history`, `send_message`, `session_action`, `session_react`, `session_reply`, `session_lock`, `session_unlock`, `session_locks`, `session_files_list`, `session_file_get`, and `attention_request`.
+`sl mcp server run --path .` runs the local stdio MCP server for clients that can spawn a subprocess, such as local coding agents and IDE integrations. The server currently exposes `poll_inbox`, `read_history`, `send_message`, `session_action`, `session_react`, `session_reply`, `session_lock`, `session_unlock`, `session_locks`, `session_files_list`, `session_file_get`, `attention_request`, and `judge_verdict`.
 
 Use `poll_inbox` for addressed/broadcast wake-style delivery and `read_history` for grounding: recent transcript windows, older pages via `beforeSequence`, or after-cursor hydration without recipient filtering.
 

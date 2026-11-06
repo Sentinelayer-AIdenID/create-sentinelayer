@@ -31,6 +31,7 @@ import {
   AdmissionCredentialRefused,
   assertCanonicalAgentId,
   canonicalAgentId,
+  currentAdmittedAgent,
   withAgentAdmission,
 } from "../session/admission-auth.js";
 import { hasStoredAdmissionCredentials, storedAdmissionAgentsForSession } from "../session/admission.js";
@@ -45,14 +46,21 @@ import {
   listSessionMessageActions,
   pollSessionEvents,
   pollSessionEventsBefore,
+  postJudgeVerdictToApi,
   syncSessionEventToApi,
   updateSessionReadCursor,
 } from "../session/sync.js";
+import { extractJudgeVerdictBlock, renderJudgeVerdictMessage, validateJudgeVerdict } from "../judge/verdict.js";
 
 export const SESSION_MCP_SERVER_NAME = "sentinelayer-session-mcp";
 export const SESSION_MCP_PROTOCOL_VERSION = "2025-06-18";
 
 const MAX_MESSAGE_CHARS = 16_000;
+// A judge verdict carries a machine-readable block; cutting it would corrupt the verdict, so the
+// judge tool posts whole messages up to this bound (below the server's message limit) or refuses.
+const JUDGE_MESSAGE_MAX_CHARS = 100_000;
+// A 404 with one of these codes is a real "not here"; any other 404 means the route is absent.
+const JUDGE_NOT_FOUND_CODES = new Set(["SESSION_NOT_FOUND", "TARGET_NOT_FOUND"]);
 const MAX_TOOL_LIMIT = 200;
 const DEFAULT_TOOL_LIMIT = 50;
 const SESSION_MCP_CONFIRM_ATTEMPTS = 3;
@@ -185,11 +193,17 @@ function eventAgentId(event = {}) {
   return normalizeAgentId(event?.agent?.id || event?.agentId || event?.agent_id, "");
 }
 
+// A judge verdict is read whole by the coder: the numbered comments and the block are the point.
+function carriesJudgeVerdict(payload) {
+  return isPlainObject(payload.judgeVerdict) || extractJudgeVerdictBlock(payload.message).status !== "none";
+}
+
 function safePayload(payload = {}) {
   if (!isPlainObject(payload)) return {};
   const next = { ...payload };
   if (typeof next.message === "string") {
-    const truncated = truncateText(next.message, MAX_MESSAGE_CHARS);
+    const limit = carriesJudgeVerdict(next) ? JUDGE_MESSAGE_MAX_CHARS : MAX_MESSAGE_CHARS;
+    const truncated = truncateText(next.message, limit);
     next.message = truncated.text;
     if (truncated.truncated) next.truncated = true;
   }
@@ -695,8 +709,9 @@ function buildSessionMessageEvent({
   nowIso = new Date().toISOString(),
   uuid = randomUUID,
   extraPayload = {},
+  maxChars = MAX_MESSAGE_CHARS,
 } = {}) {
-  const messageShape = truncateText(message);
+  const messageShape = truncateText(message, maxChars);
   if (!messageShape.text) {
     throw new Error("message is required.");
   }
@@ -986,6 +1001,8 @@ export function createSessionMcpToolHandlers({
   listRoomFilesFn = listRoomFiles,
   downloadRoomFileFn = downloadRoomFile,
   syncSessionEventToApiFn = syncSessionEventToApi,
+  postJudgeVerdictToApiFn = postJudgeVerdictToApi,
+  currentAdmittedAgentFn = currentAdmittedAgent,
   appendToStreamFn = appendToStream,
   sleepFn = sleep,
   uuidFn = randomUUID,
@@ -1210,6 +1227,105 @@ export function createSessionMcpToolHandlers({
         appendToStreamFn,
         sleepFn,
       });
+    },
+
+    async judge_verdict(input = {}) {
+      const sessionId = requireSessionId(input, { targetPath });
+      const agentId = requireAgentId(input);
+      const via = normalizeString(input.via || "auto").toLowerCase();
+      if (!["auto", "api", "room"].includes(via)) {
+        throw new Error('via must be "auto", "api" or "room".');
+      }
+      const checked = validateJudgeVerdict(input.verdict);
+      if (!checked.ok) {
+        return { ok: false, reason: "invalid_verdict", errors: checked.errors, sessionId, agentId };
+      }
+      const verdict = checked.verdict;
+      if (normalizeAgentId(verdict.coder, "") === agentId) {
+        return { ok: false, reason: "self_judgement", sessionId, agentId, coder: verdict.coder };
+      }
+      const escalateTo = normalizeRecipients(input.escalateTo || input.escalate_to);
+      // The API route mentions the room owner on escalation; naming other people needs the room message,
+      // which carries their mentions. So an escalation to named handles never goes through the route.
+      const namedEscalation = verdict.escalate && escalateTo.length > 0;
+      if (namedEscalation && via === "api") {
+        return { ok: false, reason: "escalate_to_needs_room_transport", sessionId, agentId, escalateTo };
+      }
+      // The route records whoever the credential is. Only this agent's own admission makes that the agent;
+      // under the person's token the route would record the person. The room message is checked against the
+      // agent's grant instead, so without the admission the verdict goes as a room message.
+      const admitted = currentAdmittedAgentFn();
+      const agentCredential = Boolean(admitted && admitted.sessionId === sessionId &&
+        normalizeAgentId(admitted.agentId, "") === agentId);
+      if (via === "api" && !agentCredential) {
+        return { ok: false, reason: "api_needs_agent_credential", sessionId, agentId };
+      }
+      const message = renderJudgeVerdictMessage(verdict, { escalateTo });
+      if (message.length > JUDGE_MESSAGE_MAX_CHARS) {
+        return { ok: false, reason: "verdict_message_too_long", sessionId, agentId, limit: JUDGE_MESSAGE_MAX_CHARS };
+      }
+      const dryRun = Boolean(input.dryRun || input.dry_run);
+      if (dryRun) {
+        return { ok: true, dryRun: true, sessionId, agentId, via, verdict, message };
+      }
+
+      let api = null;
+      if (via !== "room" && !namedEscalation && agentCredential) {
+        api = await postJudgeVerdictToApiFn(sessionId, verdict, { targetPath });
+        const apiSummary = { status: api?.status || 0, code: api?.code || "", reason: api?.reason || "" };
+        if (api?.ok) {
+          return { ok: true, transport: "api", sessionId, agentId, verdict, api: { ...apiSummary, body: api.body } };
+        }
+        // Fall back to the room post only when the route itself is absent (an older server, or
+        // the judge loop switched off there): a refusal or a lost response is reported as is.
+        const routeAbsent = api?.status === 404 && !JUDGE_NOT_FOUND_CODES.has(api.code);
+        if (via === "api" || !routeAbsent) {
+          return {
+            ok: false,
+            transport: "api",
+            reason: apiSummary.code || apiSummary.reason || "api_failed",
+            sessionId,
+            agentId,
+            api: { ...apiSummary, body: api?.body || null },
+          };
+        }
+      }
+
+      const agent = buildAgentEnvelope(agentId, { ...input, role: normalizeString(input.role) || "reviewer" });
+      const idempotencyKey = normalizeString(input.idempotencyKey || input.idempotency_key) ||
+        `judge-${shortSha256(JSON.stringify([sessionId, agentId, verdict.target.type, verdict.target.ref, verdict.round]))}`;
+      const event = buildSessionMessageEvent({
+        event: "session_message",
+        sessionId,
+        agent,
+        message,
+        recipients: [normalizeAgentId(verdict.coder, verdict.coder)],
+        idempotencyKey,
+        nowIso: now(),
+        uuid: uuidFn,
+        maxChars: JUDGE_MESSAGE_MAX_CHARS,
+      });
+      const posted = await persistSessionEvent({
+        sessionId,
+        event,
+        targetPath,
+        dryRun: false,
+        syncSessionEventToApiFn,
+        pollSessionEventsBeforeFn,
+        pollSessionEventsFn,
+        appendToStreamFn,
+        sleepFn,
+      });
+      return {
+        ...posted,
+        transport: "room",
+        ...(api ? { fellBackFrom: "api_route_absent" } : {}),
+        ...(via === "auto" && namedEscalation ? { roomBecause: "escalate_to_named_handles" } : {}),
+        ...(via === "auto" && !namedEscalation && !agentCredential ? { roomBecause: "no_agent_credential" } : {}),
+        sessionId,
+        agentId,
+        verdict,
+      };
     },
 
     async session_action(input = {}) {
@@ -1585,6 +1701,34 @@ export const SESSION_MCP_TOOLS = Object.freeze([
     },
   },
   {
+    name: "judge_verdict",
+    title: "Post Judge Verdict",
+    description:
+      "Send a judge-verdict back to the coding agent: ACCEPT, or CHANGES with numbered file:line comments (severity P0-P3, one-line fix). Validates the verdict first. When the agent acts under its own admission for the room and the server has the judge-verdicts route, the route records it; otherwise it posts a room message that mentions the coder and carries the verdict block (the server checks the agent's grant on that post). via=room always posts the message; dryRun returns the rendered message.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["sessionId", "agentId", "verdict"],
+      properties: {
+        sessionId: { type: "string", minLength: 1 },
+        agentId: { type: "string", minLength: 1 },
+        verdict: { type: "object" },
+        via: { type: "string", enum: ["auto", "api", "room"], default: "auto" },
+        escalateTo: {
+          anyOf: [
+            { type: "string" },
+            { type: "array", items: { type: "string" } },
+          ],
+        },
+        model: { type: "string" },
+        role: { type: "string" },
+        displayName: { type: "string" },
+        idempotencyKey: { type: "string" },
+        dryRun: { type: "boolean", default: false },
+      },
+    },
+  },
+  {
     name: "session_action",
     title: "Record Senti Session Action",
     description:
@@ -1946,7 +2090,7 @@ export async function handleMcpJsonRpcMessage(
         version: "0.20.0",
       },
       instructions:
-        "Use native Senti tools for coordination actions and generated sl.* bridge tools for the rest of SentinelLayer CLI. Use poll_inbox for addressed wake-style delivery, read_history for recent/older transcript grounding, session_action/session_react/session_reply/session_lock/session_unlock/session_locks for low-noise session work, send_message for durable posts, and generated command tools such as sl.auth.status or sl.review.scan for ordinary CLI commands.",
+        "Use native Senti tools for coordination actions and generated sl.* bridge tools for the rest of SentinelLayer CLI. Use poll_inbox for addressed wake-style delivery, read_history for recent/older transcript grounding, session_action/session_react/session_reply/session_lock/session_unlock/session_locks for low-noise session work, send_message for durable posts, judge_verdict to send a review verdict back to a coding agent, and generated command tools such as sl.auth.status or sl.review.scan for ordinary CLI commands.",
     });
   }
 

@@ -1328,6 +1328,63 @@ export async function syncSessionErrorToApi(sessionId, error, options = {}) {
 }
 
 /**
+ * POST a validated judge-verdict document to the room's judge-verdicts route. The body is the
+ * document only: the server decides who judged from the credential. Never throws; returns
+ * `{ ok, status, code, body, reason }` so the caller can tell "route not here" (404 without a
+ * room or target code) from a refusal it must report.
+ */
+export async function postJudgeVerdictToApi(
+  sessionId,
+  verdict,
+  {
+    targetPath = process.cwd(),
+    timeoutMs = DEFAULT_SYNC_TIMEOUT_MS,
+    resolveAuthSession = resolveActiveAuthSession,
+    fetchImpl = fetchWithTimeout,
+  } = {},
+) {
+  const normalizedSessionId = normalizeString(sessionId);
+  if (!isUrlPathSegment(normalizedSessionId) || !verdict || typeof verdict !== "object" || Array.isArray(verdict)) {
+    return { ok: false, status: 0, code: "", body: null, reason: "invalid_input" };
+  }
+  if (String(process.env.SENTINELAYER_SKIP_REMOTE_SYNC || "").trim() === "1") {
+    return { ok: false, status: 0, code: "", body: null, reason: "remote_sync_disabled_env" };
+  }
+  let session = null;
+  try {
+    session = await resolveAuthSession({ cwd: targetPath, env: process.env, autoRotate: false });
+  } catch {
+    return { ok: false, status: 0, code: "", body: null, reason: "no_session" };
+  }
+  if (!isAuthenticated(session)) {
+    return { ok: false, status: 0, code: "", body: null, reason: "not_authenticated" };
+  }
+  const endpoint = `${resolveApiBaseUrl(session)}/api/v1/sessions/${urlPathSegment(normalizedSessionId, { label: "sessionId" })}/judge-verdicts`;
+  try {
+    const { response, payload } = await fetchJsonWithFullTimeout(
+      endpoint,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credential: await credentialFor(session),
+        body: JSON.stringify(verdict),
+      },
+      normalizePositiveInteger(timeoutMs, DEFAULT_SYNC_TIMEOUT_MS),
+      fetchImpl,
+      { readErrorBody: true },
+    );
+    const status = response ? response.status : 0;
+    const body = payload && typeof payload === "object" ? payload : null;
+    const code = normalizeString(body?.detail?.error?.code || body?.error?.code || body?.code);
+    if (response?.ok) return { ok: true, status, code: "", body, reason: "" };
+    return { ok: false, status, code, body, reason: `api_${status || "no_response"}` };
+  } catch (error) {
+    if (error?.code === "INVITATION_PENDING") throw error;
+    return { ok: false, status: 0, code: "", body: null, reason: normalizeString(error?.message) || "request_failed" };
+  }
+}
+
+/**
  * Poll human messages for a session from sentinelayer-api and map them into
  * canonical high-priority session events for local relay.
  */

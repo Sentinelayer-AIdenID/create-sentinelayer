@@ -3,15 +3,20 @@ import { installSkills, listSkills } from "../skills/service.js";
 export function registerSkillsCommand(program) {
   const skills = program.command("skills").description("Install and inspect bundled Senti agent skills");
   for (const action of ["install", "list"]) {
-    const command = skills.command(action)
-      .description(action === "install" ? "Install bundled skills without replacing local edits" : "List bundled and installed skill versions and SHA-256 hashes")
+    const command = skills.command(action === "install" ? "install [names...]" : action)
+      .description(action === "install"
+        ? "Install bundled skills (all, or only the named ones) without replacing local edits"
+        : "List bundled and installed skill versions and SHA-256 hashes")
       .option("--dir <path>", "Skills directory (default: ~/.claude/skills)")
       .option("--json", "Emit machine-readable output");
     if (action === "install") command.option("--force", "Replace differing local files");
-    command.action(async (options, command) => {
-      const json = Boolean(command.optsWithGlobals().json);
+    command.action(async (...args) => {
+      const invoked = args.at(-1);
+      const options = args.at(-2);
+      const names = action === "install" ? args[0] : undefined;
+      const json = Boolean(invoked.optsWithGlobals().json);
       try {
-        const result = await (action === "install" ? installSkills(options) : listSkills(options));
+        const result = await (action === "install" ? installSkills({ ...options, names }) : listSkills(options));
         if (json) {
           console.log(JSON.stringify({ command: `skills ${action}`, ...result }, null, 2));
           return;
