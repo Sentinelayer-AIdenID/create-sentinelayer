@@ -49,7 +49,7 @@ import {
   syncSessionEventToApi,
   updateSessionReadCursor,
 } from "../session/sync.js";
-import { renderJudgeVerdictMessage, validateJudgeVerdict } from "../judge/verdict.js";
+import { extractJudgeVerdictBlock, renderJudgeVerdictMessage, validateJudgeVerdict } from "../judge/verdict.js";
 
 export const SESSION_MCP_SERVER_NAME = "sentinelayer-session-mcp";
 export const SESSION_MCP_PROTOCOL_VERSION = "2025-06-18";
@@ -192,11 +192,17 @@ function eventAgentId(event = {}) {
   return normalizeAgentId(event?.agent?.id || event?.agentId || event?.agent_id, "");
 }
 
+// A judge verdict is read whole by the coder: the numbered comments and the block are the point.
+function carriesJudgeVerdict(payload) {
+  return isPlainObject(payload.judgeVerdict) || extractJudgeVerdictBlock(payload.message).status !== "none";
+}
+
 function safePayload(payload = {}) {
   if (!isPlainObject(payload)) return {};
   const next = { ...payload };
   if (typeof next.message === "string") {
-    const truncated = truncateText(next.message, MAX_MESSAGE_CHARS);
+    const limit = carriesJudgeVerdict(next) ? JUDGE_MESSAGE_MAX_CHARS : MAX_MESSAGE_CHARS;
+    const truncated = truncateText(next.message, limit);
     next.message = truncated.text;
     if (truncated.truncated) next.truncated = true;
   }
@@ -1237,6 +1243,12 @@ export function createSessionMcpToolHandlers({
         return { ok: false, reason: "self_judgement", sessionId, agentId, coder: verdict.coder };
       }
       const escalateTo = normalizeRecipients(input.escalateTo || input.escalate_to);
+      // The API route mentions the room owner on escalation; naming other people needs the room message,
+      // which carries their mentions. So an escalation to named handles never goes through the route.
+      const namedEscalation = verdict.escalate && escalateTo.length > 0;
+      if (namedEscalation && via === "api") {
+        return { ok: false, reason: "escalate_to_needs_room_transport", sessionId, agentId, escalateTo };
+      }
       const message = renderJudgeVerdictMessage(verdict, { escalateTo });
       if (message.length > JUDGE_MESSAGE_MAX_CHARS) {
         return { ok: false, reason: "verdict_message_too_long", sessionId, agentId, limit: JUDGE_MESSAGE_MAX_CHARS };
@@ -1247,7 +1259,7 @@ export function createSessionMcpToolHandlers({
       }
 
       let api = null;
-      if (via !== "room") {
+      if (via !== "room" && !namedEscalation) {
         api = await postJudgeVerdictToApiFn(sessionId, verdict, { targetPath });
         const apiSummary = { status: api?.status || 0, code: api?.code || "", reason: api?.reason || "" };
         if (api?.ok) {
@@ -1297,6 +1309,7 @@ export function createSessionMcpToolHandlers({
         ...posted,
         transport: "room",
         ...(api ? { fellBackFrom: "api_route_absent" } : {}),
+        ...(namedEscalation && via === "auto" ? { roomBecause: "escalate_to_named_handles" } : {}),
         sessionId,
         agentId,
         verdict,

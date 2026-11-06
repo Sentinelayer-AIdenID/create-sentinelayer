@@ -227,6 +227,63 @@ test("judge_verdict tool: a long verdict is posted whole, never cut through its 
   assert.equal(extractJudgeVerdictBlock(message).status, "one");
 });
 
+test("judge verdict: the coder's inbox and history keep a long verdict whole; other long posts are still cut", async () => {
+  const doc = caseDoc("changes-pr-basic");
+  doc.comments = Array.from({ length: 15 }, (_, index) => ({
+    file: `src/module-${index}.js`, line: index + 1, severity: "P2", text: "x".repeat(1500), fix: "y".repeat(400),
+  }));
+  const verdictMessage = renderJudgeVerdictMessage(validateJudgeVerdict(doc).verdict);
+  const serverDelivery = `@coder-1 Judge verdict from judge-1: CHANGES\n${"z".repeat(30_000)}`;
+  const ordinary = "w".repeat(20_000);
+  assert.ok(verdictMessage.length > 40_000);
+  const events = [
+    evt("c1", "judge-1", { message: verdictMessage, to: ["coder-1"] }),
+    evt("c2", "senti", { message: serverDelivery, to: ["coder-1"], judgeVerdict: { id: "v-1", verdict: "CHANGES" } }),
+    evt("c3", "judge-1", { message: ordinary, to: ["coder-1"] }),
+  ];
+  const handlers = createSessionMcpToolHandlers({
+    targetPath: "workspace",
+    pollSessionEventsFn: async () => ({ ok: true, cursor: "c3", events }),
+    pollSessionEventsBeforeFn: async () => ({ ok: true, cursor: "c3", events }),
+    listSessionMessageActionsFn: async () => ({ ok: true, actions: [], projection: { recentActivity: [] } }),
+    updateSessionReadCursorFn: async () => ({ ok: true, updated: true }),
+  });
+  const inbox = await handlers.poll_inbox({ sessionId: "sess-1", agentId: "coder-1", cursor: "c0" });
+  const history = await handlers.read_history({ sessionId: "sess-1", agentId: "coder-1" });
+  for (const result of [inbox, history]) {
+    assert.equal(result.ok, true, result.reason);
+    const [judged, delivered, other] = result.events;
+    assert.equal(judged.payload.message, verdictMessage);
+    assert.equal(judged.payload.truncated, undefined);
+    assert.deepEqual(validateJudgeVerdict(extractJudgeVerdictBlock(judged.payload.message).document).verdict.comments.length, 15);
+    assert.equal(delivered.payload.message, serverDelivery);
+    assert.equal(other.payload.message.length, 16_000);
+    assert.equal(other.payload.truncated, true);
+  }
+});
+
+test("judge_verdict tool: an escalation to named people goes as a room message, never through the route", async () => {
+  const verdict = caseDoc("changes-final-round-escalated");
+  const auto = judgeHarness({ api: async () => ({ ok: true, status: 201, code: "", body: {}, reason: "" }) });
+  const sent = await auto.handlers.judge_verdict({ sessionId: "sess-1", agentId: "judge-1", verdict, escalateTo: ["human-owner"] });
+  assert.equal(sent.ok, true);
+  assert.equal(sent.transport, "room");
+  assert.equal(sent.roomBecause, "escalate_to_named_handles");
+  assert.deepEqual(auto.calls, ["anchor", "sync", "confirm", "cache"], "the route is not called");
+  assert.match(auto.synced[0].event.payload.message, /^@coder-1 @human-owner /);
+
+  const forced = judgeHarness();
+  const refused = await forced.handlers.judge_verdict({ sessionId: "sess-1", agentId: "judge-1", verdict, escalateTo: "human-owner", via: "api" });
+  assert.deepEqual([refused.ok, refused.reason], [false, "escalate_to_needs_room_transport"]);
+  assert.deepEqual(forced.calls, []);
+
+  // Without named people the route is used; the server mentions the room owner itself.
+  const ownerOnly = judgeHarness({ api: async () => ({ ok: true, status: 201, code: "", body: {}, reason: "" }) });
+  const viaApi = await ownerOnly.handlers.judge_verdict({ sessionId: "sess-1", agentId: "judge-1", verdict });
+  assert.equal(viaApi.transport, "api");
+  assert.deepEqual(ownerOnly.calls, ["api"]);
+});
+
 test("judge_verdict tool: auto uses the API route when the server has it", async () => {
   const seen = [];
   const { handlers, calls } = judgeHarness({
