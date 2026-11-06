@@ -10,6 +10,11 @@ const COMMAND_REGISTRARS = {
     exportName: "registerSkillsCommand",
     needsLegacy: false,
   },
+  judge: {
+    loader: () => import("./commands/judge.js"),
+    exportName: "registerJudgeCommand",
+    needsLegacy: false,
+  },
   init: {
     loader: () => import("./commands/init.js"),
     exportName: "registerInitCommand",
@@ -283,6 +288,9 @@ export async function runCli(rawArgs = process.argv.slice(2)) {
       console.log("\nAgent Skills:");
       console.log("  sl skills install [--dir <path>] [--force] [--json]  Install bundled Senti skills");
       console.log("  sl skills list [--dir <path>] [--json]  Show bundled and installed versions/hashes");
+      console.log("\nJudge Loop:");
+      console.log("  sl judge check --file <verdict.json> [--json]  Validate a verdict offline and preview the message");
+      console.log("  sl judge verdict <sessionId> --agent <id> --file <verdict.json>  Send the verdict to the coder");
     }
     return;
   }

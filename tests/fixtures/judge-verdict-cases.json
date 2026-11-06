@@ -1,0 +1,3066 @@
+{
+ "schema": "judge-verdict-cases/v1",
+ "note": "Shared agreement cases for the judge-verdict v1 validators. Keep byte-identical in both repos.",
+ "cases": [
+  {
+   "name": "changes-pr-basic",
+   "valid": true,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ]
+   }
+  },
+  {
+   "name": "accept-no-comments",
+   "valid": true,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "ACCEPT",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Meets the bar.",
+    "comments": []
+   }
+  },
+  {
+   "name": "accept-with-p2-p3-notes",
+   "valid": true,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "ACCEPT",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Meets the bar.",
+    "comments": [
+     {
+      "file": "src/a.js",
+      "line": 3,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 3,
+      "severity": "P3",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     }
+    ]
+   }
+  },
+  {
+   "name": "changes-final-round-escalated",
+   "valid": true,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 3,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ],
+    "escalate": true
+   }
+  },
+  {
+   "name": "ticket-target-no-sha",
+   "valid": true,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "ticket",
+     "ref": "TKT-2041"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ]
+   }
+  },
+  {
+   "name": "message-target",
+   "valid": true,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "message",
+     "ref": "60412"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ]
+   }
+  },
+  {
+   "name": "message-target-with-sha",
+   "valid": true,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "message",
+     "ref": "7",
+     "sha": "abcdef0"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ]
+   }
+  },
+  {
+   "name": "line-zero-whole-file",
+   "valid": true,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/a.js",
+      "line": 0,
+      "severity": "P1",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     }
+    ]
+   }
+  },
+  {
+   "name": "max-rounds-defaulted",
+   "valid": true,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 2,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ]
+   }
+  },
+  {
+   "name": "fix-omitted",
+   "valid": true,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/a.js",
+      "line": 3,
+      "severity": "P2",
+      "text": "Rename for clarity."
+     }
+    ]
+   }
+  },
+  {
+   "name": "fix-empty",
+   "valid": true,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/a.js",
+      "line": 3,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": ""
+     }
+    ]
+   }
+  },
+  {
+   "name": "do-not-train",
+   "valid": true,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ],
+    "doNotTrain": true
+   }
+  },
+  {
+   "name": "escalate-false-explicit",
+   "valid": true,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ],
+    "escalate": false
+   }
+  },
+  {
+   "name": "sha-uppercase",
+   "valid": true,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9F2C1AB"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ]
+   }
+  },
+  {
+   "name": "summary-multiline",
+   "valid": true,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Line one.\nLine two.\tTabbed.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ]
+   }
+  },
+  {
+   "name": "fifty-comments",
+   "valid": true,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/a.js",
+      "line": 1,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 2,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 3,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 4,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 5,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 6,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 7,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 8,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 9,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 10,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 11,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 12,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 13,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 14,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 15,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 16,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 17,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 18,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 19,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 20,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 21,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 22,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 23,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 24,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 25,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 26,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 27,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 28,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 29,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 30,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 31,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 32,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 33,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 34,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 35,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 36,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 37,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 38,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 39,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 40,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 41,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 42,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 43,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 44,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 45,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 46,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 47,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 48,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 49,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 50,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     }
+    ]
+   }
+  },
+  {
+   "name": "max-rounds-one-escalated",
+   "valid": true,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 1,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ],
+    "escalate": true
+   }
+  },
+  {
+   "name": "round-ten",
+   "valid": true,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 10,
+    "maxRounds": 10,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ],
+    "escalate": true
+   }
+  },
+  {
+   "name": "not-an-object",
+   "valid": false,
+   "doc": [
+    {
+     "kind": "judge-verdict",
+     "version": 1,
+     "verdict": "CHANGES",
+     "round": 1,
+     "maxRounds": 3,
+     "target": {
+      "type": "pr",
+      "ref": "acme/app#41",
+      "sha": "9f2c1ab"
+     },
+     "coder": "coder-1",
+     "summary": "Right approach. One edge case fails and the new route drops the request id.",
+     "comments": [
+      {
+       "file": "src/api/orders.js",
+       "line": 88,
+       "severity": "P1",
+       "text": "An empty cart returns 500.",
+       "fix": "Return 422 EMPTY_CART before pricing."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "judge-field-in-body",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ],
+    "judge": "judge-1"
+   }
+  },
+  {
+   "name": "judge-agent-id-in-body",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ],
+    "judgeAgentId": "judge-1"
+   }
+  },
+  {
+   "name": "agent-id-in-body",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ],
+    "agentId": "judge-1"
+   }
+  },
+  {
+   "name": "wrong-kind",
+   "valid": false,
+   "doc": {
+    "kind": "review",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ]
+   }
+  },
+  {
+   "name": "version-true",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": true,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ]
+   }
+  },
+  {
+   "name": "version-two",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 2,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ]
+   }
+  },
+  {
+   "name": "version-string",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": "1",
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ]
+   }
+  },
+  {
+   "name": "verdict-lowercase",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "changes",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ]
+   }
+  },
+  {
+   "name": "verdict-unknown",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "REJECT",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ]
+   }
+  },
+  {
+   "name": "round-zero",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 0,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ]
+   }
+  },
+  {
+   "name": "round-eleven",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 11,
+    "maxRounds": 10,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ]
+   }
+  },
+  {
+   "name": "round-over-max",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 4,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ],
+    "escalate": true
+   }
+  },
+  {
+   "name": "round-string",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": "1",
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ]
+   }
+  },
+  {
+   "name": "round-float",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1.5,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ]
+   }
+  },
+  {
+   "name": "max-rounds-zero",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 0,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ]
+   }
+  },
+  {
+   "name": "max-rounds-eleven",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 11,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ]
+   }
+  },
+  {
+   "name": "target-missing",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ]
+   }
+  },
+  {
+   "name": "target-extra-key",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab",
+     "url": "x"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ]
+   }
+  },
+  {
+   "name": "target-type-unknown",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "commit",
+     "ref": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ]
+   }
+  },
+  {
+   "name": "pr-ref-bad-format",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app/41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ]
+   }
+  },
+  {
+   "name": "pr-ref-number-zero",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#0",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ]
+   }
+  },
+  {
+   "name": "pr-without-sha",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ]
+   }
+  },
+  {
+   "name": "sha-too-short",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ]
+   }
+  },
+  {
+   "name": "sha-not-hex",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "zzzzzzz"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ]
+   }
+  },
+  {
+   "name": "message-ref-not-sequence",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "message",
+     "ref": "abc"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ]
+   }
+  },
+  {
+   "name": "ticket-ref-blank",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "ticket",
+     "ref": "   "
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ]
+   }
+  },
+  {
+   "name": "ticket-ref-control-char",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "ticket",
+     "ref": "T-1\nT-2"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ]
+   }
+  },
+  {
+   "name": "ticket-ref-too-long",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "ticket",
+     "ref": "ttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ]
+   }
+  },
+  {
+   "name": "coder-human",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "human-alice",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ]
+   }
+  },
+  {
+   "name": "coder-human-uppercase",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "Human-Alice",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ]
+   }
+  },
+  {
+   "name": "coder-space",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder 1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ]
+   }
+  },
+  {
+   "name": "coder-empty",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ]
+   }
+  },
+  {
+   "name": "coder-missing",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ]
+   }
+  },
+  {
+   "name": "summary-blank",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "   ",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ]
+   }
+  },
+  {
+   "name": "summary-too-long",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "sssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ]
+   }
+  },
+  {
+   "name": "summary-missing",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ]
+   }
+  },
+  {
+   "name": "changes-without-comments",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": []
+   }
+  },
+  {
+   "name": "accept-with-p1",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "ACCEPT",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Meets the bar.",
+    "comments": [
+     {
+      "file": "src/a.js",
+      "line": 3,
+      "severity": "P1",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     }
+    ]
+   }
+  },
+  {
+   "name": "accept-with-p0",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "ACCEPT",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Meets the bar.",
+    "comments": [
+     {
+      "file": "src/a.js",
+      "line": 3,
+      "severity": "P0",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     }
+    ]
+   }
+  },
+  {
+   "name": "comments-missing",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id."
+   }
+  },
+  {
+   "name": "comments-not-array",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": {
+     "0": {
+      "file": "src/a.js",
+      "line": 3,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     }
+    }
+   }
+  },
+  {
+   "name": "comment-extra-key",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/a.js",
+      "line": 3,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total.",
+      "title": "x"
+     }
+    ]
+   }
+  },
+  {
+   "name": "comment-text-missing",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/a.js",
+      "line": 3,
+      "severity": "P2",
+      "fix": "Call it total."
+     }
+    ]
+   }
+  },
+  {
+   "name": "comment-text-blank",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/a.js",
+      "line": 3,
+      "severity": "P2",
+      "text": " ",
+      "fix": "Call it total."
+     }
+    ]
+   }
+  },
+  {
+   "name": "comment-text-too-long",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/a.js",
+      "line": 3,
+      "severity": "P2",
+      "text": "ttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+      "fix": "Call it total."
+     }
+    ]
+   }
+  },
+  {
+   "name": "comment-fix-too-long",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/a.js",
+      "line": 3,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+     }
+    ]
+   }
+  },
+  {
+   "name": "comment-severity-p4",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/a.js",
+      "line": 3,
+      "severity": "P4",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     }
+    ]
+   }
+  },
+  {
+   "name": "comment-severity-lowercase",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/a.js",
+      "line": 3,
+      "severity": "p1",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     }
+    ]
+   }
+  },
+  {
+   "name": "comment-line-negative",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/a.js",
+      "line": -1,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     }
+    ]
+   }
+  },
+  {
+   "name": "comment-line-too-big",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/a.js",
+      "line": 10000001,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     }
+    ]
+   }
+  },
+  {
+   "name": "comment-line-bool",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/a.js",
+      "line": true,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     }
+    ]
+   }
+  },
+  {
+   "name": "comment-line-float",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/a.js",
+      "line": 1.5,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     }
+    ]
+   }
+  },
+  {
+   "name": "comment-line-string",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/a.js",
+      "line": "88",
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     }
+    ]
+   }
+  },
+  {
+   "name": "comment-file-newline",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/a.js\nsrc/b.js",
+      "line": 3,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     }
+    ]
+   }
+  },
+  {
+   "name": "comment-file-blank",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "  ",
+      "line": 3,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     }
+    ]
+   }
+  },
+  {
+   "name": "comment-file-too-long",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "line": 3,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     }
+    ]
+   }
+  },
+  {
+   "name": "comment-not-object",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     "src/a.js:3 fix it"
+    ]
+   }
+  },
+  {
+   "name": "fifty-one-comments",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/a.js",
+      "line": 1,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 2,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 3,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 4,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 5,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 6,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 7,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 8,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 9,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 10,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 11,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 12,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 13,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 14,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 15,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 16,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 17,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 18,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 19,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 20,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 21,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 22,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 23,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 24,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 25,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 26,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 27,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 28,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 29,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 30,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 31,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 32,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 33,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 34,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 35,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 36,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 37,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 38,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 39,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 40,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 41,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 42,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 43,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 44,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 45,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 46,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 47,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 48,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 49,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 50,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 51,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "Call it total."
+     }
+    ]
+   }
+  },
+  {
+   "name": "escalate-on-accept",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "ACCEPT",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Meets the bar.",
+    "comments": [],
+    "escalate": true
+   }
+  },
+  {
+   "name": "final-round-changes-not-escalated",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 3,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ]
+   }
+  },
+  {
+   "name": "escalate-string",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ],
+    "escalate": "true"
+   }
+  },
+  {
+   "name": "do-not-train-string",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ],
+    "doNotTrain": "yes"
+   }
+  },
+  {
+   "name": "nul-in-summary",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "ok\u0000",
+    "comments": [
+     {
+      "file": "src/api/orders.js",
+      "line": 88,
+      "severity": "P1",
+      "text": "An empty cart returns 500.",
+      "fix": "Return 422 EMPTY_CART before pricing."
+     }
+    ]
+   }
+  },
+  {
+   "name": "nul-in-comment-fix",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/a.js",
+      "line": 3,
+      "severity": "P2",
+      "text": "Rename for clarity.",
+      "fix": "a\u0000"
+     }
+    ]
+   }
+  },
+  {
+   "name": "oversize-document",
+   "valid": false,
+   "doc": {
+    "kind": "judge-verdict",
+    "version": 1,
+    "verdict": "CHANGES",
+    "round": 1,
+    "maxRounds": 3,
+    "target": {
+     "type": "pr",
+     "ref": "acme/app#41",
+     "sha": "9f2c1ab"
+    },
+    "coder": "coder-1",
+    "summary": "Right approach. One edge case fails and the new route drops the request id.",
+    "comments": [
+     {
+      "file": "src/a.js",
+      "line": 1,
+      "severity": "P2",
+      "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 2,
+      "severity": "P2",
+      "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 3,
+      "severity": "P2",
+      "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 4,
+      "severity": "P2",
+      "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 5,
+      "severity": "P2",
+      "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 6,
+      "severity": "P2",
+      "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 7,
+      "severity": "P2",
+      "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 8,
+      "severity": "P2",
+      "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 9,
+      "severity": "P2",
+      "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 10,
+      "severity": "P2",
+      "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 11,
+      "severity": "P2",
+      "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 12,
+      "severity": "P2",
+      "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 13,
+      "severity": "P2",
+      "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 14,
+      "severity": "P2",
+      "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 15,
+      "severity": "P2",
+      "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 16,
+      "severity": "P2",
+      "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 17,
+      "severity": "P2",
+      "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 18,
+      "severity": "P2",
+      "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 19,
+      "severity": "P2",
+      "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "fix": "Call it total."
+     },
+     {
+      "file": "src/a.js",
+      "line": 20,
+      "severity": "P2",
+      "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "fix": "Call it total."
+     }
+    ]
+   }
+  }
+ ]
+}

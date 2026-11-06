@@ -29,6 +29,7 @@ export const SESSION_ROUTE_CLASSES = Object.freeze({
   "mcp:poll_inbox": "legacy-data-plane",
   "mcp:read_history": "legacy-data-plane",
   "mcp:send_message": "legacy-data-plane",
+  "mcp:judge_verdict": "legacy-data-plane",
   "mcp:attention_request": "legacy-data-plane",
   "mcp:session_action": "legacy-data-plane",
   "mcp:session_react": "legacy-data-plane",

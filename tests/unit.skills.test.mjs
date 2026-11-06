@@ -9,12 +9,13 @@ import { spawnSync } from "node:child_process";
 import { parse } from "yaml";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-const names = ["senti-agent-identity", "senti-room-notifications", "sentinelayer-cli"];
+const names = ["senti-agent-identity", "senti-room-notifications", "sentinelayer-cli", "senti-judge", "omar-gate-setup"];
 const expectedFiles = [
   "senti-agent-identity/SKILL.md", "sentinelayer-cli/SKILL.md",
   "senti-room-notifications/SKILL.md", "senti-room-notifications/listen-wrapper.cjs",
   "senti-room-notifications/test-classifier.js", "senti-room-notifications/test-receipt.js",
   "senti-room-notifications/package.json",
+  "senti-judge/SKILL.md", "omar-gate-setup/SKILL.md",
 ];
 
 async function fixture(t) {

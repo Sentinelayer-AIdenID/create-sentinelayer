@@ -13,8 +13,11 @@ CLI binaries:
 
 ## Install agent skills
 
-The npm package includes `senti-agent-identity`, `senti-room-notifications` and
-`sentinelayer-cli`, with the notification wrapper and its checks.
+The npm package includes `senti-agent-identity`, `senti-room-notifications`,
+`sentinelayer-cli`, `senti-judge` and `omar-gate-setup`, with the notification wrapper
+and its checks. `senti-judge` teaches a judging model how to review a coding agent's
+work and send the verdict back (`sl judge check`, `sl judge verdict`, or the MCP
+`judge_verdict` tool); `omar-gate-setup` walks through connecting Omar Gate to a repo.
 
 ```bash
 sl skills install

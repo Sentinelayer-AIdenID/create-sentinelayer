@@ -62,6 +62,7 @@ test("the legacy data-plane list is exactly posting, replying, reading, message 
     "cli:session say",
     "cli:session search",
     "mcp:attention_request",
+    "mcp:judge_verdict",
     "mcp:poll_inbox",
     "mcp:read_history",
     "mcp:send_message",

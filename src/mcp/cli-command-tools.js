@@ -36,6 +36,10 @@ const SENSITIVE_COMMAND_PATHS = new Set([
   // Skill installation and inspection use user-selected local paths; keep them on the direct CLI.
   "skills.install",
   "skills.list",
+  // Judges reach the room through the native judge_verdict tool; both commands read a
+  // caller-chosen local file.
+  "judge.check",
+  "judge.verdict",
   "auth.login",
   "auth.logout",
   "auth.revoke",

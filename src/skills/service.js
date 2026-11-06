@@ -8,7 +8,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { parse } from "yaml";
 
 const BUNDLE_ROOT = fileURLToPath(new URL("../../skills/", import.meta.url));
-const SKILL_NAMES = ["senti-agent-identity", "senti-room-notifications", "sentinelayer-cli"];
+const SKILL_NAMES = ["senti-agent-identity", "senti-room-notifications", "sentinelayer-cli", "senti-judge", "omar-gate-setup"];
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");

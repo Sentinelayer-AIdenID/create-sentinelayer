@@ -48,7 +48,7 @@ function shouldEmitJson(options, command) {
 function resolveSpecPath(targetPath, explicitSpecFile) {
   const explicit = String(explicitSpecFile || "").trim();
   if (explicit) {
-    return { reportPath: path.resolve(targetPath, explicit), outputFs: fsp };
+    return path.resolve(targetPath, explicit);
   }
 
   const candidates = [path.join(targetPath, "SPEC.md"), path.join(targetPath, "docs", "spec.md")];

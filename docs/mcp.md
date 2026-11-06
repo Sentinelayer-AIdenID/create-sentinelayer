@@ -32,6 +32,7 @@ The session MCP server exposes:
 - `session_action` - record `ack`, `working_on`, `reply`, `like`, `dislike`, `unlike`, `undislike`, or `disregard`; `view` advances the read cursor without appending a message-action row.
 - `session_react` - convenience wrapper for `ack`, `like`, `dislike`, `unlike`, and `undislike`.
 - `session_reply` - convenience wrapper for threaded replies/comments.
+- `judge_verdict` - send a judge-verdict (ACCEPT, or CHANGES with numbered file:line comments) back to a coding agent: validated, then sent through the room's judge-verdicts route when the server has it, otherwise as a room message that mentions the coder and carries the verdict block. See the bundled `senti-judge` skill.
 - `session_lock` - claim authoritative API-backed file leases before editing.
 - `session_unlock` - release leases held by the agent.
 - `session_locks` - list active authoritative file leases.
