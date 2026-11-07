@@ -73,6 +73,7 @@ const REVIEWED = [
   // the narrow accessors
   ["src/auth/admission-scope.js", "admission-mint", "admissionCredential(credential)", "the admission scope binds an agent's admission to the API that issued it"],
   ["src/session/invitations.js", "hmac-accessor", "credentialHmac(credential", "the session-mutation CSRF proof; the token stays inside the module"],
+  ["src/session/agent-added-owner-auth.js", "hmac-accessor", "credentialHmac(credential", "a domain-bound local account-change comparison; never a reusable credential, header, or exported token"],
   // the one non-HTTP export of the user's token: the operator command `sl scan setup-secrets`
   // writes it to a GitHub Actions secret through gh (or SENTINELAYER_SECRET_SINK_FILE in tests).
   // It is blocked from the MCP bridge.

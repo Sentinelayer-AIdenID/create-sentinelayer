@@ -485,6 +485,7 @@ export async function listenSessionEvents({
   }
 
   async function processEventBatch(eventsInput = [], resultCursor = null) {
+    if (signal?.aborted) return { processed: false, retryAfterMs: null };
     const events = Array.isArray(eventsInput) ? eventsInput : [];
     const nextCursor = normalizeString(resultCursor) || cursorFromEvents(events, cursor);
     const cursorDidNotAdvance = Boolean(nextCursor && cursor && !cursorAdvances(nextCursor, cursor));
@@ -548,6 +549,7 @@ export async function listenSessionEvents({
 
     const shouldEmitBatch = primed || Boolean(replay);
     for (const event of visibleEvents) {
+      if (signal?.aborted) return { processed: false, retryAfterMs: null };
       const key = eventIdentityKey(event);
       if (emittedKeys.has(key)) continue;
       matched += 1;
@@ -562,6 +564,7 @@ export async function listenSessionEvents({
       }
     }
 
+    if (signal?.aborted) return { processed: false, retryAfterMs: null };
     if (nextCursor && nextCursor !== cursor) {
       const writeResult = await _writeCursor(normalizedSessionId, nextCursor, {
         targetPath,
@@ -570,6 +573,7 @@ export async function listenSessionEvents({
       persistedCursor = Boolean(writeResult?.written) || persistedCursor;
       cursor = nextCursor;
     }
+    if (signal?.aborted) return { processed: false, retryAfterMs: null };
     // A fetch cursor echoed on an empty page is transport state, not new read
     // progress. Writing it would recreate one operational write per idle poll.
     const readTarget = events.length > 0
@@ -582,10 +586,12 @@ export async function listenSessionEvents({
         targetSequenceId: readTarget.targetSequenceId,
         targetCursor: readTarget.targetCursor,
         agentId: normalizedAgentId,
+        signal,
       }).catch((error) => ({
         ok: false,
         reason: normalizeString(error?.message) || "read_cursor_write_failed",
       }));
+      if (signal?.aborted) return { processed: false, retryAfterMs: null };
       if (readCursorResult?.ok) {
         readCursorUpdates += 1;
         readCursorReason = "";
@@ -769,7 +775,9 @@ export async function listenSessionEvents({
         since: cursor,
         limit: pollLimit,
         listenerAgentId: normalizedAgentId,
+        signal,
       });
+      if (signal?.aborted) break;
 
       let cursorRetryAfterMs = null;
       if (result?.ok) {
@@ -778,6 +786,7 @@ export async function listenSessionEvents({
         await processControlBatch(result.listenerControls);
         if (signal?.aborted) break;
         const processed = await processEventBatch(result.events, result.cursor);
+        if (signal?.aborted) break;
         cursorRetryAfterMs = Number(processed?.retryAfterMs) || null;
       } else {
         lastReason = normalizeString(result?.reason) || "poll_failed";

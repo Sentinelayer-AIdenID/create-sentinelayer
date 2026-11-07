@@ -970,9 +970,11 @@ export async function syncSessionEventToApi(
     fetchImpl = fetchWithTimeout,
     nowMs = Date.now,
     noAutoGrant = false,
+    signal = undefined,
     readCredential = readAdmissionCredentialState,
   } = {}
 ) {
+  if (signal?.aborted) return { synced: false, reason: "aborted" };
   const normalizedSessionId = normalizeString(sessionId);
   if (!normalizedSessionId || !event || typeof event !== "object" || Array.isArray(event)) {
     return { synced: false, reason: "invalid_input" };
@@ -1050,6 +1052,7 @@ export async function syncSessionEventToApi(
     },
     credential: await credentialFor(session),
     body: requestBody,
+    signal,
   };
   const resolvedTimeoutMs = normalizePositiveInteger(timeoutMs, DEFAULT_SYNC_TIMEOUT_MS);
   const deadlineMs = Date.now() + resolvedTimeoutMs;
@@ -1135,6 +1138,7 @@ export async function syncSessionEventToApi(
                 "Content-Type": "application/json",
               },
               credential: await credentialFor(session),
+              signal,
               body: JSON.stringify({
                 agent_id: agentId,
                 role: grantRole,
@@ -1144,6 +1148,7 @@ export async function syncSessionEventToApi(
           ));
         } catch (grantError) {
           if (grantError?.code === "INVITATION_PENDING") throw grantError;
+          if (signal?.aborted) return { synced: false, reason: "aborted" };
           recordCircuitFailure(outboundCircuit, normalizedNowMs);
           return {
             synced: false,
@@ -1171,6 +1176,7 @@ export async function syncSessionEventToApi(
           ));
         } catch (retryError) {
           if (retryError?.code === "INVITATION_PENDING") throw retryError;
+          if (signal?.aborted) return { synced: false, reason: "aborted" };
           recordCircuitFailure(outboundCircuit, normalizedNowMs);
           return {
             synced: false,
@@ -1200,6 +1206,7 @@ export async function syncSessionEventToApi(
     };
   } catch (error) {
     if (error?.code === "INVITATION_PENDING") throw error;
+    if (signal?.aborted) return { synced: false, reason: "aborted" };
     recordCircuitFailure(outboundCircuit, normalizedNowMs);
     return {
       synced: false,
@@ -1560,12 +1567,17 @@ export async function pollSessionEvents(
     limit = 200,
     listenerAgentId = "",
     timeoutMs = DEFAULT_SYNC_TIMEOUT_MS,
+    signal = undefined,
     forceCircuitProbe = false,
     resolveAuthSession = resolveActiveAuthSession,
     fetchImpl = fetchWithTimeout,
     nowMs = Date.now,
   } = {}
 ) {
+  const abortedResult = () => ({
+    ok: false, reason: "aborted", events: [], listenerControls: [], cursor: normalizeString(since) || null,
+  });
+  if (signal?.aborted) return abortedResult();
   const normalizedSessionId = normalizeString(sessionId);
   if (!normalizedSessionId) {
     return {
@@ -1636,11 +1648,14 @@ export async function pollSessionEvents(
       {
         method: "GET",
         credential: await credentialFor(session),
+        signal,
       },
       normalizePositiveInteger(timeoutMs, DEFAULT_SYNC_TIMEOUT_MS),
       fetchImpl,
       { readErrorBody: true },
     );
+    // A cancelled response must neither acknowledge events nor reset failure history.
+    if (signal?.aborted) return abortedResult();
     if (!response || !response.ok) {
       if (isRateLimitResponse(response, payload)) {
         return {
@@ -1705,6 +1720,7 @@ export async function pollSessionEvents(
     };
   } catch (error) {
     if (error?.code === "INVITATION_PENDING") throw error;
+    if (signal?.aborted) return abortedResult();
     recordCircuitFailure(inboundCircuit, normalizedNowMs);
     return {
       ok: false,
@@ -1883,6 +1899,7 @@ export async function renewSessionPresence(
     nowMs = Date.now,
   } = {},
 ) {
+  if (signal?.aborted) return { ok: false, reason: "aborted", status: "degraded", recorded: false };
   const normalizedSessionId = normalizeString(sessionId);
   const normalizedAgentId = normalizeString(agentId);
   if (!normalizedSessionId || !normalizedAgentId) {
@@ -2004,6 +2021,7 @@ export async function renewSessionPresence(
     };
   } catch (error) {
     if (error?.code === "INVITATION_PENDING") throw error;
+    if (signal?.aborted) return { ok: false, reason: "aborted", status: "degraded", recorded: false };
     recordCircuitFailure(outboundCircuit, normalizedNowMs);
     return {
       ok: false,
@@ -2155,6 +2173,8 @@ export async function updateSessionReadCursor(
     nowMs = Date.now,
   } = {},
 ) {
+  const abortedResult = () => ({ ok: false, reason: "aborted", updated: false });
+  if (signal?.aborted) return abortedResult();
   const normalizedSessionId = normalizeString(sessionId);
   const normalizedTargetSequence = Number(targetSequenceId);
   const normalizedTargetCursor = normalizeString(targetCursor);
@@ -2213,6 +2233,7 @@ export async function updateSessionReadCursor(
       normalizePositiveInteger(timeoutMs, DEFAULT_SYNC_TIMEOUT_MS),
       fetchImpl,
     );
+    if (signal?.aborted) return abortedResult();
     if (!response?.ok) {
       if (response?.status === 404) {
         return { ok: false, reason: "read_cursor_unsupported", updated: false };
@@ -2248,6 +2269,7 @@ export async function updateSessionReadCursor(
     };
   } catch (error) {
     if (error?.code === "INVITATION_PENDING") throw error;
+    if (signal?.aborted) return abortedResult();
     recordCircuitFailure(outboundCircuit, normalizedNowMs);
     return {
       ok: false,
@@ -2504,11 +2526,13 @@ export async function pollSessionEventsBefore(
     limit = 50,
     timeoutMs = DEFAULT_SYNC_TIMEOUT_MS,
     forceCircuitProbe = false,
+    signal = undefined,
     resolveAuthSession = resolveActiveAuthSession,
     fetchImpl = fetchWithTimeout,
     nowMs = Date.now,
   } = {}
 ) {
+  if (signal?.aborted) return { ok: false, reason: "aborted", events: [], cursor: null, beforeSequence: null };
   const normalizedSessionId = normalizeString(sessionId);
   if (!normalizedSessionId) {
     return {
@@ -2575,6 +2599,7 @@ export async function pollSessionEventsBefore(
       {
         method: "GET",
         credential: await credentialFor(session),
+        signal,
       },
       normalizePositiveInteger(timeoutMs, DEFAULT_SYNC_TIMEOUT_MS),
       fetchImpl,
@@ -2618,6 +2643,7 @@ export async function pollSessionEventsBefore(
     };
   } catch (error) {
     if (error?.code === "INVITATION_PENDING") throw error;
+    if (signal?.aborted) return { ok: false, reason: "aborted", events: [], cursor: null, beforeSequence: null };
     recordCircuitFailure(inboundCircuit, normalizedNowMs);
     return {
       ok: false,

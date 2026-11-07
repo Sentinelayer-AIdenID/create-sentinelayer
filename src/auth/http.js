@@ -443,8 +443,10 @@ export async function requestJson(
     maxRetries = DEFAULT_MAX_RETRIES,
     retryDelayMs = DEFAULT_RETRY_DELAY_MS,
     allowEmptyBody = false,
+    signal,
   } = {}
 ) {
+  signal?.throwIfAborted();
   if (credential && !isCredential(credential)) {
     throw new TypeError("requestJson: credential must come from src/auth/credential-destinations.js.");
   }
@@ -500,6 +502,7 @@ export async function requestJson(
 
   let lastRetryableError = null;
   for (let attempt = 0; attempt <= normalizedMaxRetries; attempt += 1) {
+    signal?.throwIfAborted();
     const controller = new AbortController();
     let timeoutTriggered = false;
     let timeoutHandle;
@@ -514,7 +517,7 @@ export async function requestJson(
         headers: outgoingHeaders,
         body: body === undefined ? undefined : JSON.stringify(body),
         redirect: "error",
-        signal: controller.signal,
+        signal: signal ? AbortSignal.any([signal, controller.signal]) : controller.signal,
       };
       const response = credential ? await credentialedRequest(credential, url, init) : await fetch(String(url), init);
 
@@ -590,9 +593,11 @@ export async function requestJson(
         retryDelayMs: normalizedRetryDelayMs,
         retryAfterHeader: response.headers.get("retry-after"),
       });
-      await sleep(delayMs);
+      await sleep(delayMs, undefined, { signal });
       continue;
     } catch (error) {
+      // Owner cancellation is final and is not a network or circuit failure.
+      if (signal?.aborted) throw signal.reason;
       // A refused destination is final: nothing was sent, so no retry and no breaker count.
       if (error instanceof SentinelayerApiError || error instanceof CredentialDestinationRefused) {
         throw error;
@@ -625,7 +630,7 @@ export async function requestJson(
         retryDelayMs: normalizedRetryDelayMs,
         retryAfterHeader: null,
       });
-      await sleep(delayMs);
+      await sleep(delayMs, undefined, { signal });
       continue;
     } finally {
       if (timeoutHandle) {
@@ -674,6 +679,7 @@ export async function requestJsonMutation(
     maxRetries,
     retryDelayMs,
     allowEmptyBody = false,
+    signal,
   } = {}
 ) {
   const normalizedMethod = String(method || "POST").trim().toUpperCase();
@@ -702,5 +708,6 @@ export async function requestJsonMutation(
     maxRetries,
     retryDelayMs,
     allowEmptyBody,
+    signal,
   });
 }
