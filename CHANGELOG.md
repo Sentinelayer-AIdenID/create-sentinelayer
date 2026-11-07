@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.48.1](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/compare/v0.48.0...v0.48.1) (2026-11-07)
+
+
+### Bug Fixes
+
+* **engram:** publish namespace metadata atomically ([#906](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/issues/906)) ([1595bc7](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/1595bc7f6516a4dfb8d9d5f2a70e2c62c7a7c6a1))
+* **session:** bind cache recovery to boot and PID namespace ([#903](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/issues/903)) ([a73e337](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/a73e33720756158bd7a4edd49f271206ff1fd9d8))
+* **session:** preserve ownership and errors after cache record write failures ([#904](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/issues/904)) ([a1b9617](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/a1b96178e80a9936caefa5af46c53b4dcdec2267))
+* **session:** read server room titles by default ([#898](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/issues/898)) ([7c94b4e](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/7c94b4e301cf9d5d5a5478fdae4887173638fa6f))
+* **session:** recover verified dead cache lock owners ([#902](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/issues/902)) ([103ad57](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/103ad57031c3784d70aae00eb5a1f287edf2d825))
+* **session:** retry transient local metadata renames ([#901](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/issues/901)) ([ef5872a](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/commit/ef5872af94988795d46aa2f5ba9a425af45a9878))
+
 ## [0.48.0](https://github.com/Sentinelayer-AIdenID/create-sentinelayer/compare/v0.47.0...v0.48.0) (2026-11-06)
 
 
