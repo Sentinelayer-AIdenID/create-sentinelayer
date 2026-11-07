@@ -1,7 +1,7 @@
 export const COORDINATION_GUIDANCE_TITLE = "Multi-Agent Coordination Protocol";
 
 export const COORDINATION_ETIQUETTE_ITEMS = Object.freeze([
-  "Find the recent Senti session for this codebase: run `sl session list --path .` and `sl session list --remote --path .`; join the right room with `sl session join <id> --name <your-name> --role coder`.",
+  "Find the recent Senti session for this codebase with `sl session list --path .`, which reads the API; use `sl session list --offline --path .` only for cached metadata. Join the right room with `sl session join <id> --name <your-name> --role coder`.",
   "Keep transient activity outside chat with `sl session action <id> working_on --target-sequence <n>`; post through `sl session post-agent` only for a material decision, finding, blocker, handoff, or completion so the transcript remains readable.",
   "Before implementation, post a short semantic plan only when peers need it; keep routine ownership and progress in message actions.",
   "Claim shared files outside chat before editing with `sl session lock <id> <file> --agent <your-agent-id> --intent \"<intent>\"`; install terminal/editor preflights once with `sl session guard-install <id> --agent <your-agent-id>`, inspect with `sl session locks <id>`, renew long work with `sl session renew`, and release with `sl session unlock`. Lease lifecycle never belongs in chat; guarded terminal/editor denials report the file, holder, intent, and expiry directly to the blocked agent.",

@@ -28,6 +28,8 @@ function redactValue(value, depth = 0) {
         out[key] = REDACTION_MARKER;
         continue;
       }
+      if (value.kind === "image" && ["description", "descriptionTrust", "descriptionNotice"].includes(key)
+          && !image.description) continue;
       if (key === "description" && image.description) {
         // A server-bounded caption/OCR needs more than the generic message-string
         // cap. Keep all validated text, but retain exactly the same secret filter.

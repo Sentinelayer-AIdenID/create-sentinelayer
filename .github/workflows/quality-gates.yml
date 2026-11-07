@@ -382,6 +382,13 @@ jobs:
       - name: Verify investor DD resource cleanup
         run: node --import ./tests/setup-env.mjs --test tests/unit.investor-dd-orchestrator.test.mjs
 
+      - name: Verify concurrent session metadata cache reads on Windows
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --import ./tests/setup-env.mjs --test --test-concurrency=2 --test-reporter=tap tests/unit.session-metadata-cache.test.mjs tests/unit.session-metadata-cache-concurrency.test.mjs | tee windows-session-metadata-cache.tap
+          grep -qx '# skipped 0' windows-session-metadata-cache.tap
+
       # These assert Windows program lookup and child-process isolation; they skip on other
       # platforms, so here a skipped test fails the step.
       - name: Verify program lookup and repository child environment on Windows

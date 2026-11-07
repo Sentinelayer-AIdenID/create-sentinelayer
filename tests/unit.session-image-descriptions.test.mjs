@@ -10,6 +10,8 @@ import { formatAttachmentSummary } from "../src/session/attachment-summary.js";
 import { downloadRoomFile, roomFileFromPointer } from "../src/session/room-files.js";
 import { imageDescriptionFields, quoteImageDescription, sanitizeImageDescriptions, IMAGE_DESCRIPTION_NOTICE } from "../src/session/image-descriptions.js";
 import { redactEventPayload } from "../src/session/redact.js";
+import { createSession } from "../src/session/store.js";
+import { appendToStream, readStream } from "../src/session/stream.js";
 import { createSessionMcpToolHandlers } from "../src/mcp/session-stdio-server.js";
 import { createListenerHostWake } from "../src/session/wake/listen-wake.js";
 import { listenSessionEvents } from "../src/session/listener.js";
@@ -21,7 +23,7 @@ function pointer(visibleText = ocr) {
     attachmentId: "att-fixture-0001", kind: "image", filename: "synthetic.png", sizeBytes: 500,
     contentType: "image/png", sha256: "a".repeat(64), status: "uploaded",
     description: { text: "A synthetic screenshot with text.", visibleText, kind: "screenshot",
-      model: "gpt-5.4-mini", generatedAt: "2026-11-07T00:00:00+00:00" },
+      model: "synthetic-vision-fixture", generatedAt: "2026-11-07T00:00:00+00:00" },
     descriptionTrust: "quoted_untrusted", descriptionNotice: "caller-controlled notice must not be used",
   };
 }
@@ -74,6 +76,68 @@ test("Image descriptions: legacy, removed, untrusted-marker and oversized data s
   delete legacy.description;
   delete legacy.descriptionTrust;
   assert.ok(!formatAttachmentSummary(event(legacy)).includes("untrusted"));
+});
+
+function withoutDescription(source) {
+  const legacy = { ...source };
+  for (const key of ["description", "descriptionTrust", "descriptionNotice"]) delete legacy[key];
+  return legacy;
+}
+
+function assertDescriptionAbsent(source) {
+  const legacy = withoutDescription(source);
+  assert.deepEqual(imageDescriptionFields(source), {});
+  assert.equal(quoteImageDescription(source), "");
+  assert.deepEqual(sanitizeImageDescriptions(source), legacy);
+  assert.deepEqual(roomFileFromPointer(source), roomFileFromPointer(legacy));
+  assert.equal(formatAttachmentSummary(event(source)), formatAttachmentSummary(event(legacy)));
+  assert.deepEqual(redactEventPayload(event(source)), redactEventPayload(event(legacy)),
+    "raw stored events must omit rejected text and its trust/notice fields");
+}
+
+test("Image descriptions: visibility status requires the canonical uploaded state", () => {
+  for (const status of [undefined, null, "", "ready", "initiated", "staged", "failed", "quarantined",
+    "blocked", "released", "purged", "Uploaded", " uploaded", false, 0, {}, []]) {
+    assertDescriptionAbsent({ ...pointer(), status, summaryStatus: "ready" });
+  }
+  for (const summaryStatus of [undefined, "pending", "processing", "ready", "failed"]) {
+    const source = { ...pointer(), summaryStatus };
+    assert.deepEqual(imageDescriptionFields(source).description, source.description,
+      "the server's separate processing summary never replaces upload visibility");
+  }
+});
+
+for (const flag of ["removed", "hidden", "deleted", "blocked"]) {
+  test(`Image descriptions: visibility ${flag} rejects true and malformed flags on every local output`, () => {
+    for (const value of [true, "true", "false", null, 0, 1, "", {}, []]) {
+      assertDescriptionAbsent({ ...pointer(), [flag]: value });
+    }
+    for (const value of [undefined, false]) {
+      const source = { ...pointer(), [flag]: value };
+      assert.deepEqual(imageDescriptionFields(source).description, source.description);
+    }
+  });
+}
+
+test("Image descriptions: six canonical no-description payloads retain their complete legacy shape", () => {
+  const legacy = withoutDescription(pointer());
+  const cases = [
+    { event: "session_message", payload: { message: "Text only" } },
+    { event: "session_message", payload: { message: "Empty files", attachments: [] } },
+    event(legacy),
+    { actions: [{ actionType: "reply", attachments: [legacy] }],
+      projection: { recentActivity: [{ actionType: "reply", attachments: [legacy] }] } },
+    { attachment: legacy, download: { url: "https://files.example.test/synthetic" } },
+    { files: [{ ...legacy, kind: "file", filename: "synthetic.pdf", contentType: "application/pdf" }] },
+  ];
+  for (const source of cases) {
+    const before = structuredClone(source);
+    assert.deepEqual(sanitizeImageDescriptions(source), before);
+    assert.deepEqual(redactEventPayload(source), before);
+    assert.deepEqual(source, before, "legacy input is never mutated");
+  }
+  assert.ok(!formatAttachmentSummary(event(legacy)).includes("untrusted"));
+  assert.equal(roomFileFromPointer(legacy).description, undefined);
 });
 
 test("Image descriptions: stream redaction preserves long OCR but still redacts secrets", () => {
@@ -334,4 +398,143 @@ test("Image descriptions: host wake filters credential-shaped OCR inside the com
   await wake.trigger(event(pointer(`Visible before ${syntheticSecret} and after.`)));
   assert.equal(decodedQuote(messages[0]).visibleText, "Visible before [REDACTED] and after.");
   assert.ok(!messages[0].includes(syntheticSecret));
+});
+
+const restrictedOcr = "Synthetic restricted OCR must be absent.";
+const restrictedPointer = (flags = { blocked: true }) => ({ ...pointer(restrictedOcr), ...flags });
+
+for (const [name, poll] of [["poll", pollSessionEvents], ["history", pollSessionEventsBefore]]) {
+  test(`Image descriptions: visibility direct ${name} omits blocked text and keeps uploaded text`, async () => {
+    resetSessionSyncStateForTests();
+    try {
+      const result = await poll("room-test", {
+        resolveAuthSession: async () => ({ token: "fixture-auth-placeholder", apiUrl: "https://api.sentinelayer.com" }),
+        fetchImpl: async () => new Response(JSON.stringify({ events: [event(restrictedPointer()),
+          { ...event(), sequenceId: 3, cursor: "c3" }], has_more: false }),
+        { status: 200, headers: { "content-type": "application/json" } }),
+      });
+      assert.equal(result.ok, true, result.reason);
+      assert.equal(result.events.length, 2);
+      assert.equal(result.events[0].payload.attachments[0].description, undefined);
+      assert.deepEqual(result.events[1].payload.attachments[0].description, pointer().description);
+      assert.ok(!JSON.stringify(result).includes(restrictedOcr));
+    } finally {
+      resetSessionSyncStateForTests();
+    }
+  });
+}
+
+test("Image descriptions: visibility direct actions omits rejected text in raw and projected replies", async () => {
+  resetSessionSyncStateForTests();
+  const reply = { id: "reply-fixture", actionType: "reply", attachments: [restrictedPointer({ status: "quarantined" })] };
+  try {
+    const result = await listSessionMessageActions("room-test", {
+      resolveAuthSession: async () => ({ token: "fixture-auth-placeholder", apiUrl: "https://api.sentinelayer.com" }),
+      fetchImpl: async () => new Response(JSON.stringify({ actions: [reply], projection: {
+        recentActivity: [reply], byReply: { "reply-fixture": reply }, byTarget: [{ latestReplies: [reply] }],
+      } }), { status: 200, headers: { "content-type": "application/json" } }),
+    });
+    assert.equal(result.ok, true, result.reason);
+    assert.equal(result.actions[0].attachments[0].description, undefined);
+    assert.equal(result.projection.recentActivity[0].attachments[0].description, undefined);
+    assert.equal(result.projection.byReply["reply-fixture"].attachments[0].description, undefined);
+    assert.equal(result.projection.byTarget[0].latestReplies[0].attachments[0].description, undefined);
+    assert.ok(!JSON.stringify(result).includes(restrictedOcr));
+  } finally {
+    resetSessionSyncStateForTests();
+  }
+});
+
+for (const tool of ["read_history", "poll_inbox"]) {
+  for (const includeRaw of [false, true]) {
+    test(`Image descriptions: visibility MCP ${tool} raw=${includeRaw} omits rejected event and reply text`, async () => {
+      const reply = { id: "reply-fixture", targetSequenceId: 2, actionType: "reply", actorKind: "human",
+        actorId: "human-fixture", note: "Synthetic reply", attachments: [restrictedPointer({ hidden: "true" })] };
+      const poll = async () => ({ ok: true, events: [event(restrictedPointer())], cursor: "c2", hasMore: false });
+      const handlers = createSessionMcpToolHandlers({ pollSessionEventsFn: poll, pollSessionEventsBeforeFn: poll,
+        listSessionMessageActionsFn: async () => ({ ok: true, actions: [reply], projection: { recentActivity: [reply] } }),
+        updateSessionReadCursorFn: async () => ({ ok: true }) });
+      const result = await handlers[tool]({ sessionId: "room-test", agentId: "reader", includeRaw, includeActions: true });
+      assert.equal(result.ok, true);
+      assert.equal(result.events[0].payload.attachments[0].description, undefined);
+      assert.equal(result.recentHumanActivity[0].attachments[0].description, undefined);
+      assert.ok(!JSON.stringify(result).includes(restrictedOcr));
+    });
+  }
+}
+
+test("Image descriptions: visibility stream disk omits rejected fields before serialization", async () => {
+  const targetPath = await mkdtemp(path.join(os.tmpdir(), "image-visibility-stream-"));
+  try {
+    const session = await createSession({ targetPath });
+    let sequenceId = 2;
+    for (const flags of [{ blocked: true }, { hidden: "true" }, { deleted: true }, { status: "staged" }]) {
+      await appendToStream(session.sessionId,
+        { ...event(restrictedPointer(flags)), sessionId: session.sessionId, sequenceId, cursor: `c${sequenceId++}` },
+        { targetPath, syncRemote: false });
+    }
+    const stored = await readFile(path.join(targetPath, ".sentinelayer", "sessions", session.sessionId, "stream.ndjson"), "utf8");
+    assert.ok(!stored.includes(restrictedOcr));
+    const events = await readStream(session.sessionId, { targetPath, tail: 0 });
+    assert.equal(events.length, 4);
+    for (const value of events) {
+      const attachment = value.payload.attachments[0];
+      for (const key of ["description", "descriptionTrust", "descriptionNotice"]) assert.equal(Object.hasOwn(attachment, key), false);
+    }
+  } finally {
+    await rm(targetPath, { recursive: true, force: true });
+  }
+});
+
+test("Image descriptions: visibility actual file metadata omits blocked text without changing file bytes", async () => {
+  const targetPath = await mkdtemp(path.join(os.tmpdir(), "image-visibility-file-"));
+  const bytes = Buffer.from("synthetic file response");
+  const source = { ...restrictedPointer(), sizeBytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") };
+  try {
+    const handlers = createSessionMcpToolHandlers({ targetPath,
+      downloadRoomFileFn: (sessionId, attachmentId, options) => downloadRoomFile(sessionId, attachmentId, {
+        ...options, fetchAttachmentFn: async () => ({ ok: true, attachment: source,
+          download: { url: "https://files.example.test/synthetic", expiresAt: "2099-01-01T00:00:00Z" } }),
+        fetchImpl: async () => new Response(bytes, { status: 200 }),
+      }),
+    });
+    const result = await handlers.session_file_get({ sessionId: "room-test", attachmentId: source.attachmentId });
+    assert.equal(result.ok, true, result.message);
+    assert.equal(result.attachment.description, undefined);
+    assert.deepEqual(await readFile(result.path), bytes);
+    assert.ok(!JSON.stringify(result).includes(restrictedOcr));
+  } finally {
+    await rm(targetPath, { recursive: true, force: true });
+  }
+});
+
+for (const transport of ["poll", "stream"]) {
+  test(`Image descriptions: visibility listen ${transport} withholds malformed hidden text`, async () => {
+    const seen = [];
+    const source = event(restrictedPointer({ hidden: "true" }));
+    const result = await listenSessionEvents({ sessionId: "room-test", agentId: "reader", transport,
+      replay: true, maxPolls: 1, _readCursor: async () => null, _writeCursor: async () => ({ written: true }),
+      _updateReadCursor: async () => ({ ok: true }), _sleep: async () => {},
+      _poll: async () => ({ ok: true, events: [source], cursor: "c2" }),
+      _stream: async (_session, options) => { await options.onEvent(source); return { ok: true, cursor: "c2" }; },
+      onEvent: async (value) => { seen.push(value); },
+    });
+    assert.equal(result.cursor, "c2");
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].payload.attachments[0].description, undefined);
+    assert.ok(!JSON.stringify(seen).includes(restrictedOcr));
+  });
+}
+
+test("Image descriptions: visibility host wake withholds blocked text and keeps the legacy file hint", async () => {
+  const messages = [];
+  const wake = createListenerHostWake({ host: "claude", resumeSessionId: "synthetic-host", agentId: "reader",
+    sessionId: "room-test", adapters: { claude: { wake: async (target) => {
+      messages.push(target.message); return { ok: true };
+    } } } });
+  await wake.trigger(event(restrictedPointer({ status: "blocked" })));
+  assert.equal(messages.length, 1);
+  assert.ok(messages[0].includes("sl session files get room-test att-fixture-0001"));
+  assert.ok(!messages[0].includes(restrictedOcr));
+  assert.ok(!messages[0].includes('> {"text"'));
 });

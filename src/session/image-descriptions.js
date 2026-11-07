@@ -10,9 +10,11 @@ const KINDS = new Set(["photo", "screenshot", "chart", "diagram", "document"]);
 const IMAGE_REDACTION = Object.freeze({ nonExpanding: true });
 
 export function imageDescriptionFields(pointer = {}) {
-  if (!pointer || typeof pointer !== "object" || pointer.kind !== "image"
-      || pointer.removed === true || pointer.hidden === true || pointer.deleted === true
-      || ["released", "purged"].includes(pointer.status)
+  // The API emits upload_status as status on every canonical pointer. Its
+  // summaryStatus (including "ready") describes separate processing work.
+  if (!pointer || typeof pointer !== "object" || Array.isArray(pointer) || pointer.kind !== "image"
+      || pointer.status !== "uploaded"
+      || ["removed", "hidden", "deleted", "blocked"].some((flag) => pointer[flag] !== undefined && pointer[flag] !== false)
       || pointer.descriptionTrust !== "quoted_untrusted") return {};
   const source = pointer.description;
   if (!source || typeof source !== "object" || Array.isArray(source)

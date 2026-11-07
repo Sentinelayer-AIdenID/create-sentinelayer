@@ -14,9 +14,9 @@
       "src/commands/omargate.js": "5ccbf2f1bb3f2f1e9ed5e35a8a8197bfc2b1cb699365987a2a979caf834c3567",
       "src/commands/legacy-args.js": "83772b6ccd5765d1a0bd1f3ee3eefcf5c1fdaf4e9fb1a301c0312b286dbc0d29",
       "src/legacy-cli.js": "524941d7e3b292b257fd3efc2d4e6945a3621d0ad96f1d6da1041034e4a2036e",
-      "src/session/redact.js": "31fb789cdd8a681ec221186a2dd8fdf03de302a71b0214d2f4caecc536c09084",
+      "src/session/redact.js": "48471204ebbfd8011f7df1ba402d7aed4a166335861ce811a9b07708abbc60aa",
       "src/session/secret-filter.js": "97d689d00b4e0dc8acff2c041182ea3d83689cb8462ca498c836a9246b00eaf0",
-      "src/session/image-descriptions.js": "10f6368f7ad08d03484bcc00bbdffae77f0cfcbd0b3b48ae2cac57942a5b4b66"
+      "src/session/image-descriptions.js": "90f66cda3de0809801b5553065035d2188fb142aa5e54e0d1d31fe256caf25af"
     },
     "testPath": "tests/unit.typesafe-severity.test.mjs",
     "testSha256": "238cc044eff843d680796b25f7efda46b932b7d234c6eb843f8e55be5185cfb0",
@@ -168,6 +168,23 @@
       "scope": "Image descriptions request nonexpanding markers so repeated sanitization retains all nonsensitive caption/OCR at the existing combined 48,000-codepoint bound. The default string redactor and its secret detector are unchanged. All seven frozen synthetic cases, inputs, mock responses, expected outcomes, severity rules, test bytes and previous maintenance records are retained.",
       "verificationCommand": "node --import ./tests/setup-env.mjs --test --test-concurrency=1 tests/unit.typesafe-severity.test.mjs tests/unit.session-redact.test.mjs tests/unit.session-image-descriptions.test.mjs",
       "sourceKind": "The canonical sourceSha256 map binds the candidate bytes; baseRevision is the previously published PR head.",
+      "limitation": "Deterministic mocked contract evidence only; no live-provider, model-accuracy or billing claim."
+    },
+    "imageDescriptionVisibilityMaintenance": {
+      "kind": "uploaded_only_image_visibility_source_binding",
+      "baseRevision": "2a6f2a73525c98e4feff56eb56787d218e7c37f4",
+      "integratedMainRevision": "7c94b4e301cf9d5d5a5478fdae4887173638fa6f",
+      "priorSha256": {
+        "src/session/image-descriptions.js": "10f6368f7ad08d03484bcc00bbdffae77f0cfcbd0b3b48ae2cac57942a5b4b66",
+        "src/session/redact.js": "31fb789cdd8a681ec221186a2dd8fdf03de302a71b0214d2f4caecc536c09084"
+      },
+      "currentSha256": {
+        "src/session/image-descriptions.js": "90f66cda3de0809801b5553065035d2188fb142aa5e54e0d1d31fe256caf25af",
+        "src/session/redact.js": "48471204ebbfd8011f7df1ba402d7aed4a166335861ce811a9b07708abbc60aa"
+      },
+      "scope": "Image descriptions require the canonical uploaded status and absent or literal-false removal/visibility flags. Rejected image description, trust and notice fields are omitted from raw stream serialization. Secret detection, nonexpanding redaction and the 48,000-codepoint bound are unchanged. All seven frozen scenarios, inputs, mock responses, expectations, severity rules, test bytes and historical maintenance records are retained.",
+      "verificationCommand": "node --import ./tests/setup-env.mjs --test --test-concurrency=1 tests/unit.typesafe-severity.test.mjs tests/unit.session-redact.test.mjs tests/unit.session-image-descriptions.test.mjs",
+      "sourceKind": "Canonical source hashes bind the candidate bytes after current-main integration; baseRevision is the previously published PR head.",
       "limitation": "Deterministic mocked contract evidence only; no live-provider, model-accuracy or billing claim."
     }
   },

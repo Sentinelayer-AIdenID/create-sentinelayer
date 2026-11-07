@@ -50,6 +50,21 @@ const mutants = [
     "const actions = Array.isArray(payload?.actions) ? payload.actions : [];", "direct actions"],
   ["bypass_projection_ocr_filter", "src/session/sync.js", "? sanitizeImageDescriptions(payload.projection)",
     "? payload.projection", "direct actions"],
+  ["allow_nonuploaded_image_description", "src/session/image-descriptions.js",
+    'pointer.status !== "uploaded"', "false", "visibility status"],
+  ["allow_removed_image_description", "src/session/image-descriptions.js",
+    '["removed", "hidden", "deleted", "blocked"]', '["hidden", "deleted", "blocked"]', "visibility removed"],
+  ["allow_hidden_image_description", "src/session/image-descriptions.js",
+    '["removed", "hidden", "deleted", "blocked"]', '["removed", "deleted", "blocked"]', "visibility hidden"],
+  ["allow_deleted_image_description", "src/session/image-descriptions.js",
+    '["removed", "hidden", "deleted", "blocked"]', '["removed", "hidden", "blocked"]', "visibility deleted"],
+  ["allow_blocked_image_description", "src/session/image-descriptions.js",
+    '["removed", "hidden", "deleted", "blocked"]', '["removed", "hidden", "deleted"]', "visibility blocked"],
+  ["allow_malformed_visibility_flags", "src/session/image-descriptions.js",
+    "pointer[flag] !== undefined && pointer[flag] !== false", "pointer[flag] === true", "visibility hidden"],
+  ["retain_rejected_image_stream_json", "src/session/redact.js",
+    '      if (value.kind === "image" && ["description", "descriptionTrust", "descriptionNotice"].includes(key)\n'
+      + '          && !image.description) continue;\n', "", "visibility stream disk"],
 ];
 const results = [];
 for (const [name, file, before, after, pattern] of mutants) {
@@ -57,12 +72,19 @@ for (const [name, file, before, after, pattern] of mutants) {
   if (original.split(before).length !== 2) throw new Error(`${name}: expected one exact source anchor`);
   try {
     fs.writeFileSync(file, original.replace(before, after));
+    const syntax = spawnSync(process.execPath, ["--check", file], { encoding: "utf8", timeout: 10_000 });
+    if (syntax.status !== 0) throw new Error(`${name}: invalid mutation syntax`);
+    const report = path.join(directory, `${name}.xml`);
     const result = spawnSync(process.execPath, ["--import", "./tests/setup-env.mjs", "--test", "--test-concurrency=1",
+      "--test-reporter=tap", "--test-reporter=junit", "--test-reporter-destination=stdout", `--test-reporter-destination=${report}`,
       "--test-name-pattern", `Image descriptions: ${pattern}`, "tests/unit.session-image-descriptions.test.mjs"],
     { encoding: "utf8", timeout: 30_000 });
     fs.writeFileSync(path.join(directory, `${name}.log`), (result.stdout || "") + (result.stderr || ""));
-    const killed = result.status === 1;
-    results.push({ name, killed, status: result.status });
+    const namedFailures = [...(result.stdout || "").matchAll(/^not ok \d+ - (Image descriptions: .+)$/gm)].length;
+    const failed = Number((result.stdout || "").match(/^# fail (\d+)$/m)?.[1] || 0);
+    const killed = result.status === 1 && namedFailures > 0 && namedFailures === failed
+      && /^# cancelled 0$/m.test(result.stdout || "") && fs.existsSync(report);
+    results.push({ name, killed, status: result.status, namedFailures });
     console.log(`${name}: ${killed ? "KILLED" : "SURVIVED/INVALID"} (exit ${result.status})`);
   } finally {
     fs.writeFileSync(file, original);

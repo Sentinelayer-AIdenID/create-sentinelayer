@@ -99,6 +99,63 @@ maintenance fields. Each occurrence was checked against the actual source
 SHA-256; an independent reviewer also verified all canonical bindings and the
 unchanged frozen scenarios. No credential or scanner exclusion was added.
 
+## Attachment visibility follow-up
+
+The API contract was checked against sentinelayer-api PR1207 at
+`81c0896acafb3fabbea40884a9bb21d50337b0bd`. Its canonical
+`_session_attachment_payload` emits `status` from the upload state. Human posts,
+agent posts and replies resolve their pointers through that payload; event and
+action hydration preserve it, and file get plus native MCP retain the same
+field. Only `status: "uploaded"` is eligible. `summaryStatus: "ready"` is a
+separate processing result and grants no access. The API currently filters
+blocked sources from reads or returns not-found; it does not emit a blocked
+attachment state.
+
+The CLI now requires that positive uploaded state before exposing a description.
+Missing, malformed, unknown, staged, failed, quarantined, released, purged and
+blocked states fail closed. `removed`, `hidden`, `deleted` and `blocked` flags
+must be absent or literal false; string booleans, nulls and other malformed
+values are refused. Rejected description, trust and notice fields are also
+removed from the raw stream before generic JSON serialization. Existing
+attachment metadata and file operations retain their behavior.
+
+Five new visibility tests failed on the prior implementation; the no-description
+compatibility test already passed. After the correction, all six passed, then
+all **50 image-description tests** passed. They cover direct poll/history/action
+reads, every reply projection, raw and summarized MCP, actual on-disk stream
+bytes, actual file metadata, poll/SSE listeners, wakes and valid uploaded
+controls. The six explicit legacy fixtures are text-only events, empty file
+lists, an uploaded image event, reply actions with a projection, file-get
+metadata and a room-file list. Their entire no-description payload shape and
+input values remain unchanged; this is the named repository fixture set, not a
+claim about an undisclosed external review fixture. The image model fixture now
+uses a synthetic name.
+
+After merging main `7c94b4e301cf9d5d5a5478fdae4887173638fa6f`, the affected
+regression passed **358 tests with zero failures** and one existing Windows-only
+file-stream skip on Linux (`d-cli-visibility-regression.xml`). It includes the
+unchanged frozen actual-caller evaluations, redaction, attachment/file outputs,
+sync, MCP, listeners/wakes and the updated main metadata/cache/list behavior.
+Syntax validation passed **442 files**, and documentation validation passed.
+The six 48,000-codepoint boundary cases and their nonexpanding-redaction
+mutation remain in the current proof.
+
+All **25 actual mutants** were killed in `d-cli-mutants-visibility`: the prior
+18 were rerun together with seven new cases for a non-uploaded state, each of
+the four visibility/removal flags, malformed flags, and the raw-stream fallback.
+In particular, removing `deleted` from the guard and retaining rejected OCR on
+disk each failed its named behavioral test. The runner validates mutation
+syntax first and requires failures from named image-description tests, so an
+import or collection failure cannot count as a kill. TAP and JUnit evidence are
+retained, and all eight affected source files were restored byte-for-byte.
+
+The two changed implementation bindings were refreshed with an explicit
+visibility-maintenance record. All ten canonical source/test bindings verify;
+the seven frozen scenarios, inputs, mock responses, expected outcomes and every
+historical maintenance record are unchanged. The complete actual-caller
+evaluation ran in the passing regression. These scoped counts overlap earlier
+proofs and do not change the disclosed full-verification limitations above.
+
 ## Controls
 
 AI TOOLING GOVERNANCE: no additional model route, provider call, or authority.
@@ -106,4 +163,4 @@ AI INSTRUCTION TOPOLOGY: repository/MCP/eval instructions remain in force.
 AI CHANGE PROVENANCE & ATTESTATION: AI-assisted implementation and deterministic proofs.
 AI EVALS / CONTINUOUS EVALUATION: synthetic before/after cases above and deliberate mutants.
 TOOL / MCP SECURITY: JSON-quoted data, typed metadata, unchanged auth and wake budget.
-HITL OPERATIONS & CALIBRATION: Warden reviews; server rollout stays behind its feature/consent gates.
+HITL OPERATIONS & CALIBRATION: maintainer review; server rollout stays behind its feature/consent gates.
