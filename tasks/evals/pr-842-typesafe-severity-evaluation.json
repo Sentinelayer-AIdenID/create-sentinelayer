@@ -14,9 +14,9 @@
       "src/commands/omargate.js": "5ccbf2f1bb3f2f1e9ed5e35a8a8197bfc2b1cb699365987a2a979caf834c3567",
       "src/commands/legacy-args.js": "83772b6ccd5765d1a0bd1f3ee3eefcf5c1fdaf4e9fb1a301c0312b286dbc0d29",
       "src/legacy-cli.js": "524941d7e3b292b257fd3efc2d4e6945a3621d0ad96f1d6da1041034e4a2036e",
-      "src/session/redact.js": "48471204ebbfd8011f7df1ba402d7aed4a166335861ce811a9b07708abbc60aa",
+      "src/session/redact.js": "99281f141c838bcbff904e1970ecb0fe0c1e22bf531e02857b512bb6db5b2edb",
       "src/session/secret-filter.js": "97d689d00b4e0dc8acff2c041182ea3d83689cb8462ca498c836a9246b00eaf0",
-      "src/session/image-descriptions.js": "90f66cda3de0809801b5553065035d2188fb142aa5e54e0d1d31fe256caf25af"
+      "src/session/image-descriptions.js": "3d05cbb12221da72f9fd3784ab1c359f33e45d068ce3b84cb3a4c65da289972f"
     },
     "testPath": "tests/unit.typesafe-severity.test.mjs",
     "testSha256": "238cc044eff843d680796b25f7efda46b932b7d234c6eb843f8e55be5185cfb0",
@@ -186,6 +186,23 @@
       "verificationCommand": "node --import ./tests/setup-env.mjs --test --test-concurrency=1 tests/unit.typesafe-severity.test.mjs tests/unit.session-redact.test.mjs tests/unit.session-image-descriptions.test.mjs",
       "sourceKind": "Canonical source hashes bind the candidate bytes after current-main integration; baseRevision is the previously published PR head.",
       "limitation": "Deterministic mocked contract evidence only; no live-provider, model-accuracy or billing claim."
+    },
+    "imageDescriptionCanonicalFieldsMaintenance": {
+      "kind": "canonical_description_fields_on_every_attachment_pointer",
+      "baseRevision": "0e78ed81f983a4c6cf0ccc6d0bbb8d9d1a20934f",
+      "integratedMainRevision": "ef5872af94988795d46aa2f5ba9a425af45a9878",
+      "priorSha256": {
+        "src/session/image-descriptions.js": "90f66cda3de0809801b5553065035d2188fb142aa5e54e0d1d31fe256caf25af",
+        "src/session/redact.js": "48471204ebbfd8011f7df1ba402d7aed4a166335861ce811a9b07708abbc60aa"
+      },
+      "currentSha256": {
+        "src/session/image-descriptions.js": "3d05cbb12221da72f9fd3784ab1c359f33e45d068ce3b84cb3a4c65da289972f",
+        "src/session/redact.js": "99281f141c838bcbff904e1970ecb0fe0c1e22bf531e02857b512bb6db5b2edb"
+      },
+      "scope": "Raw streams rebuild valid image description, trust and fixed notice from the validated contract. Current and legacy non-image attachment pointers lose description fields; ordinary non-attachment descriptions retain their prior shape. The secret detector, bounded filter and 48,000-codepoint limit are unchanged. Every frozen scenario, input, mock response, expected outcome, invariant, actual-caller test byte and historical maintenance record is retained.",
+      "verificationCommand": "node --import ./tests/setup-env.mjs --test --test-concurrency=1 tests/unit.typesafe-severity.test.mjs tests/unit.session-redact.test.mjs tests/unit.session-image-descriptions.test.mjs",
+      "sourceKind": "Canonical source hashes bind the candidate bytes after current-main integration; baseRevision is the previously published PR head.",
+      "limitation": "Deterministic mocked contract evidence only; no live-provider, model-accuracy, billing or hosted-gate completion claim."
     }
   },
   "baselineMeaning": "Published base generation-only contract, with candidate off mode exercised on identical synthetic inputs; no independent baseline model/provider run.",

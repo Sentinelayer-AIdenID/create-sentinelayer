@@ -9,6 +9,17 @@ const KINDS = new Set(["photo", "screenshot", "chart", "diagram", "document"]);
 // sanitization passes without cutting nonsensitive OCR or relaxing the API bound.
 const IMAGE_REDACTION = Object.freeze({ nonExpanding: true });
 
+export function isAttachmentPointer(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  // Match the canonical kinds and the legacy aliases read by room-files and
+  // attachment-summary. An ordinary record's description is unrelated metadata.
+  return value.kind === "image" || value.kind === "file"
+    || ["attachmentId", "attachment_id"].some((key) => Object.hasOwn(value, key))
+    || (Object.hasOwn(value, "id") && ["filename", "sizeBytes", "size_bytes", "contentType", "content_type"]
+      .some((key) => Object.hasOwn(value, key)))
+    || (typeof value.pointer === "string" && /^\/api\/v1\/sessions\/[^/]+\/attachments\/[^/?#]+$/.test(value.pointer));
+}
+
 export function imageDescriptionFields(pointer = {}) {
   // The API emits upload_status as status on every canonical pointer. Its
   // summaryStatus (including "ready") describes separate processing work.
@@ -41,7 +52,7 @@ export function sanitizeImageDescriptions(value) {
   if (Array.isArray(value)) return value.map(sanitizeImageDescriptions);
   if (!value || typeof value !== "object") return value;
   const copy = Object.fromEntries(Object.entries(value).map(([key, inner]) => [key, sanitizeImageDescriptions(inner)]));
-  if (value.kind === "image") {
+  if (isAttachmentPointer(value)) {
     for (const key of ["description", "descriptionTrust", "descriptionNotice"]) delete copy[key];
     Object.assign(copy, imageDescriptionFields(value));
   }

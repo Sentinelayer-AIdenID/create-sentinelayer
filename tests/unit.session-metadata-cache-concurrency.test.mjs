@@ -58,5 +58,6 @@ test("four concurrent CLI readers complete all 72 reads of one workspace cache",
   const filenames = await readdir(context.cacheDir);
   assert.equal(filenames.some((name) => name.endsWith(".tmp")), false);
   assert.equal(filenames.includes(".refresh.lock"), false, "an owner must release the scope lock");
+  assert.equal(filenames.includes(".refresh-recovery.lock"), false, "an owner must release the recovery guard");
   assert.match(JSON.parse(await readFile(path.join(context.cacheDir, `${sessionId}.json`), "utf8")).session.title, /^Server title \d+$/);
 });

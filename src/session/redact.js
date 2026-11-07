@@ -6,7 +6,7 @@
 // point — if it writes raw, a secret leaks into the audit trail forever.
 //
 // Direct image outputs use the same bounded string filter as the stream sink.
-import { imageDescriptionFields, MAX_IMAGE_DESCRIPTION_CHARS } from "./image-descriptions.js";
+import { imageDescriptionFields, isAttachmentPointer, MAX_IMAGE_DESCRIPTION_CHARS } from "./image-descriptions.js";
 import { SECRET_LIKE_PATTERN, redactString } from "./secret-filter.js";
 
 const REDACTION_MARKER = "[REDACTED]";
@@ -23,22 +23,23 @@ function redactValue(value, depth = 0) {
   if (value && typeof value === "object") {
     const out = {};
     const image = imageDescriptionFields(value);
+    const attachment = isAttachmentPointer(value);
     for (const [key, inner] of Object.entries(value)) {
       if (/^(authorization|cookie|set-cookie|x-api-key|api[_-]?key|secret|password|token)$/i.test(key)) {
         out[key] = REDACTION_MARKER;
         continue;
       }
-      if (value.kind === "image" && ["description", "descriptionTrust", "descriptionNotice"].includes(key)
-          && !image.description) continue;
-      if (key === "description" && image.description) {
-        // A server-bounded caption/OCR needs more than the generic message-string
-        // cap. Keep all validated text, but retain exactly the same secret filter.
-        out[key] = Object.fromEntries(Object.entries(image.description).map(([name, content]) => [
-          name, redactString(content, MAX_IMAGE_DESCRIPTION_CHARS * 2),
-        ]));
-        continue;
-      }
+      if (attachment && ["description", "descriptionTrust", "descriptionNotice"].includes(key)) continue;
       out[key] = redactValue(inner, depth + 1);
+    }
+    if (image.description) {
+      // Rebuild all three fields from the validated contract, including its fixed
+      // notice. Keep complete caption/OCR and the existing bounded secret filter.
+      Object.assign(out, image, {
+        description: Object.fromEntries(Object.entries(image.description).map(([name, content]) => [
+          name, redactString(content, MAX_IMAGE_DESCRIPTION_CHARS * 2),
+        ])),
+      });
     }
     return out;
   }

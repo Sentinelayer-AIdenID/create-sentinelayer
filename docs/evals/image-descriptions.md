@@ -156,6 +156,55 @@ historical maintenance record are unchanged. The complete actual-caller
 evaluation ran in the passing regression. These scoped counts overlap earlier
 proofs and do not change the disclosed full-verification limitations above.
 
+## Canonical notice and non-image pointer follow-up
+
+Warden's review at `0e78ed81f983a4c6cf0ccc6d0bbb8d9d1a20934f` identified two
+remaining raw-data cases. The stream sink now removes all caller-supplied
+description, trust and notice fields from attachment pointers, then rebuilds
+valid image fields from `imageDescriptionFields`. A caller cannot replace the
+fixed notice, and a missing notice is filled from the same validated contract.
+The full caption/OCR limit and existing bounded secret filter are unchanged.
+
+Recursive sanitization and the stream sink also strip description fields from
+non-image pointers. Detection covers canonical image/file kinds, attachment ID
+aliases, legacy IDs accompanied by file metadata, and the existing canonical
+attachment-path pointer. Ordinary non-attachment records retain their own
+description fields. All six canonical no-description fixtures keep their entire
+legacy shape, and filtering never mutates its input.
+
+Four new regressions produced **three intended assertion failures and one
+compatibility pass** before the correction, with no errors or skips. They check
+actual `stream.ndjson` bytes for caller-controlled or missing notices, current
+and legacy non-image pointers, and unrelated ordinary descriptions. The final
+focused scope passed **199 tests with zero failures or errors**, with the same
+existing Windows-only file-stream test skipped on Linux. This includes all
+54 image-description cases, the six 48,000-codepoint boundary cases, redaction,
+attachment/file/stream regressions and all 81 frozen actual-caller checks. Files
+ran in fresh serial Node processes with test concurrency one.
+
+The mutation driver now requires a passing unmodified baseline and an explicit
+`ERR_ASSERTION` for each named failure. Its first stricter pass accepted 26
+mutants and rejected three older cases whose tests dereferenced missing fields
+before asserting. Those tests now assert required file-description, reply-pointer
+and quote presence explicitly. The final run killed **all 29 actual mutants**,
+including four new notice/non-image/legacy-alias cases, with no invalid failures,
+cancellations or skips. All eight affected source files were restored byte for
+byte; baseline, TAP/JUnit, summary and restoration hashes are retained by the
+driver. The first strict attempt remains part of the evidence.
+
+Main `ef5872af94988795d46aa2f5ba9a425af45a9878` is integrated with exactly its two
+metadata-writer/test changes. The two changed description implementation hashes
+have a new explicit maintenance record. All ten canonical source/test bindings
+verify; the seven frozen scenarios, inputs, mock responses, expected outcomes,
+actual-caller test bytes and every prior maintenance record remain unchanged.
+These scoped results overlap earlier proofs and do not claim fresh hosted
+checks, local deep Omar/audit authentication, or full verification completion.
+
+The final redacted full-file scan of the eight changed paths reported three
+existing public source-checksum fields in the frozen binding record. Each was
+recomputed from the actual current or historical `secret-filter.js` bytes and
+matched exactly. No credential, scanner-rule change or new exclusion was found.
+
 ## Controls
 
 AI TOOLING GOVERNANCE: no additional model route, provider call, or authority.
