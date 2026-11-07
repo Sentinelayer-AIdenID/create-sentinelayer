@@ -393,7 +393,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node --import ./tests/setup-env.mjs --test --test-concurrency=2 --test-reporter=tap tests/unit.engram-graph-store.test.mjs | tee windows-engram-graph-store.tap
+          node --import ./tests/setup-env.mjs --test --test-concurrency=2 --test-reporter=tap tests/unit.engram-graph-store.test.mjs tests/unit.engram-namespace-isolation.test.mjs | tee windows-engram-graph-store.tap
           grep -qx '# skipped 0' windows-engram-graph-store.tap
 
       # These assert Windows program lookup and child-process isolation; they skip on other

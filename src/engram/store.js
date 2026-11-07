@@ -132,26 +132,74 @@ export async function verifyNamespace(dir, namespace) {
 
 /**
  * Ensure the directory's namespace.json sidecar matches the expected namespace,
- * writing it on first write with flag "wx" so a concurrent create is detected.
+ * publishing complete metadata without replacing a concurrent winner.
  * Throws NamespaceOwnershipError if a different namespace already owns the
  * directory.
+ *
+ * First initialization requires filesystem hard-link support: write an exclusive
+ * temporary, then link it into place. Unsupported links preserve their errno;
+ * there is no overwrite/rename fallback. Existing valid markers and read-only
+ * APIs do not acquire this new filesystem capability or directory-write need.
  */
 export async function ensureNamespace(dir, namespace, legacyFrom) {
-  await fsp.mkdir(dir, { recursive: true });
   const sidecar = path.join(dir, SIDECAR);
+  let present = true;
+  try { await fsp.lstat(sidecar); }
+  catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+    present = false;
+  }
+  // Keep the existing verifier's ownership/error contract. Malformed markers
+  // are never treated as absence or rewritten, and valid stores need no writes.
+  if (present) return verifyNamespace(dir, namespace);
+
+  await fsp.mkdir(dir, { recursive: true });
+  const temporary = `${sidecar}.${process.pid}.${crypto.randomUUID()}.tmp`;
+  const bytes = Buffer.from(JSON.stringify({ raw: namespace.raw, ...(legacyFrom ? { legacyFrom } : {}) }, null, 2) + "\n");
+  // An EEXIST from this unique temporary belongs to the failed open, not to a
+  // concurrent publication of the final marker. Never remove that foreign file.
+  const handle = await fsp.open(temporary, "wx");
+  let identity;
+  let written = false;
+  let failure;
   try {
-    await fsp.writeFile(
-      sidecar,
-      JSON.stringify({ raw: namespace.raw, ...(legacyFrom ? { legacyFrom } : {}) }, null, 2) + "\n",
-      { flag: "wx" },
-    );
-    return;
-  } catch (e) {
-    if (e && e.code === "EEXIST") {
-      // Sidecar already exists — verify it matches.
-      return verifyNamespace(dir, namespace);
+    identity = await handle.stat({ bigint: true });
+    await handle.writeFile(bytes);
+    written = true;
+    try { await fsp.link(temporary, sidecar); }
+    catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+      await verifyNamespace(dir, namespace);
     }
-    throw e;
+  } catch (error) {
+    failure = { error };
+    throw error;
+  } finally {
+    let cleanupFailure;
+    try {
+      const current = await fsp.lstat(temporary, { bigint: true });
+      // The original handle stays open through cleanup to prevent inode reuse.
+      // Preserve replacements and foreign same-inode bytes, including on error.
+      if (current.isFile() && current.dev === identity?.dev && current.ino === identity?.ino) {
+        const content = await fsp.readFile(temporary);
+        const expected = written ? bytes : bytes.subarray(0, content.length);
+        const latest = await fsp.lstat(temporary, { bigint: true });
+        if (content.equals(expected) && latest.isFile()
+          && latest.dev === identity.dev && latest.ino === identity.ino) {
+          await fsp.unlink(temporary);
+        }
+      }
+    } catch (error) {
+      if (error?.code !== "ENOENT") cleanupFailure = { error };
+    }
+    try { await handle.close(); } catch (error) { cleanupFailure ??= { error }; }
+    if (cleanupFailure) {
+      if (!failure) throw cleanupFailure.error;
+      // Keep the original error's identity, errno, cause and JSON representation.
+      try {
+        Object.defineProperty(failure.error, "namespaceCleanupError", { value: cleanupFailure.error, configurable: true });
+      } catch { /* Frozen or primitive original errors still propagate. */ }
+    }
   }
 }
 
