@@ -337,7 +337,7 @@ function isApiHostAllowed(urlString) {
   }
 }
 
-function resolveApiBaseUrl(session = {}) {
+export function resolveApiBaseUrl(session = {}) {
   const apiUrl = normalizeString(session.apiUrl) || DEFAULT_API_BASE_URL;
   const normalized = apiUrl.replace(/\/+$/, "");
   if (!isApiHostAllowed(normalized) && session.source === "session_admission") {
@@ -3533,7 +3533,19 @@ export async function listSessionsFromApi({
         warnings: [],
       };
     }
-    const pageSessions = Array.isArray(payload?.sessions) ? payload.sessions : [];
+    if (!Array.isArray(payload?.sessions)) {
+      return {
+        ok: false,
+        reason: "invalid_session_list_response",
+        sessions: [],
+        count: 0,
+        nextCursor: null,
+        hasMore: false,
+        truncated: false,
+        warnings: [],
+      };
+    }
+    const pageSessions = payload.sessions;
     for (const item of pageSessions) {
       const sessionId = normalizeString(item?.sessionId || item?.id);
       if (sessionId && seenSessionIds.has(sessionId)) continue;

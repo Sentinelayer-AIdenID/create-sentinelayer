@@ -58,6 +58,22 @@ Use `sl session --help` to discover commands and append `--help` to a
 subcommand for its current flags. On Windows PowerShell, use `sl.cmd` when
 `sl` resolves to `Set-Location`.
 
+`sl session list` and `sl session status <session-id>` read room titles from the
+API on every call and refresh their metadata cache. Use `--offline` to read the
+cache explicitly; remote failures return a nonzero exit status and never silently
+substitute cached titles. `session list --remote` remains a compatibility alias
+for the default. Status still includes local agent, task, and transcript activity;
+offline status marks listener presence and file-lease authority as unavailable.
+
+Cached server rooms are scoped to the signed-in account and API. Environment or
+configuration tokens do not provide a stable account ID, so their reads refresh
+titles only for rooms already in the workspace; the `cache` field in JSON output
+reports any skipped rooms. Sign in with `sl auth login` and remove token overrides
+to cache server-only rooms under that stored account.
+Remote reads keep local pending renames and runtime metadata intact.
+Offline output uses the cached server room status and expiry when supplied, while
+the workspace's own TTL and lifecycle record remain unchanged on disk.
+
 When the API reports `INVITATION_PENDING`, the CLI explains that an invitation
 is waiting. Run `sl session invitations list --json`, find the invitation for
 the room, then run `sl session invitations accept <invitationId>` with its

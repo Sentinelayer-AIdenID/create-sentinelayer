@@ -79,6 +79,12 @@ import {
 } from "../session/store.js";
 import { fetchSessionListeners, formatListenerLine } from "../session/listeners.js";
 import {
+  cacheRemoteSessionMetadata,
+  listOfflineSessionMetadata,
+  readOfflineSessionMetadata,
+  resolveSessionMetadataContext,
+} from "../session/metadata-cache.js";
+import {
   getListenerProcessStatus,
   LISTENER_PROCESS_SCAN_RETRY_TIMEOUT_MS,
   removeListenerPidRecord,
@@ -146,6 +152,7 @@ import {
   createSessionMessageAction,
   editSessionMessage,
   fetchJsonWithFullTimeout,
+  fetchSessionFromApi,
   fetchSessionPresence,
   fetchSessionUsageLedger,
   fetchSessionPinnedMessages,
@@ -579,6 +586,9 @@ export function formatSessionListLine(item = {}) {
   const lastActivity = item.lastActivityAt ? ` last=${item.lastActivityAt}` : "";
   return `${sessionId} status=${status}${archive}${titlePart}${codebasePart} created=${created}${lastActivity}`;
 }
+
+const SESSION_CACHE_SCOPE_WARNING =
+  "Remote-only rooms were not cached because this credential has no stable account ID. Use a stored login without a token override to cache them.";
 
 const SESSION_MESSAGE_ACTION_TYPES = new Set([
   "ack",
@@ -8174,7 +8184,8 @@ Guide: https://sentinelayer.com/docs/senti/overview/
 
   session
     .command("status <sessionId>")
-    .description("Show workspace session status, agents, and file-lock health")
+    .description("Read session metadata from the API and show workspace agents and file-lock health")
+    .option("--offline", "Read cached metadata and local activity without contacting the API")
     .option("--path <path>", "Workspace path for the session", ".")
     .option("--json", "Emit machine-readable output")
     .action(async (sessionId, options, command) => {
@@ -8183,11 +8194,41 @@ Guide: https://sentinelayer.com/docs/senti/overview/
         throw new Error("session id is required.");
       }
       const targetPath = path.resolve(process.cwd(), String(options.path || "."));
-      const sessionPayload = await getSession(normalizedSessionId, {
-        targetPath,
-      });
+      const context = await resolveSessionMetadataContext({ targetPath, offline: Boolean(options.offline) });
+      let cache = null;
+      let sessionPayload;
+      if (options.offline) {
+        sessionPayload = await readOfflineSessionMetadata(normalizedSessionId, { targetPath, context });
+      } else {
+        const requestedAt = new Date().toISOString();
+        const remote = await fetchSessionFromApi(normalizedSessionId, {
+          targetPath,
+          resolveAuthSession: async () => context.authSession,
+        });
+        if (!remote.ok) {
+          process.exitCode = 1;
+          if (shouldEmitJson(options, command)) {
+            console.log(JSON.stringify({
+              command: "session status", source: "remote", targetPath, sessionId: normalizedSessionId,
+              ok: false, reason: remote.reason || "remote_unavailable", session: null,
+            }, null, 2));
+          } else {
+            console.log(pc.yellow(`Remote status unavailable (${remote.reason}). Run with --offline to read the local cache.`));
+          }
+          return;
+        }
+        if (normalizeString(remote.session?.sessionId || remote.session?.id) !== normalizedSessionId) {
+          throw new Error("Remote session metadata does not match the requested session; the cache was not refreshed.");
+        }
+        cache = await cacheRemoteSessionMetadata([remote.session], { targetPath, context, requestedAt });
+        sessionPayload = {
+          ...await getSession(normalizedSessionId, { targetPath }),
+          ...remote.session,
+          sessionId: normalizedSessionId,
+        };
+      }
       if (!sessionPayload) {
-        throw new Error(`Session '${normalizedSessionId}' was not found.`);
+        throw new Error(`Session '${normalizedSessionId}' was not found in the local cache.`);
       }
 
       const [
@@ -8216,7 +8257,10 @@ Guide: https://sentinelayer.com/docs/senti/overview/
           includeExpired: true,
           limit: 100,
         }),
-        listFileLocks(normalizedSessionId, { targetPath })
+        options.offline ? Promise.resolve({
+          ok: false, authoritative: false, activeFileLocks: [],
+          error: { code: "OFFLINE", message: "File-lease authority is unavailable offline." },
+        }) : listFileLocks(normalizedSessionId, { targetPath })
           .then((activeFileLocks) => ({
             ok: true,
             authoritative: true,
@@ -8251,46 +8295,51 @@ Guide: https://sentinelayer.com/docs/senti/overview/
       const hiddenControlEventCount = recentEvents.length - materialRecentEvents.length;
       let listenerRows = [];
       let listenerPresence = {
-        source: "remote_presence",
+        source: options.offline ? "offline_cache" : "remote_presence",
         ok: false,
         authoritative: false,
         presenceStatus: "degraded",
-        reason: "presence_unknown",
+        reason: options.offline ? "offline" : "presence_unknown",
         count: 0,
         liveCount: 0,
         listeners: [],
       };
-      try {
-        const remoteListeners = await fetchSessionListeners(normalizedSessionId, {
-          targetPath,
-        });
-        if (remoteListeners?.ok && Array.isArray(remoteListeners.listeners)) {
-          listenerRows = remoteListeners.listeners;
-          listenerPresence = {
-            source: "remote_presence",
-            ok: true,
-            authoritative: true,
-            presenceStatus: remoteListeners.presenceStatus || "ok",
-            count: listenerRows.length,
-            liveCount: listenerRows.filter(
-              (row) => row.status === "present" || row.status === "active" || row.status === "idle",
-            ).length,
-            listeners: listenerRows,
-          };
-        } else if (remoteListeners && remoteListeners.ok === false) {
-          listenerPresence = {
-            ...listenerPresence,
-            presenceStatus: remoteListeners.presenceStatus || "degraded",
-            reason: normalizeString(remoteListeners.reason) || "remote_unavailable",
-            retryAfterMs: remoteListeners.retryAfterMs || null,
-          };
+      if (!options.offline) {
+        try {
+          const remoteListeners = await fetchSessionListeners(normalizedSessionId, {
+            targetPath,
+          });
+          if (remoteListeners?.ok && Array.isArray(remoteListeners.listeners)) {
+            listenerRows = remoteListeners.listeners;
+            listenerPresence = {
+              source: "remote_presence",
+              ok: true,
+              authoritative: true,
+              presenceStatus: remoteListeners.presenceStatus || "ok",
+              count: listenerRows.length,
+              liveCount: listenerRows.filter(
+                (row) => row.status === "present" || row.status === "active" || row.status === "idle",
+              ).length,
+              listeners: listenerRows,
+            };
+          } else if (remoteListeners && remoteListeners.ok === false) {
+            listenerPresence = {
+              ...listenerPresence,
+              presenceStatus: remoteListeners.presenceStatus || "degraded",
+              reason: normalizeString(remoteListeners.reason) || "remote_unavailable",
+              retryAfterMs: remoteListeners.retryAfterMs || null,
+            };
+          }
+        } catch (error) {
+          listenerPresence.reason = normalizeString(error?.message) || "remote_unavailable";
         }
-      } catch (error) {
-        listenerPresence.reason = normalizeString(error?.message) || "remote_unavailable";
       }
       const liveListenerCount = listenerPresence.liveCount;
       const payload = {
         command: "session status",
+        source: options.offline ? "local" : "remote",
+        ok: true,
+        cache,
         targetPath,
         sessionId: normalizedSessionId,
         session: sessionPayload,
@@ -8316,6 +8365,8 @@ Guide: https://sentinelayer.com/docs/senti/overview/
       }
 
       console.log(pc.bold(`Session ${normalizedSessionId}`));
+      console.log(`title="${formatSessionListText(sessionPayload.title, { maxLength: 120 })}"${options.offline ? " (cached)" : ""}`);
+      if (cache?.skipped) console.log(pc.yellow(SESSION_CACHE_SCOPE_WARNING));
       const listenerText = listenerPresence.authoritative
         ? `${liveListenerCount}/${listenerRows.length}`
         : `unknown(${listenerPresence.presenceStatus || "degraded"})`;
@@ -8824,12 +8875,13 @@ Guide: https://sentinelayer.com/docs/senti/overview/
   session
     .command("list")
     .description(
-      "List sessions. Defaults to local cache; pass --remote to query the SentinelLayer API for every session on your account.",
+      "List sessions from the API and refresh cached metadata. Use --offline for the local cache.",
     )
     .option(
       "--remote",
-      "Query the API for sessions on the authenticated account (covers sessions created from any workspace or the web dashboard)",
+      "Query the API for the authenticated account (the default; retained for compatibility)",
     )
+    .option("--offline", "Read the local cache without contacting the API")
     .option(
       "--include-archived",
       "Include archived/expired sessions (past conversations)",
@@ -8846,14 +8898,24 @@ Guide: https://sentinelayer.com/docs/senti/overview/
       const includeArchived = Boolean(options.includeArchived);
       const limit = parsePositiveInteger(options.limit, "limit", 50);
       const emitJson = shouldEmitJson(options, command);
+      if (options.remote && options.offline) {
+        throw new Error("Use only one of --remote or --offline.");
+      }
+      const context = await resolveSessionMetadataContext({ targetPath, offline: Boolean(options.offline) });
 
-      if (options.remote) {
+      if (!options.offline) {
+        const requestedAt = new Date().toISOString();
         const remote = await listSessionsFromApi({
           targetPath,
           includeArchived,
           limit: emitJson ? 200 : limit,
           fetchAll: emitJson,
+          resolveAuthSession: async () => context.authSession,
         });
+        const cache = remote.ok
+          ? await cacheRemoteSessionMetadata(remote.sessions, { targetPath, context, requestedAt })
+          : null;
+        if (!remote.ok) process.exitCode = 1;
         const trimmed = emitJson ? remote.sessions : remote.sessions.slice(0, limit);
         const payload = {
           command: "session list",
@@ -8867,6 +8929,7 @@ Guide: https://sentinelayer.com/docs/senti/overview/
           hasMore: Boolean(remote.hasMore),
           truncated: Boolean(remote.truncated),
           warnings: Array.isArray(remote.warnings) ? remote.warnings : [],
+          cache,
           sessions: trimmed,
         };
         if (emitJson) {
@@ -8876,7 +8939,7 @@ Guide: https://sentinelayer.com/docs/senti/overview/
         if (!remote.ok) {
           console.log(
             pc.yellow(
-              `Remote list unavailable (${remote.reason}). Try \`sl auth login\` or run without --remote for local cache.`,
+              `Remote list unavailable (${remote.reason}). Try \`sl auth login\` or run with --offline for local cache.`,
             ),
           );
           return;
@@ -8893,6 +8956,9 @@ Guide: https://sentinelayer.com/docs/senti/overview/
         }
         for (const item of trimmed) {
           console.log(formatSessionListLine(item));
+        }
+        if (cache.skipped) {
+          console.log(pc.yellow(SESSION_CACHE_SCOPE_WARNING));
         }
         if (remote.count > trimmed.length || remote.hasMore) {
           console.log(
@@ -8913,9 +8979,7 @@ Guide: https://sentinelayer.com/docs/senti/overview/
         return;
       }
 
-      const sessions = includeArchived
-        ? await listAllSessions({ targetPath })
-        : await listActiveSessions({ targetPath });
+      const sessions = await listOfflineSessionMetadata({ targetPath, context, includeArchived });
       const trimmed = emitJson ? sessions : sessions.slice(0, limit);
       const payload = {
         command: "session list",
@@ -8933,8 +8997,8 @@ Guide: https://sentinelayer.com/docs/senti/overview/
         console.log(
           pc.yellow(
             includeArchived
-              ? "No sessions in local cache. Run with --remote to fetch from the API."
-              : "No active sessions in local cache. Run with --remote to see sessions from other workspaces or the web.",
+              ? "No sessions in local cache. Run without --offline to fetch from the API."
+              : "No active sessions in local cache. Run without --offline to see sessions from other workspaces or the web.",
           ),
         );
         return;
