@@ -33,6 +33,9 @@ export function selfProvisioningMcpInputSchema(tool) {
   };
 }
 const SENSITIVE_COMMAND_PATHS = new Set([
+  // Holds the owner's account credential and starts durable listeners. Owners
+  // launch this directly; room agents cannot create a new account control plane.
+  "agent.watch-added",
   // Skill installation and inspection use user-selected local paths; keep them on the direct CLI.
   "skills.install",
   "skills.list",

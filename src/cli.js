@@ -5,6 +5,11 @@ import { CLI_VERSION, runLegacyCliWithErrorHandling } from "./legacy-cli.js";
 import { restrictProgramLookupToPath } from "./program-lookup.js";
 
 const COMMAND_REGISTRARS = {
+  agent: {
+    loader: () => import("./commands/agent.js"),
+    exportName: "registerAgentCommand",
+    needsLegacy: false,
+  },
   skills: {
     loader: () => import("./commands/skills.js"),
     exportName: "registerSkillsCommand",

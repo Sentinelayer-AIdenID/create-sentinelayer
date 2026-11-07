@@ -624,6 +624,7 @@ export async function runAdmissionJoin(
     ttlSeconds = 7200,
     wait = true,
     recoverActive = false,
+    requireAccountCheck = false,
     waitTimeoutMs = 15 * 60_000,
     noAutoGrant = false,
     targetPath = process.cwd(),
@@ -635,8 +636,10 @@ export async function runAdmissionJoin(
     requestRead = requestJson,
     sleep = sleepMs,
     now = () => Date.now(),
+    signal,
   } = {}
 ) {
+  signal?.throwIfAborted();
   const sid = normalizeString(sessionId);
   const agent = normalizeString(agentId).toLowerCase();
   if (!sid) throw new Error("session id is required.");
@@ -649,9 +652,20 @@ export async function runAdmissionJoin(
   const goalSummary = normalizeString(goal);
   if (!goalSummary) throw new Error("--goal is required: say what this agent is coming to do.");
 
+  if (signal) {
+    const cancellable = (request) => async (url, options) => {
+      signal.throwIfAborted();
+      const result = await request(url, { ...options, signal });
+      signal.throwIfAborted();
+      return result;
+    };
+    requestMutation = cancellable(requestMutation);
+    requestRead = cancellable(requestRead);
+  }
   const deps = { requestMutation, origin };
   const auth = await authContext({ targetPath, resolveAuthSession });
   const key = await loadOrCreateAgentKey(agent, { homeDir });
+  signal?.throwIfAborted();
   const goalContract = {
     summary: goalSummary,
     deliverables: deliverables.map(normalizeString).filter(Boolean),
@@ -670,7 +684,7 @@ export async function runAdmissionJoin(
   // same key. A different goal, scope or duration is a question for the server,
   // which answers with the existing grant (same purpose) or a conflict (new one).
   const held = await readAdmissionCredentialState(sid, agent, { homeDir, now: now() });
-  if (!recoverActive && held.state === "live" && held.credential.requestFingerprint === fingerprint) {
+  if (!requireAccountCheck && !recoverActive && held.state === "live" && held.credential.requestFingerprint === fingerprint) {
     const fastPathCredential = await withAdmissionCredentialLock(
       admissionCredentialPath(sid, agent, { homeDir }),
       async () => {
@@ -719,10 +733,13 @@ export async function runAdmissionJoin(
   if (resumable && pendingNoAutoGrant && state.noAutoGrant !== true) {
     state.noAutoGrant = true;
     const stored = await writePendingAdmissionState(statePath, state, sid, agent, homeDir, now);
-    if (stored) return redacted({ status: "active", reused: true, stored, sid, agent, homeDir });
+    if (stored && !requireAccountCheck) return redacted({ status: "active", reused: true, stored, sid, agent, homeDir });
   }
 
-  if (!resumable) {
+  // A watcher must revalidate the current account even if a local admission or
+  // pending request exists. The same own-key POST also consumes a new preapproval.
+  // Ordinary joins retain their existing local reuse and poll-only resume.
+  if (!resumable || requireAccountCheck) {
     const created = await mutate(
       auth,
       sid,
@@ -843,7 +860,7 @@ export async function runAdmissionJoin(
       };
     }
     const interval = Math.min(Math.max(Number(polled.pollAfterSeconds) || 5, 2), 30) * 1000;
-    await sleep(Math.min(interval, Math.max(0, deadline - now())));
+    await sleep(Math.min(interval, Math.max(0, deadline - now())), undefined, { signal });
   }
 
   if (TERMINAL.has(polled.status)) {
