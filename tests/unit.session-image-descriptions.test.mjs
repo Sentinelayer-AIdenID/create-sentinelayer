@@ -8,7 +8,7 @@ import path from "node:path";
 
 import { formatAttachmentSummary } from "../src/session/attachment-summary.js";
 import { downloadRoomFile, roomFileFromPointer } from "../src/session/room-files.js";
-import { imageDescriptionFields, quoteImageDescription, IMAGE_DESCRIPTION_NOTICE } from "../src/session/image-descriptions.js";
+import { imageDescriptionFields, quoteImageDescription, sanitizeImageDescriptions, IMAGE_DESCRIPTION_NOTICE } from "../src/session/image-descriptions.js";
 import { redactEventPayload } from "../src/session/redact.js";
 import { createSessionMcpToolHandlers } from "../src/mcp/session-stdio-server.js";
 import { createListenerHostWake } from "../src/session/wake/listen-wake.js";
@@ -148,6 +148,70 @@ test("Image descriptions: direct quote and file metadata redact only credential-
   assertSafeImage(roomFileFromPointer(source));
   assert.equal(source.description.visibleText, secretOcr, "output filtering must not change the input");
 });
+
+function boundaryPointer(secret, field) {
+  const source = pointer("Other visible text.");
+  source.description.text = "Other caption.";
+  const otherField = field === "text" ? "visibleText" : "text";
+  const suffix = ` ${secret} 😀 preserved suffix`;
+  source.description[field] = "x".repeat(48_000
+    - Array.from(source.description[otherField]).length - Array.from(suffix).length) + suffix;
+  source.description.model = "m".repeat(120 - secret.length) + secret;
+  return source;
+}
+
+for (const secret of ["NPM_TOKEN", "xoxb-a"]) {
+  for (const field of ["text", "visibleText"]) {
+    test(`Image descriptions: boundary redaction stays idempotent for ${field} with ${secret}`, () => {
+      const source = boundaryPointer(secret, field);
+      const original = structuredClone(source);
+      assert.equal(Array.from(source.description.text).length + Array.from(source.description.visibleText).length, 48_000);
+      const first = sanitizeImageDescriptions(source);
+      const expected = { ...source.description,
+        [field]: source.description[field].replace(secret, "[X]"),
+        model: source.description.model.replace(secret, "[X]"),
+      };
+      assert.deepEqual(first.description, expected, "all nonsensitive caption/OCR, including the Unicode suffix, is retained");
+      for (let pass = 0; pass < 3; pass += 1) {
+        assert.deepEqual(sanitizeImageDescriptions(first), first);
+        assert.deepEqual(imageDescriptionFields(first).description, expected);
+        assert.deepEqual(decodedQuote(quoteImageDescription(first)), expected);
+        assert.deepEqual(roomFileFromPointer(first).description, expected);
+        assert.deepEqual(redactEventPayload(event(first)).payload.attachments[0].description, expected);
+      }
+      assert.deepEqual(source, original, "sanitization never mutates the input");
+      assert.ok(!JSON.stringify(first).includes(secret));
+    });
+  }
+}
+
+for (const includeRaw of [false, true]) {
+  test(`Image descriptions: boundary redaction survives a direct poll and MCP raw=${includeRaw} read`, async () => {
+    resetSessionSyncStateForTests();
+    const secret = "NPM_TOKEN";
+    const source = boundaryPointer(secret, "visibleText");
+    const poll = (sessionId) => pollSessionEvents(sessionId, {
+      resolveAuthSession: async () => ({ token: "fixture-auth-placeholder", apiUrl: "https://api.sentinelayer.com" }),
+      fetchImpl: async () => new Response(JSON.stringify({ events: [event(source)], has_more: false }),
+        { status: 200, headers: { "content-type": "application/json" } }),
+    });
+    try {
+      const handlers = createSessionMcpToolHandlers({ pollSessionEventsFn: poll,
+        updateSessionReadCursorFn: async () => ({ ok: true }) });
+      const result = await handlers.poll_inbox({ sessionId: "room-test", agentId: "reader", includeRaw, includeActions: false });
+      assert.equal(result.ok, true);
+      const expected = { ...source.description,
+        visibleText: source.description.visibleText.replace(secret, "[X]"),
+        model: source.description.model.replace(secret, "[X]"),
+      };
+      assert.deepEqual(result.events[0].payload.attachments[0].description, expected);
+      assert.deepEqual(decodedQuote(result.events[0].attachmentSummary), expected);
+      assert.ok(!JSON.stringify(result).includes(secret));
+    } finally {
+      resetSessionSyncStateForTests();
+    }
+  });
+}
 
 for (const [name, poll] of [["poll", pollSessionEvents], ["history", pollSessionEventsBefore]]) {
   test(`Image descriptions: direct ${name} API read filters raw OCR without truncation`, async () => {

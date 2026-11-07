@@ -15,8 +15,8 @@
       "src/commands/legacy-args.js": "83772b6ccd5765d1a0bd1f3ee3eefcf5c1fdaf4e9fb1a301c0312b286dbc0d29",
       "src/legacy-cli.js": "524941d7e3b292b257fd3efc2d4e6945a3621d0ad96f1d6da1041034e4a2036e",
       "src/session/redact.js": "31fb789cdd8a681ec221186a2dd8fdf03de302a71b0214d2f4caecc536c09084",
-      "src/session/secret-filter.js": "6e90f774b7f805572602e3a7a3f626a2bfb33f8734b3f81cf02ec05b97ad32a3",
-      "src/session/image-descriptions.js": "7793b37df01a3f4e0484ff593846576f85245cc62b230336baa1db0d540b7860"
+      "src/session/secret-filter.js": "97d689d00b4e0dc8acff2c041182ea3d83689cb8462ca498c836a9246b00eaf0",
+      "src/session/image-descriptions.js": "10f6368f7ad08d03484bcc00bbdffae77f0cfcbd0b3b48ae2cac57942a5b4b66"
     },
     "testPath": "tests/unit.typesafe-severity.test.mjs",
     "testSha256": "238cc044eff843d680796b25f7efda46b932b7d234c6eb843f8e55be5185cfb0",
@@ -153,6 +153,22 @@
       "limitation": "Deterministic mocked contract evidence only. Historical provenance is retained; no live-provider, model-accuracy, billing or hosted-gate completion claim.",
       "localVerificationRevision": "a3751ced4d90b42fdd8b4798895e7d7be1eaa447",
       "sourceKind": "Local verification checkout; the sourceSha256 map binds the published bytes independently of commit metadata."
+    },
+    "imageDescriptionBoundaryMaintenance": {
+      "kind": "nonexpanding_image_redaction_source_binding",
+      "baseRevision": "098db452ad18c95fa195469d48e5c73029868cb7",
+      "priorSha256": {
+        "src/session/secret-filter.js": "6e90f774b7f805572602e3a7a3f626a2bfb33f8734b3f81cf02ec05b97ad32a3",
+        "src/session/image-descriptions.js": "7793b37df01a3f4e0484ff593846576f85245cc62b230336baa1db0d540b7860"
+      },
+      "currentSha256": {
+        "src/session/secret-filter.js": "97d689d00b4e0dc8acff2c041182ea3d83689cb8462ca498c836a9246b00eaf0",
+        "src/session/image-descriptions.js": "10f6368f7ad08d03484bcc00bbdffae77f0cfcbd0b3b48ae2cac57942a5b4b66"
+      },
+      "scope": "Image descriptions request nonexpanding markers so repeated sanitization retains all nonsensitive caption/OCR at the existing combined 48,000-codepoint bound. The default string redactor and its secret detector are unchanged. All seven frozen synthetic cases, inputs, mock responses, expected outcomes, severity rules, test bytes and previous maintenance records are retained.",
+      "verificationCommand": "node --import ./tests/setup-env.mjs --test --test-concurrency=1 tests/unit.typesafe-severity.test.mjs tests/unit.session-redact.test.mjs tests/unit.session-image-descriptions.test.mjs",
+      "sourceKind": "The canonical sourceSha256 map binds the candidate bytes; baseRevision is the previously published PR head.",
+      "limitation": "Deterministic mocked contract evidence only; no live-provider, model-accuracy or billing claim."
     }
   },
   "baselineMeaning": "Published base generation-only contract, with candidate off mode exercised on identical synthetic inputs; no independent baseline model/provider run.",

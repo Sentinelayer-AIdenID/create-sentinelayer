@@ -66,10 +66,38 @@ therefore not claimed green. Fresh hosted quality, security and Omar checks are
 required on the PR head before handoff. No live model call was made by these
 evaluations.
 
-The final redacted Gitleaks delta scan reported one public source checksum:
+The initial redacted Gitleaks delta scan reported one public source checksum:
 the `secret-filter.js` entry in the frozen source-binding map. Two reviewers
 independently recomputed SHA-256 from that module and confirmed the exact match.
 It is not a credential; no scanner rule, exclusion or ignore entry was changed.
+
+## Boundary review follow-up
+
+The PR review found that replacing a short secret-shaped value with
+`[REDACTED]` could grow a valid 48,000-codepoint description beyond the input
+bound. A later sanitizer or quote then discarded the whole description.
+Image fields now request nonexpanding replacements: matches shorter than the
+normal marker use `[X]`, while longer matches keep `[REDACTED]`. The detector,
+default string-redactor behavior and API input limits are unchanged. No
+nonsensitive caption or OCR is truncated to make room for a marker.
+
+Six boundary regressions failed before the correction and passed afterward.
+They cover caption/OCR at exactly 48,000 combined Unicode code points, the
+shortest recognized secret shape, a 120-character model field, a non-BMP suffix,
+repeated sanitization, quoting, file/stream metadata and real poll-to-MCP raw and
+summarized paths. The combined frozen-evaluation/redaction/image run passed
+**123 tests, zero skipped**. All **18 actual mutants** were killed, including
+restoring the expanding marker; the affected source was restored exactly.
+These counts overlap the earlier runs. The canonical source bindings were
+refreshed while preserving all frozen scenario inputs, expected outcomes and
+historical records. Fresh hosted checks and review remain required for this
+follow-up head.
+
+The follow-up delta scan reported four occurrences of the previous/current
+public `secret-filter.js` checksum: the replaced binding and the two historical
+maintenance fields. Each occurrence was checked against the actual source
+SHA-256; an independent reviewer also verified all canonical bindings and the
+unchanged frozen scenarios. No credential or scanner exclusion was added.
 
 ## Controls
 
