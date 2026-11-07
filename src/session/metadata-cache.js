@@ -1,10 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 import fsp from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 
 import { resolveActiveAuthSession } from "../auth/service.js";
 import { resolveCredentialsFilePath } from "../auth/session-store.js";
+import { withCacheWriteLock } from "./cache-write-lock.js";
 import { isValidSessionId, normalizeSessionId } from "./paths.js";
 import { getSession, isSessionCacheExpired, listAllSessions } from "./store.js";
 import { resolveApiBaseUrl } from "./sync.js";
@@ -62,37 +62,6 @@ async function writePrivateJson(filePath, value) {
   } finally {
     // Cleanup must not turn a successfully published cache into a command error.
     await fsp.rm(temporaryPath, { force: true }).catch(() => {});
-  }
-}
-
-// Serialize publication and pruning for the whole account/workspace catalog,
-// including separate CLI processes. Never steal a lock by age: its writer may
-// still be publishing. A busy or abandoned lock is a bounded cache failure,
-// not a failed server read.
-async function withCacheWriteLock(context, operation, timeoutMs) {
-  await fsp.mkdir(context.cacheDir, { recursive: true, mode: 0o700 });
-  const lockPath = path.join(context.cacheDir, ".refresh.lock");
-  const deadline = performance.now() + timeoutMs;
-  let handle;
-  for (;;) {
-    try {
-      handle = await fsp.open(lockPath, "wx", 0o600);
-      break;
-    } catch (error) {
-      if (!["EEXIST", "EPERM", "EACCES", "EBUSY"].includes(error?.code)) throw error;
-      if (performance.now() >= deadline) {
-        throw Object.assign(new Error("Metadata cache refresh lock is unavailable."), { code: "CACHE_LOCK_TIMEOUT" });
-      }
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
-  }
-  try {
-    await handle.writeFile(JSON.stringify({ pid: process.pid, host: os.hostname(), createdAt: new Date().toISOString() }));
-    return await operation();
-  } finally {
-    try { await handle.close(); } finally {
-      await retryTransientFileOperation(() => fsp.rm(lockPath, { force: true }));
-    }
   }
 }
 
