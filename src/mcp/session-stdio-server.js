@@ -11,6 +11,7 @@ import {
 } from "./cli-command-tools.js";
 import { appendToStream, readStream } from "../session/stream.js";
 import { formatAttachmentSummary, withAttachmentSummary } from "../session/attachment-summary.js";
+import { sanitizeImageDescriptions } from "../session/image-descriptions.js";
 import { formatEditSummary, withEditSummary } from "../session/edit-summary.js";
 import { listFileLocks, lockFile, unlockFile } from "../session/file-locks.js";
 import {
@@ -200,7 +201,7 @@ function carriesJudgeVerdict(payload) {
 
 function safePayload(payload = {}) {
   if (!isPlainObject(payload)) return {};
-  const next = { ...payload };
+  const next = sanitizeImageDescriptions(payload);
   if (typeof next.message === "string") {
     const limit = carriesJudgeVerdict(next) ? JUDGE_MESSAGE_MAX_CHARS : MAX_MESSAGE_CHARS;
     const truncated = truncateText(next.message, limit);
@@ -485,9 +486,12 @@ function isHumanMessageAction(action = {}) {
 }
 
 function summarizeMessageActionActivity(action = {}) {
+  const sessionId = normalizeString(action.sessionId || action.session_id);
+  const attachments = Array.isArray(action.attachments) ? sanitizeImageDescriptions(action.attachments) : [];
+  const attachmentSummary = formatAttachmentSummary({ sessionId, payload: { attachments } });
   return cleanObject({
     id: normalizeString(action.id),
-    sessionId: normalizeString(action.sessionId || action.session_id),
+    sessionId,
     targetSequenceId: normalizePositiveInteger(action.targetSequenceId ?? action.target_sequence_id, null),
     targetCursor: normalizeString(action.targetCursor || action.target_cursor),
     targetActionId: normalizeString(action.targetActionId || action.target_action_id),
@@ -496,6 +500,8 @@ function summarizeMessageActionActivity(action = {}) {
     actorId: normalizeString(action.actorId || action.actor_id),
     actorRole: normalizeString(action.actorRole || action.actor_role),
     note: truncateText(action.note || action.message || "").text,
+    attachments: attachments.length ? attachments : undefined,
+    attachmentSummary: attachmentSummary || undefined,
     createdAt: normalizeString(action.createdAt || action.created_at || action.ts || action.timestamp),
     activityType: normalizeString(action.activityType || action.activity_type) || "message_action",
     isHumanActivity: isHumanMessageAction(action),

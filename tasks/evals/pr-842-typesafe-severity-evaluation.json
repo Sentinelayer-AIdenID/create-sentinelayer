@@ -14,10 +14,12 @@
       "src/commands/omargate.js": "5ccbf2f1bb3f2f1e9ed5e35a8a8197bfc2b1cb699365987a2a979caf834c3567",
       "src/commands/legacy-args.js": "83772b6ccd5765d1a0bd1f3ee3eefcf5c1fdaf4e9fb1a301c0312b286dbc0d29",
       "src/legacy-cli.js": "524941d7e3b292b257fd3efc2d4e6945a3621d0ad96f1d6da1041034e4a2036e",
-      "src/session/redact.js": "a92cd2e70b165e4e015edcbeff1d3119c3b1f091ef72654e776c0139ace663a2"
+      "src/session/redact.js": "99281f141c838bcbff904e1970ecb0fe0c1e22bf531e02857b512bb6db5b2edb",
+      "src/session/secret-filter.js": "97d689d00b4e0dc8acff2c041182ea3d83689cb8462ca498c836a9246b00eaf0",
+      "src/session/image-descriptions.js": "3d05cbb12221da72f9fd3784ab1c359f33e45d068ce3b84cb3a4c65da289972f"
     },
     "testPath": "tests/unit.typesafe-severity.test.mjs",
-    "testSha256": "a1bbdb78a7e271d8bd183da13abe007473e0bc33968230680caefc94a6f4e86d",
+    "testSha256": "238cc044eff843d680796b25f7efda46b932b7d234c6eb843f8e55be5185cfb0",
     "dictionaryVersion": "omar-severity-evaluation/1",
     "privacyCorrection": {
       "baseRevision": "22b8553073bb72cfccd71fb1c06217c3e6844ff4",
@@ -140,6 +142,67 @@
       },
       "scope": "Only `sl init` project setup changed in src/legacy-cli.js: the token is no longer written to .sentinelayer/config.json, .sentinelayer/ is added to .gitignore in existing repos, and a tracked config.json is reported. The severity classification path, all seven synthetic cases, inputs, mock responses, expectations, invariants, the other six implementation hashes and the test bytes are unchanged; the contract suite reruns against the current binding.",
       "provenance": "Prior bindings remain historical anchors. This refresh binds the current source after CRLF-to-LF normalization only; it is not model accuracy, live-provider, billing or new security-acceptance evidence."
+    },
+    "imageDescriptionRedactionMaintenance": {
+      "kind": "shared_secret_filter_dependency_binding",
+      "baseRevision": "e27c3a2c93fb2dffefb7a6b686f0725d9efb8c79",
+      "priorRedactSha256": "a92cd2e70b165e4e015edcbeff1d3119c3b1f091ef72654e776c0139ace663a2",
+      "priorTestSha256": "a1bbdb78a7e271d8bd183da13abe007473e0bc33968230680caefc94a6f4e86d",
+      "scope": "The unchanged secret detector and bounded string filter move to secret-filter.js so direct image-description outputs share the stream privacy filter. redact.js now imports both new modules; the canonical source map binds both dependencies and the test explicitly requires them. All seven synthetic cases, inputs, mock responses, expected outcomes, severity rules and invariants remain unchanged.",
+      "verificationCommand": "node --import ./tests/setup-env.mjs --test --test-concurrency=1 tests/unit.typesafe-severity.test.mjs tests/unit.session-redact.test.mjs tests/unit.session-image-descriptions.test.mjs",
+      "limitation": "Deterministic mocked contract evidence only. Historical provenance is retained; no live-provider, model-accuracy, billing or hosted-gate completion claim.",
+      "localVerificationRevision": "a3751ced4d90b42fdd8b4798895e7d7be1eaa447",
+      "sourceKind": "Local verification checkout; the sourceSha256 map binds the published bytes independently of commit metadata."
+    },
+    "imageDescriptionBoundaryMaintenance": {
+      "kind": "nonexpanding_image_redaction_source_binding",
+      "baseRevision": "098db452ad18c95fa195469d48e5c73029868cb7",
+      "priorSha256": {
+        "src/session/secret-filter.js": "6e90f774b7f805572602e3a7a3f626a2bfb33f8734b3f81cf02ec05b97ad32a3",
+        "src/session/image-descriptions.js": "7793b37df01a3f4e0484ff593846576f85245cc62b230336baa1db0d540b7860"
+      },
+      "currentSha256": {
+        "src/session/secret-filter.js": "97d689d00b4e0dc8acff2c041182ea3d83689cb8462ca498c836a9246b00eaf0",
+        "src/session/image-descriptions.js": "10f6368f7ad08d03484bcc00bbdffae77f0cfcbd0b3b48ae2cac57942a5b4b66"
+      },
+      "scope": "Image descriptions request nonexpanding markers so repeated sanitization retains all nonsensitive caption/OCR at the existing combined 48,000-codepoint bound. The default string redactor and its secret detector are unchanged. All seven frozen synthetic cases, inputs, mock responses, expected outcomes, severity rules, test bytes and previous maintenance records are retained.",
+      "verificationCommand": "node --import ./tests/setup-env.mjs --test --test-concurrency=1 tests/unit.typesafe-severity.test.mjs tests/unit.session-redact.test.mjs tests/unit.session-image-descriptions.test.mjs",
+      "sourceKind": "The canonical sourceSha256 map binds the candidate bytes; baseRevision is the previously published PR head.",
+      "limitation": "Deterministic mocked contract evidence only; no live-provider, model-accuracy or billing claim."
+    },
+    "imageDescriptionVisibilityMaintenance": {
+      "kind": "uploaded_only_image_visibility_source_binding",
+      "baseRevision": "2a6f2a73525c98e4feff56eb56787d218e7c37f4",
+      "integratedMainRevision": "7c94b4e301cf9d5d5a5478fdae4887173638fa6f",
+      "priorSha256": {
+        "src/session/image-descriptions.js": "10f6368f7ad08d03484bcc00bbdffae77f0cfcbd0b3b48ae2cac57942a5b4b66",
+        "src/session/redact.js": "31fb789cdd8a681ec221186a2dd8fdf03de302a71b0214d2f4caecc536c09084"
+      },
+      "currentSha256": {
+        "src/session/image-descriptions.js": "90f66cda3de0809801b5553065035d2188fb142aa5e54e0d1d31fe256caf25af",
+        "src/session/redact.js": "48471204ebbfd8011f7df1ba402d7aed4a166335861ce811a9b07708abbc60aa"
+      },
+      "scope": "Image descriptions require the canonical uploaded status and absent or literal-false removal/visibility flags. Rejected image description, trust and notice fields are omitted from raw stream serialization. Secret detection, nonexpanding redaction and the 48,000-codepoint bound are unchanged. All seven frozen scenarios, inputs, mock responses, expectations, severity rules, test bytes and historical maintenance records are retained.",
+      "verificationCommand": "node --import ./tests/setup-env.mjs --test --test-concurrency=1 tests/unit.typesafe-severity.test.mjs tests/unit.session-redact.test.mjs tests/unit.session-image-descriptions.test.mjs",
+      "sourceKind": "Canonical source hashes bind the candidate bytes after current-main integration; baseRevision is the previously published PR head.",
+      "limitation": "Deterministic mocked contract evidence only; no live-provider, model-accuracy or billing claim."
+    },
+    "imageDescriptionCanonicalFieldsMaintenance": {
+      "kind": "canonical_description_fields_on_every_attachment_pointer",
+      "baseRevision": "0e78ed81f983a4c6cf0ccc6d0bbb8d9d1a20934f",
+      "integratedMainRevision": "ef5872af94988795d46aa2f5ba9a425af45a9878",
+      "priorSha256": {
+        "src/session/image-descriptions.js": "90f66cda3de0809801b5553065035d2188fb142aa5e54e0d1d31fe256caf25af",
+        "src/session/redact.js": "48471204ebbfd8011f7df1ba402d7aed4a166335861ce811a9b07708abbc60aa"
+      },
+      "currentSha256": {
+        "src/session/image-descriptions.js": "3d05cbb12221da72f9fd3784ab1c359f33e45d068ce3b84cb3a4c65da289972f",
+        "src/session/redact.js": "99281f141c838bcbff904e1970ecb0fe0c1e22bf531e02857b512bb6db5b2edb"
+      },
+      "scope": "Raw streams rebuild valid image description, trust and fixed notice from the validated contract. Current and legacy non-image attachment pointers lose description fields; ordinary non-attachment descriptions retain their prior shape. The secret detector, bounded filter and 48,000-codepoint limit are unchanged. Every frozen scenario, input, mock response, expected outcome, invariant, actual-caller test byte and historical maintenance record is retained.",
+      "verificationCommand": "node --import ./tests/setup-env.mjs --test --test-concurrency=1 tests/unit.typesafe-severity.test.mjs tests/unit.session-redact.test.mjs tests/unit.session-image-descriptions.test.mjs",
+      "sourceKind": "Canonical source hashes bind the candidate bytes after current-main integration; baseRevision is the previously published PR head.",
+      "limitation": "Deterministic mocked contract evidence only; no live-provider, model-accuracy, billing or hosted-gate completion claim."
     }
   },
   "baselineMeaning": "Published base generation-only contract, with candidate off mode exercised on identical synthetic inputs; no independent baseline model/provider run.",

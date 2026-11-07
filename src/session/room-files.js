@@ -22,6 +22,7 @@ import { pipeline } from "node:stream/promises";
 
 import { authLoginHint } from "../ui/command-hints.js";
 import { fetchSessionAttachment, pollSessionEventsBefore } from "./sync.js";
+import { imageDescriptionFields } from "./image-descriptions.js";
 
 const ATTACHMENT_ID_PATTERN = /^[A-Za-z0-9._:-]{8,120}$/;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
@@ -98,6 +99,7 @@ export function roomFileFromPointer(pointer = {}, event = {}) {
     publishedAt: normalizeString(event.ts || event.timestamp || event.createdAt) || null,
     publishedBy: eventAuthorId(event) || null,
     publishedSequenceId: eventSequence(event) || null,
+    ...imageDescriptionFields(pointer),
   };
 }
 

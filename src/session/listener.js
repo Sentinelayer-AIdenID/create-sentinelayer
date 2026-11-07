@@ -9,6 +9,7 @@ import {
 import { cursorAdvances, readSyncCursor, writeSyncCursor } from "./sync-cursor.js";
 import { isSessionListenerLifecycleEvent } from "./control-events.js";
 import { sessionMessageRoutingEvent } from "./message-edits.js";
+import { sanitizeImageDescriptions } from "./image-descriptions.js";
 
 const BROADCAST_RECIPIENTS = new Set([
   "*",
@@ -554,7 +555,7 @@ export async function listenSessionEvents({
       if (!shouldEmitBatch && eventTimestampMs(event) < startedAtMs) continue;
       emittedKeys.add(key);
       try {
-        await onEvent(event);
+        await onEvent(sanitizeImageDescriptions(event));
         emitted += 1;
       } catch (error) {
         emittedKeys.delete(key);

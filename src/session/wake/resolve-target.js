@@ -104,7 +104,11 @@ function defaultFormatMessage(event, agentId) {
   const head = `Senti wake for ${agentId}: ${event.event === "session_message_edited" ? "edited message" : "new message"} from ${author}.`
     .slice(0, MAX_WAKE_MESSAGE_CHARS);
   const attachmentBudget = Math.max(0, MAX_WAKE_MESSAGE_CHARS - head.length - 2);
-  const attachments = formatAttachmentSummary(event).slice(0, attachmentBudget);
+  const fullAttachments = formatAttachmentSummary(event);
+  // Keep the existing wake budget. Never cut a quoted OCR block in half; full
+  // descriptions remain in read_history and session_file_get metadata.
+  const attachments = fullAttachments.length <= attachmentBudget ? fullAttachments
+    : formatAttachmentSummary(event, { includeImageDescriptions: false }).slice(0, attachmentBudget);
   const bodyBudget = Math.max(0, MAX_WAKE_MESSAGE_CHARS - head.length - 2 - (attachments ? attachments.length + 2 : 0));
   return [head, body.slice(0, bodyBudget), attachments].filter(Boolean).join("\n\n");
 }
