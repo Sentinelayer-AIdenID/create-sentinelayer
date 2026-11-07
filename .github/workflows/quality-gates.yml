@@ -389,6 +389,13 @@ jobs:
           node --import ./tests/setup-env.mjs --test --test-concurrency=2 --test-reporter=tap tests/unit.session-cache-lock.test.mjs tests/unit.session-metadata-cache.test.mjs tests/unit.session-metadata-cache-concurrency.test.mjs | tee windows-session-metadata-cache.tap
           grep -qx '# skipped 0' windows-session-metadata-cache.tap
 
+      - name: Verify graph namespace publication and store integrity on Windows
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --import ./tests/setup-env.mjs --test --test-concurrency=2 --test-reporter=tap tests/unit.engram-graph-store.test.mjs | tee windows-engram-graph-store.tap
+          grep -qx '# skipped 0' windows-engram-graph-store.tap
+
       # These assert Windows program lookup and child-process isolation; they skip on other
       # platforms, so here a skipped test fails the step.
       - name: Verify program lookup and repository child environment on Windows
