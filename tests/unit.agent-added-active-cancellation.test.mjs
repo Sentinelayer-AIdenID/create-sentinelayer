@@ -44,7 +44,7 @@ function respond(res, body) {
   res.end(JSON.stringify(body));
 }
 
-for (const stalled of ["poll", "read-cursor"]) {
+for (const stalled of ["poll", "read-cursor", "heartbeat"]) {
   for (const phase of ["headers", "body"]) {
     test(`an added-room stop closes active ${stalled} ${phase} after ready without later work`, { timeout: 10_000 }, async () => {
       resetSessionSyncStateForTests();
@@ -57,7 +57,7 @@ for (const stalled of ["poll", "read-cursor"]) {
           for await (const _chunk of req) { /* Drain the synthetic request body. */ }
           const url = new URL(req.url, "http://loopback.invalid");
           const step = url.pathname.endsWith("/admissions/self") ? "receipt"
-            : url.pathname.endsWith("/presence") ? "presence"
+            : url.pathname.endsWith("/presence") ? (requests.some((request) => request.step === "presence") ? "heartbeat" : "presence")
               : url.pathname.endsWith("/events/before") ? "prime"
                 : url.pathname.endsWith("/read-cursor") ? "read-cursor"
                   : req.method === "POST" && url.pathname.endsWith("/events") ? "hello" : "poll";
@@ -112,7 +112,8 @@ for (const stalled of ["poll", "read-cursor"]) {
         assert.deepEqual(await within(handle.ready, 3000), { joined: true }, "the listener is joined before cancellation");
         assert.notEqual(await within(arrived.promise), "deadline", "the active request reaches the real HTTP server");
         const atAbort = { requests: requests.length, events: events.length, cursorWrites: cursorWrites.length };
-        controller.abort();
+        if (stalled === "heartbeat" && phase === "body") handle.stop();
+        else controller.abort();
         const stopped = await within(Promise.all([terminal, disconnected.promise]));
         assert.notEqual(stopped, "deadline", "active cancellation must finish before the HTTP timeout");
         assert.equal(stopped[1], true, "the stalled socket closes before a response completes");
@@ -120,12 +121,19 @@ for (const stalled of ["poll", "read-cursor"]) {
         assert.deepEqual({ requests: requests.length, events: events.length, cursorWrites: cursorWrites.length }, atAbort,
           "cancellation cannot start another request, event callback or cursor write");
         assert.deepEqual(notices, [], "operator cancellation is not a room failure");
-        assert.equal(lifecycle.filter((state) => state.type === "heartbeat").length, 0, "no heartbeat follows the aborted active read");
+        assert.equal(lifecycle.filter((state) => state.type === "heartbeat").length, stalled === "heartbeat" ? 1 : 0,
+          "only the heartbeat already in flight may have started before cancellation");
         assert.equal(lifecycle.at(-1)?.type, "stopped");
         assert.equal(lifecycle.at(-1)?.consecutivePollFailures, 0);
-        assert.equal(lifecycle.at(-1)?.readCursorUpdates, 0, "an aborted cursor response is not a successful update");
+        assert.equal(lifecycle.at(-1)?.readCursorUpdates, stalled === "heartbeat" ? 1 : 0,
+          "only the cursor response completed before cancellation is acknowledged");
         assert.equal(lifecycle.at(-1)?.readCursorReason, "", "operator cancellation adds no cursor failure state");
         assert.equal(requests.filter((request) => request.step === "hello").length, 1);
+        if (stalled === "heartbeat") {
+          assert.deepEqual(requests.map((request) => request.step),
+            ["receipt", "presence", "prime", "hello", "poll", "read-cursor", "heartbeat"],
+            "the stalled presence is the active heartbeat after startup and a completed read");
+        }
         assert.ok(requests.every((request) => request.admissionBound), "all real room traffic keeps its room admission");
         assert.deepEqual(serverErrors, []);
       } finally {
