@@ -1,6 +1,7 @@
 // Display metadata only. The files command resolves pointers when asked to fetch.
 import { containsSecret } from "./redact.js";
 import { sessionMessageRoutingEvent } from "./message-edits.js";
+import { quoteImageDescription, sanitizeImageDescriptions } from "./image-descriptions.js";
 
 const MAX_VISIBLE_ATTACHMENTS = 5;
 
@@ -35,7 +36,7 @@ function fileSize(value) {
   return `${size.toFixed(size < 10 ? 1 : 0)} ${units[unit]}`;
 }
 
-export function formatAttachmentSummary(event = {}) {
+export function formatAttachmentSummary(event = {}, { includeImageDescriptions = true } = {}) {
   const session = event?.sessionId || event?.session_id;
   event = sessionMessageRoutingEvent(event);
   const payload = event?.payload || {};
@@ -59,7 +60,8 @@ export function formatAttachmentSummary(event = {}) {
     const fetch = attachmentId.length >= 8
       ? `sl session files get ${sessionId} ${attachmentId}`
       : `sl session files ${sessionId}`;
-    return `${marker} (fetch: ${fetch})`;
+    const description = includeImageDescriptions ? quoteImageDescription(item) : "";
+    return `${marker} (fetch: ${fetch})${description}`;
   });
   if (attachments.length > MAX_VISIBLE_ATTACHMENTS) {
     summaries.push(`+${attachments.length - MAX_VISIBLE_ATTACHMENTS} more`);
@@ -72,6 +74,7 @@ export function appendAttachmentSummary(text, event) {
 }
 
 export function withAttachmentSummary(event) {
+  event = sanitizeImageDescriptions(event);
   const attachmentSummary = formatAttachmentSummary(event);
   return attachmentSummary ? { ...event, attachmentSummary } : event;
 }

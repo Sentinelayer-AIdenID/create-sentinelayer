@@ -294,7 +294,10 @@ test("Frozen eval evidence binds the complete synthetic comparison and canonical
   assert.equal(evalEvidence.sourceBinding.privacyCorrectionBaseRevision, "22b8553073bb72cfccd71fb1c06217c3e6844ff4");
   assert.deepEqual(evalEvidence.cases.map((c) => c.id), ["off-compatibility", "on-schema-valid-disagreement", "positive-cap-skip", "provider-outage", "malformed-response", "insufficient-evidence", "secret-like-content"]);
   const sourceHashes = { ...evalEvidence.sourceBinding.sourceSha256, [evalEvidence.sourceBinding.testPath]: evalEvidence.sourceBinding.testSha256 };
-  assert.equal(Object.keys(sourceHashes).length, 8);
+  assert.equal(Object.keys(sourceHashes).length, 10);
+  for (const dependency of ["src/session/secret-filter.js", "src/session/image-descriptions.js"]) {
+    assert.ok(Object.hasOwn(sourceHashes, dependency), `redaction dependency remains bound: ${dependency}`);
+  }
   for (const [file, expected] of Object.entries(sourceHashes)) {
     const canonical = (await fsp.readFile(new URL(`../${file}`, import.meta.url), "utf8")).replace(/\r\n/g, "\n");
     assert.equal(createHash("sha256").update(canonical).digest("hex"), expected, `canonical source binding: ${file}`);

@@ -11,6 +11,7 @@ import { isSessionControlEvent } from "./control-events.js";
 import { createSessionMutationHeaders, throwIfPendingSessionInvitation } from "./invitations.js";
 import { messageRevision } from "./message-edits.js";
 import { appendAttachmentSummary } from "./attachment-summary.js";
+import { sanitizeImageDescriptions } from "./image-descriptions.js";
 import { readAdmissionCredentialState } from "./admission.js";
 import { installTestEgressGuard } from "../net/test-egress-guard.js";
 import { isUrlPathSegment, urlPathSegment } from "../net/url-path.js";
@@ -1681,9 +1682,9 @@ export async function pollSessionEvents(
       if (!item || typeof item !== "object") continue;
       const cursor = normalizeString(item.cursor);
       if (cursor) lastCursor = cursor;
-      // Pass through verbatim — the API already returns the NDJSON
-      // envelope shape that appendToStream expects.
-      acceptedEvents.push(item);
+      // Keep the NDJSON envelope; newly readable OCR uses the same secret filter
+      // even when a consumer prints the response without writing a stream first.
+      acceptedEvents.push(sanitizeImageDescriptions(item));
     }
     const responseCursor =
       normalizeString(payload?.nextCursor || payload?.next_cursor || payload?.cursor) ||
@@ -2425,7 +2426,7 @@ export async function streamSessionEvents(
       const eventCursor = normalizeString(event?.cursor);
       if (eventCursor) cursor = eventCursor;
       eventCount += 1;
-      await onEvent(event);
+      await onEvent(sanitizeImageDescriptions(event));
     },
   };
 
@@ -2603,7 +2604,8 @@ export async function pollSessionEventsBefore(
     }
     recordCircuitSuccess(inboundCircuit);
 
-    const events = chronologicalSessionEvents(payload?.events || []);
+    const safeEvents = sanitizeImageDescriptions(payload?.events || []);
+    const events = chronologicalSessionEvents(safeEvents);
     const lastEvent = events[events.length - 1] || null;
     return {
       ok: true,
@@ -2613,7 +2615,7 @@ export async function pollSessionEventsBefore(
       beforeSequence: nextBeforeSequenceFromPayload(payload, payload?.events || []),
       hasMore: typeof payload?.has_more === "boolean" ? payload.has_more : null,
       partial: typeof payload?.partial === "boolean" ? payload.partial : null,
-      rawEvents: payload?.events,
+      rawEvents: payload?.events == null ? payload?.events : safeEvents,
       rawNextBeforeSequence: payload?.next_before_sequence ?? null,
     };
   } catch (error) {
@@ -2716,7 +2718,7 @@ export async function listSessionMessageActions(
       };
     }
     recordCircuitSuccess(inboundCircuit);
-    const actions = Array.isArray(payload?.actions) ? payload.actions : [];
+    const actions = Array.isArray(payload?.actions) ? sanitizeImageDescriptions(payload.actions) : [];
     return {
       ok: true,
       reason: "",
@@ -2724,7 +2726,7 @@ export async function listSessionMessageActions(
       actions,
       count: Number(payload?.count ?? actions.length) || actions.length,
       projection: payload?.projection && typeof payload.projection === "object"
-        ? payload.projection
+        ? sanitizeImageDescriptions(payload.projection)
         : null,
     };
   } catch (error) {
