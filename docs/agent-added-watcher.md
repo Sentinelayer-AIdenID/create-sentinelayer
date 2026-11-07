@@ -84,15 +84,16 @@ the mutation driver also ran its test processes serially.
 | Check | Recorded result |
 | --- | --- |
 | Focused watcher, admission, admission-auth, HTTP and credential-census tests | 120 passed; no failures or skips |
+| Review follow-up: watcher, admission, HTTP and session sync tests | 153 passed; no failures or skips |
 | `npm run check` | Passed; 442 files checked |
 | `npm run docs:build` | Passed |
 | End-to-end tests | 148 passed; no failures or skips |
 | Full unit coverage command | 4,032 passed, 2 failed, 7 skipped; exit 1 |
-| Actual mutation proof | Nine named baseline tests passed; nine mutants killed by behavioral assertions; zero invalid failures or cancellations |
-| Mutation restoration | All four changed source files restored byte for byte, with matching SHA-256 hashes |
+| Final actual mutation proof | Ten named baseline tests passed; twelve mutants killed by behavioral assertions; zero invalid failures or cancellations |
+| Mutation restoration | All five changed source files restored byte for byte, with matching SHA-256 hashes |
 | `npm pack --dry-run --json` | Passed; `sentinelayer-cli@0.48.0`, 449 package entries |
 | Local `/omargate deep` and `/audit` | Both exited 1 before scanning: CLI authentication was required |
-| Redacted Gitleaks scan of all 15 complete intended files | One reviewed finding: an unchanged public-key thumbprint in the existing cross-language fixture; no added credential |
+| Initial redacted Gitleaks scan of all 15 complete intended files | One reviewed finding: an unchanged public-key thumbprint in the existing cross-language fixture; no added credential |
 | Redacted Gitleaks scan of the staged diff | Passed; no findings |
 
 Local verification is **not fully green**. The coverage failures were
@@ -110,6 +111,16 @@ public fixture key in `tests/unit.session-admission.test.mjs`, not a private key
 or bearer credential. That fixture is identical to the base commit and remains
 unchanged; no scanner rule or ignore entry was added.
 
+The review follow-up fixes cancellation through the receipt, initial history
+read and hello transports. A real loopback server stalls each of those requests
+and the presence request in turn. Stopping the worker must close the socket and
+settle startup before the HTTP timeout, without a retry or any later startup
+request. Three additional actual mutants remove the receipt, cursor or hello
+transport signal and each fails that same wire-level assertion. Cancelled writes
+and cursor reads do not count as remote failures in the shared circuit breaker.
+The 153-test follow-up includes `tests/unit.session-sync.test.mjs`; these counts
+overlap the initial checks and are not additive.
+
 The focused regression command is:
 
 ```sh
@@ -124,7 +135,8 @@ node --import ./tests/setup-env.mjs --test --test-concurrency=1 \
 The reproducible mutation driver checks wrong-agent feed acceptance, an owner
 account change, exhausted pending capacity, missing stored admission, cached
 admission account checks, pending preapproval refresh, the pre-hello cursor,
-cancellation after approval, and an already-cancelled HTTP request:
+cancellation after approval, an already-cancelled HTTP request, and cancellation
+of each receipt/cursor/hello HTTP transport:
 
 ```sh
 node scripts/check-agent-added-mutants.mjs --evidence-dir /tmp/sl-agent-added-mutants

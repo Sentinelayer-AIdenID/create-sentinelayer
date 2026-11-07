@@ -43,7 +43,7 @@ export function startAddedRoomListener({
       });
       if (joined?.status !== "active" || controller.signal.aborted) return resolveReady({ joined: false });
       await _withAdmission(sessionId, agentId, async () => {
-        const receipt = await _receipt(sessionId, { targetPath });
+        const receipt = await _receipt(sessionId, { targetPath, signal: controller.signal });
         if (receipt?.agentId !== agentId) throw new Error("Admission receipt names another agent.");
         if (controller.signal.aborted) return resolveReady({ joined: false });
         const presence = await _presence(sessionId, { targetPath, agentId, model, provider,
@@ -52,12 +52,12 @@ export function startAddedRoomListener({
         if (controller.signal.aborted) return resolveReady({ joined: false });
         // Prime before the hello. A person replying while the listener starts
         // must remain after this cursor and arrive on its first read.
-        const latest = await _latest(sessionId, { targetPath, limit: 1 });
+        const latest = await _latest(sessionId, { targetPath, limit: 1, signal: controller.signal });
         if (!latest?.ok) throw new Error("The room did not accept the initial read.");
         if (controller.signal.aborted) return resolveReady({ joined: false });
         const hello = createAgentEvent({ event: "session_message", agentId, agentModel: model, sessionId,
           idempotencyToken: `agent-added:${notificationId}:${agentId}`, payload: { message: ADDED_ROOM_HELLO } });
-        const posted = await _post(sessionId, hello, { targetPath, noAutoGrant: true });
+        const posted = await _post(sessionId, hello, { targetPath, noAutoGrant: true, signal: controller.signal });
         if (!posted?.synced) throw new Error("The room did not accept the hello.");
         resolveReady({ joined: true });
         if (controller.signal.aborted) return;

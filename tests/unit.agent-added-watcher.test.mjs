@@ -315,6 +315,75 @@ test("the generated MCP bridge blocks the owner watcher before executing it", as
   assert.match(String(response.reason), /sensitive|blocked/);
 });
 
+test("cancellation closes each stalled startup HTTP request without starting the next step", async () => {
+  const steps = ["receipt", "presence", "cursor", "hello"];
+  const within = async (promise) => {
+    let timer;
+    try {
+      return await Promise.race([promise, new Promise((resolve) => { timer = setTimeout(() => resolve("deadline"), 1500); })]);
+    } finally { clearTimeout(timer); }
+  };
+  for (const stalled of steps) {
+    const sid = randomUUID(), requests = [];
+    let reached, closed, listens = 0;
+    const arrived = new Promise((resolve) => { reached = resolve; });
+    const disconnected = new Promise((resolve) => { closed = resolve; });
+    const controller = new AbortController();
+    const server = createServer(async (req, res) => {
+      for await (const _chunk of req) { /* Drain the synthetic request body. */ }
+      const step = req.url.includes("/admissions/self") ? "receipt"
+        : req.url.endsWith("/presence") ? "presence"
+          : req.url.includes("/events/before") ? "cursor" : "hello";
+      requests.push(step);
+      if (step === stalled) {
+        res.once("close", () => closed(!res.writableEnded));
+        reached();
+        return; // A live server that never returns headers; cancellation must close it.
+      }
+      const body = step === "receipt" ? { agentId: AGENT }
+        : step === "cursor" ? { events: [], has_more: false } : { ok: true, recorded: true };
+      res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify(body));
+    });
+    server.listen(0, "127.0.0.1"); await once(server, "listening");
+    const apiUrl = `http://127.0.0.1:${server.address().port}`;
+    const workspace = await fsp.mkdtemp(path.join(os.tmpdir(), "sl-added-cancel-"));
+    const names = ["SENTINELAYER_TOKEN", "SENTINELAYER_API_URL", "SENTINELAYER_SKIP_REMOTE_SYNC"];
+    const prior = names.map((name) => process.env[name]);
+    process.env.SENTINELAYER_TOKEN = OWNER_TOKEN;
+    process.env.SENTINELAYER_API_URL = apiUrl;
+    process.env.SENTINELAYER_SKIP_REMOTE_SYNC = "0";
+    let handle, terminal;
+    try {
+      const auth = await account(apiUrl);
+      const owner = await ownerWatcherAuth(AGENT, { resolveAuth: async () => auth });
+      handle = startAddedRoomListener({ sessionId: sid, notificationId: `cancel-${stalled}`, agentId: AGENT,
+        ownerBinding: owner.binding, targetPath: workspace, signal: controller.signal,
+        _ownerAuth: async () => owner,
+        _join: async () => { await storeAdmission(sid, apiUrl); return { status: "active" }; },
+        _listen: async () => { listens++; },
+      });
+      terminal = Promise.allSettled([handle.ready, handle.done]);
+      assert.notEqual(await within(arrived), "deadline", `${stalled} reached the actual HTTP server`);
+      controller.abort();
+      const stopped = await within(Promise.all([terminal, disconnected]));
+      assert.notEqual(stopped, "deadline", `${stalled} cancellation must terminate before the HTTP timeout`);
+      assert.equal(stopped[1], true, `${stalled} socket closed before a response`);
+      assert.notEqual(stopped[0][0].value?.joined, true);
+      assert.deepEqual(requests, steps.slice(0, steps.indexOf(stalled) + 1), "no retry or later startup request");
+      assert.equal(listens, 0);
+    } finally {
+      controller.abort(); handle?.stop();
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+      if (terminal) await terminal;
+      for (let i = 0; i < names.length; i++) {
+        if (prior[i] === undefined) delete process.env[names[i]]; else process.env[names[i]] = prior[i];
+      }
+      await fsp.rm(workspace, { recursive: true, force: true });
+    }
+  }
+});
+
 test("owner watcher dispatch rejects duplicate identity and workspace options", async () => {
   for (const args of [
     ["--agent", AGENT, "--agent=outsider"],

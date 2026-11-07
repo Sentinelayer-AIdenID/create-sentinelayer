@@ -90,6 +90,29 @@ const mutants = [
     testFile: httpTests,
     test: "an already cancelled request makes zero transport calls",
   },
+  {
+    name: "omit_receipt_transport_cancellation",
+    file: "src/session/admission.js",
+    edits: [edit("credential: await credentialFor(auth),\n    signal,",
+      "credential: await credentialFor(auth),\n    signal: undefined,")],
+    testFile: watcherTests,
+    test: "cancellation closes each stalled startup HTTP request without starting the next step",
+  },
+  {
+    name: "omit_initial_cursor_transport_cancellation",
+    file: "src/session/sync.js",
+    edits: [edit('method: "GET",\n        credential: await credentialFor(session),\n        signal,',
+      'method: "GET",\n        credential: await credentialFor(session),\n        signal: undefined,')],
+    testFile: watcherTests,
+    test: "cancellation closes each stalled startup HTTP request without starting the next step",
+  },
+  {
+    name: "omit_hello_transport_cancellation",
+    file: "src/session/sync.js",
+    edits: [edit("body: requestBody,\n    signal,", "body: requestBody,\n    signal: undefined,")],
+    testFile: watcherTests,
+    test: "cancellation closes each stalled startup HTTP request without starting the next step",
+  },
 ];
 
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");

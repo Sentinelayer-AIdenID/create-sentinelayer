@@ -941,8 +941,9 @@ function redacted({ status, reused, stored, claimed, sid, agent, homeDir }) {
  */
 export async function fetchOwnAdmissionReceipt(
   sessionId,
-  { targetPath = process.cwd(), resolveAuthSession = resolveActiveAuthSession, requestRead = requestJson } = {}
+  { targetPath = process.cwd(), resolveAuthSession = resolveActiveAuthSession, requestRead = requestJson, signal } = {}
 ) {
+  signal?.throwIfAborted();
   const sid = normalizeString(sessionId);
   const auth = await resolveAuthSession({ cwd: targetPath, env: process.env, autoRotate: false });
   if (!isAuthenticated(auth) || auth.source !== "session_admission") {
@@ -952,6 +953,7 @@ export async function fetchOwnAdmissionReceipt(
   return checkedTransport(requestRead)(admissionUrl(apiUrl, sid, "/self"), {
     method: "GET",
     credential: await credentialFor(auth),
+    signal,
   });
 }
 
