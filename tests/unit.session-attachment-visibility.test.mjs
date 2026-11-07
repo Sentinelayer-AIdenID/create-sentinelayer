@@ -75,6 +75,7 @@ for (const command of ["read", "status", "history"]) {
   test(`Attachment visibility: CLI ${command} preserves file metadata and fetch hints`, async () => {
     await withSession(async (sessionId, targetPath) => {
       const args = command === "history" ? [command] : [command, sessionId];
+      if (command === "status") args.push("--offline");
       const output = await cli([...args, "--path", targetPath]);
       assertVisible(output, sessionId);
       if (command === "read") {

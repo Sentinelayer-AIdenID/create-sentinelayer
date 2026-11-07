@@ -7885,6 +7885,12 @@ test("CLI session commands: start/list/join/say/read/status/kill/leave flow with
       if (req.method === "GET" && url.pathname === "/api/v1/sessions/agent-grants" && url.search === "?limit=100") {
         return jsonResponse(res, 200, { grants, nextAfter: null });
       }
+      if (req.method === "GET" && url.pathname === "/api/v1/sessions") {
+        return jsonResponse(res, 200, { sessions: [{ sessionId: activeRoom, title: "Current room", status: "active" }] });
+      }
+      if (req.method === "GET" && activeRoom && url.pathname === `/api/v1/sessions/${activeRoom}`) {
+        return jsonResponse(res, 200, { sessionId: activeRoom, title: "Current room", status: "active" });
+      }
       if (req.method === "PUT" && activeRoom && url.pathname === `/api/v1/sessions/${activeRoom}/presence`) {
         const body = await readJsonBody(req);
         if (!grants.some((grant) => grant.agentId === body.agentId) || body.state !== "idle" || body.clientKind !== "cli") {

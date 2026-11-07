@@ -33,10 +33,12 @@ const AUTH_BYPASS_COMMANDS = new Set([
   "-v",
 ]);
 
-// Commands that work without auth (local only, no API calls)
+// Configuration inspection is local and does not require authentication.
 const NO_AUTH_REQUIRED = new Set([
   "config",    // local config inspection
 ]);
+// These commands permit explicit offline reads without the front-door login
+// gate. Their online paths still require credentials at the API transport.
 const SESSION_NO_AUTH_SUBCOMMANDS = new Set([
   "read",
   "list",
