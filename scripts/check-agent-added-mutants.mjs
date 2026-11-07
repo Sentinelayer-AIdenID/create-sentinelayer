@@ -34,6 +34,22 @@ const mutants = [
     test: "account change stops the watcher and every active room before another feed read",
   },
   {
+    name: "advance_cursor_before_validating_notification_page",
+    file: "src/session/agent-added-watcher.js",
+    edits: [edit("          const additions = page.notifications.map((item) => checkedAddition(item, agentId, _now()));",
+      "          cursor = page.nextCursor;\n          const additions = page.notifications.map((item) => checkedAddition(item, agentId, _now()));")],
+    testFile: watcherTests,
+    test: "five invalid notification pages stop the watcher while retaining its cursor and closing active rooms",
+  },
+  {
+    name: "fall_back_to_owner_after_admission_expiry",
+    file: "src/auth/admission-scope.js",
+    edits: [edit("if (!(credential.expiresAt * 1000 > Date.now())) return null;",
+      "if (!(credential.expiresAt * 1000 > Date.now())) return undefined;")],
+    testFile: watcherTests,
+    test: "a running added-room listener stops at admission expiry without falling back to the owner account",
+  },
+  {
     name: "retain_exhausted_pending_additions",
     file: "src/session/agent-added-watcher.js",
     edits: [

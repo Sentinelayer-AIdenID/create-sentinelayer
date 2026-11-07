@@ -337,7 +337,7 @@ function isApiHostAllowed(urlString) {
   }
 }
 
-function resolveApiBaseUrl(session = {}) {
+export function resolveApiBaseUrl(session = {}) {
   const apiUrl = normalizeString(session.apiUrl) || DEFAULT_API_BASE_URL;
   const normalized = apiUrl.replace(/\/+$/, "");
   if (!isApiHostAllowed(normalized) && session.source === "session_admission") {
@@ -3498,6 +3498,7 @@ export async function listSessionsFromApi({
   const normalizedMaxPages = Math.max(1, Math.min(100, normalizePositiveInteger(maxPages, 50)));
   let nextCursor = normalizeString(cursor) || null;
   let hasMore = false;
+  let complete = false;
   const sessions = [];
   const seenSessionIds = new Set();
   let count = 0;
@@ -3546,7 +3547,19 @@ export async function listSessionsFromApi({
         warnings: [],
       };
     }
-    const pageSessions = Array.isArray(payload?.sessions) ? payload.sessions : [];
+    if (!Array.isArray(payload?.sessions)) {
+      return {
+        ok: false,
+        reason: "invalid_session_list_response",
+        sessions: [],
+        count: 0,
+        nextCursor: null,
+        hasMore: false,
+        truncated: false,
+        warnings: [],
+      };
+    }
+    const pageSessions = payload.sessions;
     for (const item of pageSessions) {
       const sessionId = normalizeString(item?.sessionId || item?.id);
       if (sessionId && seenSessionIds.has(sessionId)) continue;
@@ -3555,16 +3568,27 @@ export async function listSessionsFromApi({
     }
     count = sessions.length;
     nextCursor = normalizeString(payload?.next_cursor || payload?.nextCursor);
-    hasMore = Boolean(payload?.has_more && nextCursor);
-    if (!fetchAll || !hasMore) break;
+    const moreFields = ["has_more", "hasMore"].filter((field) => Object.hasOwn(payload, field));
+    const hasPagination = moreFields.length > 0
+      || Object.hasOwn(payload, "next_cursor") || Object.hasOwn(payload, "nextCursor");
+    hasMore = moreFields.some((field) => payload[field] === true) || Boolean(nextCursor);
+    // A resumed, limited, or ambiguous page cannot authorize cache pruning.
+    // Older APIs omit pagination fields; only a short page proves their end.
+    complete = !cursor && !hasMore && (
+      (moreFields.length > 0 && moreFields.every((field) => payload[field] === false))
+      || (!hasPagination && pageSessions.length < normalizedLimit)
+    );
+    if (!fetchAll || !hasMore || !nextCursor) break;
   }
 
-  const truncated = Boolean(fetchAll && hasMore && nextCursor);
+  const truncated = Boolean(fetchAll && hasMore);
   const warnings = truncated
     ? [
         {
-          code: "SESSION_LIST_MAX_PAGES_REACHED",
-          message: `Session list stopped after ${normalizedMaxPages} pages; output is partial and nextCursor can resume the listing.`,
+          code: nextCursor ? "SESSION_LIST_MAX_PAGES_REACHED" : "SESSION_LIST_CURSOR_MISSING",
+          message: nextCursor
+            ? `Session list stopped after ${normalizedMaxPages} pages; output is partial and nextCursor can resume the listing.`
+            : "Session list reports more results without a cursor; output is partial and the cache was not pruned.",
           maxPages: normalizedMaxPages,
           nextCursor,
         },
@@ -3579,6 +3603,7 @@ export async function listSessionsFromApi({
     nextCursor: nextCursor || null,
     hasMore,
     truncated,
+    complete,
     warnings,
   };
 }

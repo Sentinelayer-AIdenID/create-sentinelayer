@@ -43,6 +43,16 @@ a stable notification/agent idempotency token; server message deduplication
 also keeps repeated delivery from creating another identical hello in a room.
 Only read/post actions are requested and automatic grants remain disabled.
 
+The admission request uses the normal **two-hour lifetime**. The server can
+shorten it to the room or identity expiry. Neither the watcher nor presence
+renewal extends that approval. When the admission expires, the listener stops
+before another room request and cannot use the owner's account credential.
+The already consumed notification does not automatically start another join.
+Continuing in the room requires a fresh authorized admission and own-key claim;
+the original single-use preapproval cannot approve it again. Restarting the
+watcher or replaying the old notice does not renew the expired grant or bypass
+that decision.
+
 ## Bounds and shutdown
 
 The watcher accepts up to 100 simultaneous rooms by default (`--max-rooms`,
@@ -50,6 +60,12 @@ The watcher accepts up to 100 simultaneous rooms by default (`--max-rooms`,
 at most five room workers per poll. Pending joins get at most five attempts with
 bounded backoff before a `join_failed` notice; failed entries release queue
 capacity. Expired additions are dropped at their 24-hour server lifetime.
+
+If any notice in a page is invalid or names another agent, the watcher rejects
+the entire page and retains its previous cursor. It reports `feed_unavailable`
+and stops after five consecutive failed polls, closing its active listeners.
+It does not skip the invalid notice or advance past unvalidated additions. The
+owner must address the feed problem before restarting.
 
 The cursor is in memory. Restarting re-reads the server's bounded 24-hour window;
 room admission and message idempotence make that safe. `--max-polls` provides a
@@ -89,8 +105,8 @@ the mutation driver also ran its test processes serially.
 | `npm run docs:build` | Passed |
 | End-to-end tests | 148 passed; no failures or skips |
 | Full unit coverage command | 4,032 passed, 2 failed, 7 skipped; exit 1 |
-| Final actual mutation proof | Ten named baseline tests passed; twelve mutants killed by behavioral assertions; zero invalid failures or cancellations |
-| Mutation restoration | All five changed source files restored byte for byte, with matching SHA-256 hashes |
+| Cancellation review actual mutation proof | Ten named baseline tests passed; twelve mutants killed by behavioral assertions; zero invalid failures or cancellations |
+| Cancellation review mutation restoration | All five changed source files restored byte for byte, with matching SHA-256 hashes |
 | `npm pack --dry-run --json` | Passed; `sentinelayer-cli@0.48.0`, 449 package entries |
 | Local `/omargate deep` and `/audit` | Both exited 1 before scanning: CLI authentication was required |
 | Initial redacted Gitleaks scan of all 15 complete intended files | One reviewed finding: an unchanged public-key thumbprint in the existing cross-language fixture; no added credential |
@@ -121,6 +137,47 @@ and cursor reads do not count as remote failures in the shared circuit breaker.
 The 153-test follow-up includes `tests/unit.session-sync.test.mjs`; these counts
 overlap the initial checks and are not additive.
 
+### Admission expiry and current-main follow-up
+
+The later follow-up integrates main
+`7c94b4e301cf9d5d5a5478fdae4887173638fa6f` (room titles and metadata cache).
+Those thirteen incoming paths retain main's behavior. The watcher follow-up
+adds help, documentation, two behavioral tests, and two mutation cases; it does
+not change the admission lifetime, approval rules, or runtime expiry behavior.
+
+The new long-listener test uses the real listener, admission scope, auth
+resolution and HTTP transport against a loopback server. After a message arrives
+with a live admission, a fake clock crosses its normal two-hour expiry. The
+listener refuses before another room HTTP request, reports the refusal, stops,
+and does not request or claim another admission. Changing the expired scope to
+allow account fallback produces a real captured owner-token request and fails
+the credential-boundary assertion. The fixture restores its clock, environment,
+stored credential, temporary workspace, worker and server connections.
+
+The notification test starts an active room, then receives five pages containing
+an invalid notice beside a valid one. All five reads keep the last accepted
+cursor, none starts the later room, and the fifth failure closes the active
+listener. Its mutation moves the cursor update before page validation and fails
+the exact retained-cursor assertion.
+
+| Follow-up check | Recorded result |
+| --- | --- |
+| Watcher, admission, admission-auth, HTTP, credential-census, sync, metadata-cache, remote-list and attachment-visibility suites | 236 passed in nine fresh, serial Node processes; no failures or skips |
+| Actual mutation proof | Twelve named baseline tests passed; fourteen mutants killed by behavioral assertions; zero invalid failures or cancellations |
+| Mutation restoration | All six source files restored byte for byte, with matching SHA-256 hashes |
+| Syntax checks, rendered command help, and whitespace checks | Passed |
+| Redacted Gitleaks scans of the complete seventeen staged files and the staged diff | Passed; no findings |
+| Combined shared-process attempt | 178 passed and 58 failed after later files inherited fixture state; this invocation disabled the repository runner's normal file isolation |
+
+The failed combined attempt is retained in the evidence. It was not reproduced
+on pristine main and is not claimed as a baseline failure. The applicable
+follow-up result runs each of the nine files in a fresh process, matching the
+file isolation used by the repository's `test:unit` script. The inherited
+four-reader metadata-cache subprocess test was not rerun locally, to preserve
+the two-test-process limit; its unchanged main test remains in hosted CI. These
+follow-up counts overlap earlier checks and do not replace the disclosed full
+coverage and local-authentication limitations above.
+
 The focused regression command is:
 
 ```sh
@@ -133,7 +190,8 @@ node --import ./tests/setup-env.mjs --test --test-concurrency=1 \
 ```
 
 The reproducible mutation driver checks wrong-agent feed acceptance, an owner
-account change, exhausted pending capacity, missing stored admission, cached
+account change, page validation before cursor advancement, no account fallback
+at live-listener expiry, exhausted pending capacity, missing stored admission, cached
 admission account checks, pending preapproval refresh, the pre-hello cursor,
 cancellation after approval, an already-cancelled HTTP request, and cancellation
 of each receipt/cursor/hello HTTP transport:

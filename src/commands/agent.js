@@ -7,6 +7,7 @@ export function registerAgentCommand(program) {
   const agent = program.command("agent").description("Owner controls for your agents");
   agent.command("watch-added")
     .description("Watch additions using your account credential; start this yourself. Each chat listener uses its own admission.")
+    .addHelpText("after", "\nRoom admissions normally last two hours and may end earlier. They are not renewed automatically; after expiry, a fresh authorized admission and own-key claim are required. An invalid notification page keeps its cursor; five failed polls stop the watcher.\n")
     .requiredOption("--agent <id>", "Exact granted agent id (lowercase)")
     .option("--model <model>", "The agent's model for its admission request", "cli")
     .option("--provider <provider>", "The agent's provider for its admission request", "unknown")

@@ -58,6 +58,44 @@ Use `sl session --help` to discover commands and append `--help` to a
 subcommand for its current flags. On Windows PowerShell, use `sl.cmd` when
 `sl` resolves to `Set-Location`.
 
+`sl session list` and `sl session status <session-id>` read room titles from the
+API on every call and refresh their metadata cache. Use `--offline` to read the
+cache explicitly; remote failures return a nonzero exit status and never silently
+substitute cached titles. `session list --remote` remains a compatibility alias
+for the default. Status still includes local agent, task, and transcript activity;
+offline status marks listener presence and file-lease authority as unavailable.
+
+Cached server rooms are scoped to the signed-in account, API, and workspace.
+Their private files live in the user configuration directory
+(`~/.sentinelayer/session-metadata-cache`), outside the repository, with mode
+`0600` where supported. These read commands do not rotate stored tokens.
+Environment or configuration tokens do not provide a stable account ID, so their reads refresh
+titles only for rooms already in the workspace; the `cache` field in JSON output
+reports any skipped rooms. Sign in with `sl auth login` and remove token overrides
+to cache server-only rooms under that stored account.
+Remote reads keep local pending renames and runtime metadata intact.
+Offline output uses the cached server room status and expiry when supplied, while
+the workspace's own TTL and lifecycle record remain unchanged on disk.
+Text output from offline list and status is marked `(cached)`. A complete API
+listing prunes previously cached rooms that are no longer returned; a limited,
+failed, or incomplete listing never prunes absent rooms. Explicit archived
+status immediately hides a room from the active offline list. Local-only rooms
+that have never been cached from the server remain available offline.
+
+Cache refresh is best effort: a successful API read still prints its server
+result and exits successfully if the cache cannot be written. The CLI warns on
+stderr, and JSON output reports `cache.ok: false` with sanitized failure codes;
+the top-level `ok` continues to describe the server read. Offline results may
+remain stale until a later refresh succeeds.
+Concurrent refreshes serialize publication and pruning within that cache scope;
+an older response cannot overwrite a newer one. If request timestamps tie within
+one millisecond, the committed publication wins. Waiting for the cache lock is
+limited to 1.5 seconds and does not change server-read success. Locks are never
+stolen by age. If a process crashes while holding `.refresh.lock`, verify that
+its recorded process has stopped before removing only that lock file. Older
+repository-local title sidecars are not imported; the next successful online
+read fills the private cache.
+
 When the API reports `INVITATION_PENDING`, the CLI explains that an invitation
 is waiting. Run `sl session invitations list --json`, find the invitation for
 the room, then run `sl session invitations accept <invitationId>` with its

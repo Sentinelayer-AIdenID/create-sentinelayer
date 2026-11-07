@@ -117,6 +117,24 @@ test("malformed or another agent's addition never starts a worker or advances it
   assert.equal(checkedAddition(notification("old", "room", { createdAt: new Date(NOW - 86400001).toISOString() }), AGENT, NOW), null);
 });
 
+test("five invalid notification pages stop the watcher while retaining its cursor and closing active rooms", async () => {
+  const starts = [], cursors = [], notices = [];
+  const bad = notification("invalid", "room-2", { payload: { sessionId: "room-2", agentId: "another-agent" } });
+  await assert.rejects(watchAgentAdditions(await watchOptions({ maxPolls: null,
+    _readPage: async (_owner, _agent, cursor) => {
+      cursors.push(cursor);
+      return cursors.length === 1 ? page([notification()], "aa1.valid")
+        : page([notification("later", "room-3"), bad], `aa1.invalid${cursors.length}`);
+    },
+    _startListener: (options) => liveHandle(options, starts),
+    onNotice: async (notice) => notices.push(notice),
+  })), /notification feed is unavailable after five attempts/);
+  assert.deepEqual(cursors, [null, ...Array(5).fill("aa1.valid")]);
+  assert.equal(notices.filter((notice) => notice.type === "feed_unavailable").length, 5);
+  assert.deepEqual(starts.map((start) => start.options.sessionId), ["room-1"]);
+  assert.equal(starts[0].handle.stopped, true);
+});
+
 test("account change stops the watcher and every active room before another feed read", async () => {
   const first = await account(), second = await account(API, "different_fixture_account");
   let resolves = 0, reads = 0;
@@ -301,6 +319,84 @@ test("every real room request uses its admission and a reply arriving after hell
     }
     await new Promise((resolve) => server.close(resolve));
     await fsp.rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("a running added-room listener stops at admission expiry without falling back to the owner account", async (t) => {
+  const sid = randomUUID(), requests = [], notices = [], errors = [], delivered = [];
+  let now = Date.now(), joined = 0, clockAdvances = 0, requestsAtExpiry = 0, workerSignal;
+  const expiresAt = Math.floor(now / 1000) + 7200;
+  t.mock.method(Date, "now", () => now);
+  const liveMessage = createAgentEvent({ event: "session_message", agentId: "human-fixture", sessionId: sid,
+    agentModel: "fixture", sequenceId: 3, cursor: "before-expiry", payload: { message: `@${AGENT} Still here before expiry.` } });
+  const server = createServer(async (req, res) => {
+    for await (const _chunk of req) { /* Drain the synthetic request body. */ }
+    const bearer = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+    requests.push({ path: req.url, method: req.method, bearer, at: now });
+    // A fallback mutant receives a real refusal, so its failure is the wrong
+    // bearer assertion below, never a hanging server or runner timeout.
+    if (bearer !== ROOM_TOKEN) {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: { code: "AGENT_IDENTITY_REQUIRED" } }));
+      return;
+    }
+    let body = { ok: true, recorded: true };
+    if (req.url.includes("/admissions/self")) body = { agentId: AGENT };
+    else if (req.url.includes("/events/before")) body = { events: [], has_more: false };
+    else if (req.method === "POST" && req.url.endsWith("/events")) body = { ok: true, sequenceId: 2, cursor: "hello" };
+    else if (req.method === "GET" && req.url.includes("/events")) body = { events: [liveMessage], nextCursor: "before-expiry" };
+    res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify(body));
+  });
+  server.listen(0, "127.0.0.1"); await once(server, "listening");
+  const apiUrl = `http://127.0.0.1:${server.address().port}`;
+  const workspace = await fsp.mkdtemp(path.join(os.tmpdir(), "sl-added-expiry-"));
+  const names = ["SENTINELAYER_TOKEN", "SENTINELAYER_API_URL", "SENTINELAYER_SKIP_REMOTE_SYNC"];
+  const prior = names.map((name) => process.env[name]);
+  process.env.SENTINELAYER_TOKEN = OWNER_TOKEN;
+  process.env.SENTINELAYER_API_URL = apiUrl;
+  process.env.SENTINELAYER_SKIP_REMOTE_SYNC = "0";
+  let handle, credentialFile;
+  try {
+    const auth = await account(apiUrl);
+    const owner = await ownerWatcherAuth(AGENT, { resolveAuth: async () => auth });
+    handle = startAddedRoomListener({ sessionId: sid, notificationId: "expiry-notice", agentId: AGENT,
+      ownerBinding: owner.binding, targetPath: workspace, _ownerAuth: async () => owner,
+      _join: async () => { joined++; credentialFile = await storeAdmission(sid, apiUrl, { expiresAt }); return { status: "active" }; },
+      _listen: (options) => {
+        workerSignal = options.signal;
+        return listenSessionEvents({ ...options, maxPolls: 3,
+          onError: async (result) => { errors.push(result); await options.onError(result); },
+          _sleep: async (_milliseconds, { signal }) => {
+            if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+            clockAdvances++;
+            requestsAtExpiry = requests.length;
+            now = expiresAt * 1000 + 1;
+          },
+        });
+      },
+      onEvent: async (event) => delivered.push(event),
+      onNotice: async (notice) => notices.push(notice),
+    });
+    assert.deepEqual(await handle.ready, { joined: true });
+    await handle.done;
+    assert.ok(delivered.some((event) => event.payload?.message === liveMessage.payload.message));
+    assert.equal(clockAdvances, 1, "the real listener was running when its approved lifetime ended");
+    assert.equal(joined, 1, "expiry must not request or claim another admission automatically");
+    assert.deepEqual(requests.filter((request) => request.bearer !== ROOM_TOKEN), [], "expiry must never expose the configured owner token to a room route");
+    assert.equal(requests.length, requestsAtExpiry, "expired admission lookup must stop before another room transport");
+    assert.deepEqual(errors.map((error) => error.reason), ["not_authenticated"]);
+    assert.equal(notices.filter((notice) => notice.type === "room_read_unavailable").length, 1);
+    assert.equal(workerSignal.aborted, true);
+    assert.equal(requests.filter((request) => request.method === "POST" && request.path.endsWith("/events")).length, 1);
+  } finally {
+    handle?.stop(); if (handle?.done) await handle.done.catch(() => {});
+    for (let i = 0; i < names.length; i++) {
+      if (prior[i] === undefined) delete process.env[names[i]]; else process.env[names[i]] = prior[i];
+    }
+    server.closeAllConnections(); await new Promise((resolve) => server.close(resolve));
+    if (credentialFile) await fsp.rm(credentialFile, { force: true });
+    await fsp.rm(workspace, { recursive: true, force: true });
+    t.mock.restoreAll();
   }
 });
 
