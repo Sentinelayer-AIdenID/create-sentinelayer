@@ -466,3 +466,377 @@ test("(k) NS2: build-state read refuses a hashed dir whose sidecar names another
     await fsp.rm(root, { recursive: true, force: true });
   }
 });
+
+// Ticket 82e1b04d: namespace metadata is visible only after its complete write.
+test("NS marker publication: held first write preserves a concurrent winner's inode and bytes", async () => {
+  const root = await tmpRoot();
+  const ns = parseNamespace("project:namespace-publication");
+  const dir = namespaceDir(root, ns);
+  const final = path.join(dir, "namespace.json");
+  const store = createStore({ storeRoot: root });
+  const realOpen = fsp.open;
+  const realWriteFile = fsp.writeFile;
+  let signalWrite;
+  const writeStarted = new Promise((resolve) => { signalWrite = resolve; });
+  let releaseWrite;
+  const writeReleased = new Promise((resolve) => { releaseWrite = resolve; });
+  let held = false;
+  let first;
+  let second;
+  let winnerHandle;
+  let timer;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error("namespace marker barrier timed out")), 5_000);
+  });
+  const settle = (operation) => operation.then(
+    (value) => ({ status: "fulfilled", value }),
+    (reason) => ({ status: "rejected", reason }),
+  );
+  const hold = (handle) => {
+    held = true;
+    const write = handle.writeFile.bind(handle);
+    handle.writeFile = async (...args) => {
+      signalWrite();
+      await writeReleased;
+      return write(...args);
+    };
+    return handle;
+  };
+  fsp.open = async (file, flags, ...args) => {
+    const handle = await realOpen(file, flags, ...args);
+    if (!held && flags === "wx" && path.dirname(String(file)) === dir
+      && path.basename(String(file)).startsWith("namespace.json")) hold(handle);
+    return handle;
+  };
+  // The old initializer uses writeFile(path, {flag: "wx"}), whose internal
+  // open is not the exported fsp.open. Model its native open/write boundary
+  // with a real exclusive open; competing calls and verification stay native.
+  fsp.writeFile = async (file, data, options) => {
+    if (!held && String(file) === final && options?.flag === "wx") {
+      const handle = hold(await realOpen(file, "wx", options.mode));
+      try { return await handle.writeFile(data, options); }
+      finally { await handle.close(); }
+    }
+    return realWriteFile(file, data, options);
+  };
+  try {
+    first = settle(store.appendItems(ns, [{ id: "first", kind: "note", text: "first", ts: "2026-01-01T00:00:00Z" }]));
+    await Promise.race([writeStarted, deadline]);
+    second = settle(store.appendItems(ns, [{ id: "second", kind: "note", text: "second", ts: "2026-01-01T00:00:00Z" }]));
+    const result = await Promise.race([second, deadline]);
+    assert.equal(result.status, "fulfilled",
+      `a concurrent initializer read incomplete namespace metadata: ${result.reason?.message}`);
+
+    // Keep the winning inode alive so unlink-and-republish cannot hide behind
+    // inode reuse, even if the losing initializer publishes identical bytes.
+    winnerHandle = await realOpen(final, "r");
+    const winner = await winnerHandle.stat({ bigint: true });
+    const bytes = await fsp.readFile(final);
+    releaseWrite();
+    const results = await Promise.race([Promise.all([first, second]), deadline]);
+    assert.ok(results.every((entry) => entry.status === "fulfilled"));
+    assert.deepEqual(results.map((entry) => entry.value.written), [1, 1]);
+    const current = await fsp.stat(final, { bigint: true });
+    assert.deepEqual({ dev: current.dev, ino: current.ino }, { dev: winner.dev, ino: winner.ino },
+      "a valid concurrent winner's inode must never be replaced");
+    assert.deepEqual(await fsp.readFile(final), bytes, "the winner's bytes must remain unchanged");
+    assert.equal(bytes.toString(), JSON.stringify({ raw: ns.raw }, null, 2) + "\n");
+    assert.deepEqual((await store.readObservations(ns)).map((item) => item.text).sort(), ["first", "second"]);
+    assert.deepEqual((await fsp.readdir(dir)).filter((name) => name.startsWith("namespace.json.")), []);
+  } finally {
+    releaseWrite();
+    clearTimeout(timer);
+    try {
+      await Promise.allSettled([first, second].filter(Boolean));
+      await winnerHandle?.close();
+    } finally {
+      fsp.open = realOpen;
+      fsp.writeFile = realWriteFile;
+      await fsp.rm(root, { recursive: true, force: true });
+    }
+  }
+});
+
+async function withNamespaceMarker(fn) {
+  const root = await tmpRoot();
+  const ns = parseNamespace("project:marker-contract");
+  const dir = namespaceDir(root, ns);
+  try { return await fn({ root, ns, dir, final: path.join(dir, "namespace.json"), ensure: await getEnsureNamespace() }); }
+  finally { await fsp.rm(root, { recursive: true, force: true }); }
+}
+
+test("NS marker publication: existing valid metadata and read APIs need no directory writes", async () => {
+  await withNamespaceMarker(async ({ root, ns, dir, final, ensure }) => {
+    const legacyFrom = "project_marker-contract";
+    await ensure(dir, ns, legacyFrom);
+    const store = createStore({ storeRoot: root });
+    await store.appendItems(ns, [{ id: "read-only", kind: "note", text: "retained", ts: "2026-01-01T00:00:00Z" }]);
+    const builds = createBuildState({ storeRoot: root });
+    await builds.begin(ns, { docDigest: "retained", expectedChunks: 1 });
+    const marker = await fsp.readFile(final, "utf-8");
+    assert.equal(marker, JSON.stringify({ raw: ns.raw, legacyFrom }, null, 2) + "\n");
+    const originals = Object.fromEntries(["open", "mkdir", "writeFile", "appendFile", "link", "rename", "unlink"]
+      .map((method) => [method, fsp[method]]));
+    let writes = 0;
+    for (const method of Object.keys(originals)) {
+      fsp[method] = async () => { writes++; throw Object.assign(new Error("read-only store"), { code: "EROFS" }); };
+    }
+    try {
+      await ensure(dir, ns, "must-not-replace-legacyFrom");
+      assert.equal((await store.readObservations(ns))[0].text, "retained");
+      assert.equal((await builds.read(ns)).state, "building");
+      assert.equal(writes, 0);
+      assert.equal(await fsp.readFile(final, "utf-8"), marker);
+    } finally { Object.assign(fsp, originals); }
+  });
+});
+
+for (const [name, marker] of [
+  ["empty", ""], ["malformed", "{"], ["null", "null"],
+  ["foreign", JSON.stringify({ raw: "project:other-owner" }) + "\n"],
+]) {
+  test(`NS marker publication: existing ${name} metadata is refused without mutation`, async () => {
+    await withNamespaceMarker(async ({ ns, dir, final, ensure }) => {
+      await fsp.mkdir(dir, { recursive: true });
+      await fsp.writeFile(final, marker);
+      const OwnershipError = await getNamespaceOwnershipError();
+      await assert.rejects(() => ensure(dir, ns), (error) => name === "foreign"
+        ? error instanceof OwnershipError && error.message.includes("already owned by")
+        : error.constructor === Error && error.message.startsWith(`corrupt namespace sidecar in ${dir}:`));
+      assert.equal(await fsp.readFile(final, "utf-8"), marker);
+      assert.deepEqual(await fsp.readdir(dir), ["namespace.json"]);
+    });
+  });
+}
+
+test("NS marker publication: reads refuse an existing directory with no marker without repairing it", async () => {
+  await withNamespaceMarker(async ({ root, ns, dir }) => {
+    await fsp.mkdir(dir, { recursive: true });
+    const OwnershipError = await getNamespaceOwnershipError();
+    await assert.rejects(() => createStore({ storeRoot: root }).readObservations(ns), OwnershipError);
+    await assert.rejects(() => createBuildState({ storeRoot: root }).read(ns), OwnershipError);
+    assert.deepEqual(await fsp.readdir(dir), []);
+  });
+});
+
+test("NS marker publication: an existing marker read error retains the verifier's error format", async () => {
+  await withNamespaceMarker(async ({ ns, dir, final, ensure }) => {
+    await ensure(dir, ns);
+    const realReadFile = fsp.readFile;
+    fsp.readFile = async (file, ...args) => {
+      if (String(file) === final) throw Object.assign(new Error("marker read denied"), { code: "EACCES" });
+      return realReadFile(file, ...args);
+    };
+    try {
+      await assert.rejects(() => ensure(dir, ns), (error) => error.constructor === Error
+        && error.message === `corrupt namespace sidecar in ${dir}: marker read denied`);
+    } finally { fsp.readFile = realReadFile; }
+    assert.deepEqual(await fsp.readdir(dir), ["namespace.json"]);
+  });
+});
+
+for (const [code, partial] of [["ENOSPC", false], ["EIO", true]]) {
+  test(`NS marker publication: ${code} ${partial ? "partial UTF-8" : "empty"} write removes only its owned temporary`, async () => {
+    await withNamespaceMarker(async ({ ns, dir, final, ensure }) => {
+      const originals = { open: fsp.open, link: fsp.link };
+      const failure = Object.assign(new Error("metadata write failed"), { code });
+      let closed = false;
+      let links = 0;
+      fsp.link = async (...args) => { links++; return originals.link(...args); };
+      fsp.open = async (file, ...args) => {
+        const handle = await originals.open(file, ...args);
+        if (path.dirname(String(file)) === dir && path.basename(String(file)).startsWith("namespace.json.")) {
+          const write = handle.writeFile.bind(handle);
+          const close = handle.close.bind(handle);
+          handle.writeFile = async (bytes) => {
+            if (partial) {
+              const offset = bytes.indexOf(Buffer.from("π"));
+              assert.ok(offset >= 0);
+              await write(bytes.subarray(0, offset + 1));
+            }
+            throw failure;
+          };
+          handle.close = async () => { await close(); closed = true; };
+        }
+        return handle;
+      };
+      try {
+        await assert.rejects(() => ensure(dir, ns, "legacy-π"), (error) => error === failure && error.code === code);
+        assert.equal(closed, true);
+        assert.equal(links, 0, "incomplete metadata must never be published");
+        assert.deepEqual(await fsp.readdir(dir), []);
+      } finally { Object.assign(fsp, originals); }
+      await ensure(dir, ns, "legacy-π");
+      assert.equal(await fsp.readFile(final, "utf-8"), JSON.stringify({ raw: ns.raw, legacyFrom: "legacy-π" }, null, 2) + "\n");
+      assert.deepEqual(await fsp.readdir(dir), ["namespace.json"]);
+    });
+  });
+}
+
+// Inject unsupported-link errors; these cases do not claim native FAT/NTFS proof.
+for (const code of ["ENOTSUP", "EISDIR"]) {
+  test(`NS marker publication: unsupported link ${code} preserves errno and removes its owned temporary`, async () => {
+    await withNamespaceMarker(async ({ ns, dir, ensure }) => {
+      const realLink = fsp.link;
+      const failure = Object.assign(new Error("filesystem does not support this hard link"), { code });
+      let links = 0;
+      fsp.link = async () => { links++; throw failure; };
+      try {
+        await assert.rejects(() => ensure(dir, ns), (error) => error === failure && error.code === code);
+        assert.equal(links, 1, "no retry or overwrite fallback is permitted");
+        assert.deepEqual(await fsp.readdir(dir), []);
+      } finally { fsp.link = realLink; }
+    });
+  });
+}
+
+test("NS marker publication: unsupported links after a legacy claim preserve moved data and refuse unmarked reads", async () => {
+  await withNamespaceMarker(async ({ root, ns, dir }) => {
+    const legacyName = (await getLegacyNamespaceDirName())(ns);
+    const oldDir = path.join(root, ".sentinelayer", "engram", legacyName);
+    const data = JSON.stringify({ id: "legacy", kind: "note", text: "kept", ts: "2026-01-01T00:00:00Z" }) + "\n";
+    await fsp.mkdir(oldDir, { recursive: true });
+    await fsp.writeFile(path.join(oldDir, "items.ndjson"), data);
+    const store = createStore({ storeRoot: root, legacyLossyDirs: "first-claim" });
+    const realLink = fsp.link;
+    const failure = Object.assign(new Error("hard links unsupported after legacy rename"), { code: "ENOTSUP" });
+    fsp.link = async () => { throw failure; };
+    try { await assert.rejects(() => store.readObservations(ns), (error) => error === failure); }
+    finally { fsp.link = realLink; }
+    assert.equal(await fsp.readFile(path.join(dir, "items.ndjson"), "utf-8"), data);
+    assert.deepEqual(await fsp.readdir(dir), ["items.ndjson"]);
+    await assert.rejects(() => fsp.access(oldDir), (error) => error.code === "ENOENT");
+    await assert.rejects(() => store.readObservations(ns), await getNamespaceOwnershipError());
+    assert.deepEqual(await fsp.readdir(dir), ["items.ndjson"]);
+  });
+});
+
+test("NS marker publication: a temporary name collision preserves the foreign file and original EEXIST", async () => {
+  await withNamespaceMarker(async ({ ns, dir, ensure }) => {
+    const realOpen = fsp.open;
+    let foreign;
+    let collision;
+    fsp.open = async (file, flags, ...args) => {
+      if (flags === "wx" && path.dirname(String(file)) === dir) {
+        foreign = String(file);
+        await fsp.writeFile(foreign, "foreign temporary", { flag: "wx" });
+      }
+      try { return await realOpen(file, flags, ...args); }
+      catch (error) { collision = error; throw error; }
+    };
+    try {
+      await assert.rejects(() => ensure(dir, ns), (error) => error === collision && error.code === "EEXIST");
+      assert.equal(await fsp.readFile(foreign, "utf-8"), "foreign temporary");
+      assert.deepEqual(await fsp.readdir(dir), [path.basename(foreign)]);
+    } finally { fsp.open = realOpen; }
+  });
+});
+
+for (const replacement of ["new inode with identical bytes", "foreign same-inode bytes"]) {
+  test(`NS marker publication: failed-link cleanup preserves ${replacement}`, async () => {
+    await withNamespaceMarker(async ({ ns, dir, ensure }) => {
+      const realLink = fsp.link;
+      const failure = Object.assign(new Error("publication failed"), { code: "EIO" });
+      let temporary;
+      let replacementBytes;
+      let replacementIdentity;
+      fsp.link = async (source) => {
+        temporary = source;
+        replacementBytes = replacement.startsWith("new inode") ? await fsp.readFile(source) : Buffer.from("foreign bytes");
+        if (replacement.startsWith("new inode")) await fsp.unlink(source);
+        await fsp.writeFile(source, replacementBytes);
+        replacementIdentity = await fsp.stat(source, { bigint: true });
+        throw failure;
+      };
+      try {
+        await assert.rejects(() => ensure(dir, ns), (error) => error === failure);
+        assert.deepEqual(await fsp.readFile(temporary), replacementBytes);
+        const current = await fsp.stat(temporary, { bigint: true });
+        assert.deepEqual({ dev: current.dev, ino: current.ino },
+          { dev: replacementIdentity.dev, ino: replacementIdentity.ino });
+        assert.deepEqual(await fsp.readdir(dir), [path.basename(temporary)]);
+      } finally { fsp.link = realLink; }
+    });
+  });
+}
+
+for (const [name, marker] of [
+  ["malformed", "{"], ["foreign", JSON.stringify({ raw: "project:concurrent-owner" }) + "\n"],
+]) {
+  test(`NS marker publication: a ${name} concurrent winner is refused and preserved`, async () => {
+    await withNamespaceMarker(async ({ ns, dir, final, ensure }) => {
+      const realLink = fsp.link;
+      const OwnershipError = await getNamespaceOwnershipError();
+      fsp.link = async (source, target) => {
+        await fsp.writeFile(final, marker, { flag: "wx" });
+        return realLink(source, target);
+      };
+      try {
+        await assert.rejects(() => ensure(dir, ns), (error) => name === "foreign"
+          ? error instanceof OwnershipError
+          : error.constructor === Error && error.message.startsWith(`corrupt namespace sidecar in ${dir}:`));
+        assert.equal(await fsp.readFile(final, "utf-8"), marker);
+        assert.deepEqual(await fsp.readdir(dir), ["namespace.json"]);
+      } finally { fsp.link = realLink; }
+    });
+  });
+}
+
+for (const cleanup of ["read", "unlink", "close"]) {
+  test(`NS marker publication: ${cleanup} cleanup failure preserves the original write error`, async () => {
+    await withNamespaceMarker(async ({ ns, dir, ensure }) => {
+      const originals = { open: fsp.open, readFile: fsp.readFile, unlink: fsp.unlink };
+      const failure = Object.assign(new Error("primary write failure", { cause: "retained cause" }), { code: "ENOSPC" });
+      const secondary = Object.assign(new Error("secondary cleanup failure"), { code: "EACCES" });
+      const originalJson = JSON.stringify(failure);
+      let writeFailed = false;
+      let closed = false;
+      fsp.open = async (...args) => {
+        const handle = await originals.open(...args);
+        const close = handle.close.bind(handle);
+        handle.writeFile = async () => { writeFailed = true; throw failure; };
+        handle.close = async () => {
+          await close(); closed = true;
+          if (cleanup === "close") throw secondary;
+        };
+        return handle;
+      };
+      for (const [method, kind] of [["readFile", "read"], ["unlink", "unlink"]]) {
+        fsp[method] = async (file, ...args) => {
+          if (writeFailed && cleanup === kind && path.dirname(String(file)) === dir) throw secondary;
+          return originals[method](file, ...args);
+        };
+      }
+      try {
+        await assert.rejects(() => ensure(dir, ns), (error) => error === failure);
+        assert.equal(closed, true);
+        assert.equal(failure.namespaceCleanupError, secondary);
+        assert.equal(failure.cause, "retained cause");
+        assert.equal(JSON.stringify(failure), originalJson);
+      } finally { Object.assign(fsp, originals); }
+    });
+  });
+}
+
+test("NS marker publication: a frozen primary error survives a secondary cleanup failure", async () => {
+  await withNamespaceMarker(async ({ ns, dir, ensure }) => {
+    const originals = { link: fsp.link, unlink: fsp.unlink };
+    const failure = Object.freeze(Object.assign(new Error("primary link failure"), { code: "EIO" }));
+    fsp.link = async () => { throw failure; };
+    fsp.unlink = async () => { throw Object.assign(new Error("cleanup failed"), { code: "EACCES" }); };
+    try { await assert.rejects(() => ensure(dir, ns), (error) => error === failure); }
+    finally { Object.assign(fsp, originals); }
+  });
+});
+
+test("NS marker publication: successful publication still reports its cleanup failure", async () => {
+  await withNamespaceMarker(async ({ ns, dir, final, ensure }) => {
+    const realUnlink = fsp.unlink;
+    const failure = Object.assign(new Error("cleanup failed"), { code: "EACCES" });
+    fsp.unlink = async () => { throw failure; };
+    try {
+      await assert.rejects(() => ensure(dir, ns), (error) => error === failure);
+      assert.equal(await fsp.readFile(final, "utf-8"), JSON.stringify({ raw: ns.raw }, null, 2) + "\n");
+    } finally { fsp.unlink = realUnlink; }
+  });
+});

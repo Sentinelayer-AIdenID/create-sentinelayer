@@ -1046,6 +1046,71 @@ test("EW03 namespace publication: a held first metadata write cannot reject a co
   });
 });
 
+test("EW03 namespace publication: a valid concurrent winner keeps its inode and bytes", async () => {
+  await withStore(async (store) => {
+    const dir = store._graphNamespaceDir(ns);
+    const final = path.join(dir, "namespace.json");
+    const realOpen = fsp.open;
+    let signalWrite;
+    const writeStarted = new Promise((resolve) => { signalWrite = resolve; });
+    let releaseWrite;
+    const writeReleased = new Promise((resolve) => { releaseWrite = resolve; });
+    let held = false;
+    let first;
+    let second;
+    let winnerHandle;
+    let timer;
+    const deadline = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error("namespace winner barrier timed out")), 5_000);
+    });
+    const settle = (operation) => operation.then(
+      (value) => ({ status: "fulfilled", value }),
+      (reason) => ({ status: "rejected", reason }),
+    );
+    fsp.open = async (file, flags, ...args) => {
+      const handle = await realOpen(file, flags, ...args);
+      if (!held && flags === "wx" && path.dirname(String(file)) === dir
+        && path.basename(String(file)).startsWith("namespace.json.")) {
+        held = true;
+        const write = handle.writeFile.bind(handle);
+        handle.writeFile = async (...writeArgs) => {
+          signalWrite();
+          await writeReleased;
+          return write(...writeArgs);
+        };
+      }
+      return handle;
+    };
+    try {
+      first = settle(store.publishGraph(CALLER, ns, makeGraph()));
+      await Promise.race([writeStarted, deadline]);
+      second = settle(store.publishGraph(CALLER, ns, makeGraph()));
+      const result = await Promise.race([second, deadline]);
+      assert.equal(result.status, "fulfilled", result.reason?.message);
+      winnerHandle = await realOpen(final, "r");
+      const winner = await winnerHandle.stat({ bigint: true });
+      const bytes = await readFile(final);
+      releaseWrite();
+      const results = await Promise.race([Promise.all([first, second]), deadline]);
+      assert.ok(results.every((entry) => entry.status === "fulfilled"));
+      assert.deepEqual(results.map((entry) => entry.value.version).sort(), [1, 2]);
+      const current = await fsp.stat(final, { bigint: true });
+      assert.deepEqual({ dev: current.dev, ino: current.ino }, { dev: winner.dev, ino: winner.ino },
+        "a valid concurrent winner's inode must never be replaced");
+      assert.deepEqual(await readFile(final), bytes, "the winner's bytes must remain unchanged");
+      assert.deepEqual(JSON.parse(bytes.toString()), { raw: TENANT });
+      assert.deepEqual((await fsp.readdir(dir)).filter((name) => name.startsWith("namespace.json.")), []);
+    } finally {
+      releaseWrite();
+      clearTimeout(timer);
+      try {
+        await Promise.allSettled([first, second].filter(Boolean));
+        await winnerHandle?.close();
+      } finally { fsp.open = realOpen; }
+    }
+  });
+});
+
 test("EW03 namespace publication: an existing readable marker requires no directory writes", async () => {
   await withStore(async (store) => {
     const dir = store._graphNamespaceDir(ns);
