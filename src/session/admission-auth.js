@@ -103,9 +103,10 @@ function optionValue(args, name) {
   return "";
 }
 
-/** Refuse a `session` command that gives an identity-deciding option more than once. */
+/** Refuse room/owner commands that give an identity-deciding option more than once. */
 export function assertUnambiguousIdentityOptions(args = []) {
-  if (String(args[0] || "").trim().toLowerCase() !== "session") return;
+  const command = String(args[0] || "").trim().toLowerCase();
+  if (command !== "session" && command !== "agent") return;
   const tokens = optionTokens(args);
   for (const name of IDENTITY_OPTIONS) {
     const count = tokens.filter((t) => t === name || t.startsWith(`${name}=`)).length;
@@ -201,8 +202,8 @@ async function implicitAgent(sessionId, targetPath, env) {
  * throws: it is never silently run on the human token.
  */
 export async function resolveAgentAdmissionTarget(args = [], { env = process.env, homeDir } = {}) {
-  if (String(args[0] || "").trim().toLowerCase() !== "session") return null;
   assertUnambiguousIdentityOptions(args);
+  if (String(args[0] || "").trim().toLowerCase() !== "session") return null;
   const tokens = args.map((a) => String(a ?? "").trim());
   const terminator = tokens.indexOf("--");
   const positional = [

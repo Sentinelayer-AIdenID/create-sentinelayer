@@ -404,6 +404,41 @@ test("Unit auth http: retries timeout/network failures and returns normalized ti
   }
 });
 
+test("owner cancellation aborts an in-flight mutation without retrying or poisoning the circuit", async () => {
+  __resetRequestCircuitForTests();
+  const previousFetch = globalThis.fetch;
+  const controller = new AbortController();
+  let calls = 0;
+  globalThis.fetch = async (_url, options) => {
+    calls++;
+    return new Promise((_resolve, reject) => {
+      options.signal.addEventListener("abort", () => reject(options.signal.reason), { once: true });
+      controller.abort();
+    });
+  };
+  try {
+    await assert.rejects(requestJsonMutation("https://api.example.com/cancel", {
+      operationName: "session.admission_request", signal: controller.signal, maxRetries: 3, retryDelayMs: 1,
+    }), { name: "AbortError" });
+    assert.equal(calls, 1);
+    globalThis.fetch = async () => createResponse(200, { ok: true });
+    assert.deepEqual(await requestJson("https://api.example.com/cancel", { maxRetries: 0 }), { ok: true });
+  } finally {
+    globalThis.fetch = previousFetch;
+    __resetRequestCircuitForTests();
+  }
+});
+
+test("an already cancelled request makes zero transport calls", async () => {
+  const previousFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => { calls++; return createResponse(200, { ok: true }); };
+  try {
+    await assert.rejects(requestJson("https://api.example.com/cancelled", { signal: AbortSignal.abort() }), { name: "AbortError" });
+    assert.equal(calls, 0);
+  } finally { globalThis.fetch = previousFetch; }
+});
+
 test("Unit auth http: opens circuit breaker after consecutive retryable failures", async () => {
   __resetRequestCircuitForTests();
   const previousFetch = globalThis.fetch;

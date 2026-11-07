@@ -265,6 +265,78 @@ test("full flow: request, wait, approve, claim; credential stored and never outp
   assert.equal("privateKey" in requestBody || JSON.stringify(requestBody).includes("PRIVATE"), false);
 });
 
+test("an owner addition refreshes the same pending own-key request and claims its preapproval", async () => {
+  const dirs = await scratch();
+  const api = fakeApi();
+  const pending = await runAdmissionJoin(SID, base(api, dirs, { wait: false, noAutoGrant: true }));
+  const original = api.admissions.get(pending.admissionId);
+  const count = api.calls.length;
+  const ordinary = await runAdmissionJoin(SID, base(api, dirs, { wait: false }));
+  assert.equal(ordinary.status, "pending");
+  assert.equal(api.calls.length, count, "ordinary joins retain their poll-only resume");
+  let refreshes = 0;
+  const refreshed = await runAdmissionJoin(SID, base(api, dirs, {
+    requireAccountCheck: true,
+    noAutoGrant: true,
+    requestMutation: async (url, options) => {
+      if (url.endsWith("/admissions")) {
+        refreshes += 1;
+        assert.deepEqual(options.body, original.body, "preapproval refresh cannot substitute a key, goal or scope");
+        original.status = "approved";
+        return { admissionId: original.id, status: "approved", agentId: original.body.agentId };
+      }
+      return api.requestMutation(url, options);
+    },
+  }));
+  assert.equal(refreshes, 1);
+  assert.equal(refreshed.status, "active");
+  assert.equal(refreshed.admissionId, pending.admissionId);
+  assert.equal(api.calls.filter((call) => call.url.endsWith("/claim")).length, 1, "the real own-key signature flow still claims");
+  const held = await readAdmissionCredentialState(SID, "builder-1", { homeDir: dirs.homeDir });
+  assert.equal(held.credential.noAutoGrant, true);
+});
+
+test("owner bootstrap cannot reuse a locally live admission without checking the current account", async () => {
+  const dirs = await scratch();
+  const api = fakeApi({ onPoll: (adm) => { adm.status = "approved"; } });
+  const first = await runAdmissionJoin(SID, base(api, dirs));
+  assert.equal(first.status, "active");
+  let requests = 0;
+  const otherAccount = "fixture_other_account";
+  await assert.rejects(runAdmissionJoin(SID, base(api, dirs, {
+    requireAccountCheck: true,
+    resolveAuthSession: async () => ({ token: otherAccount, apiUrl: "https://api.test" }),
+    requestMutation: async (url, options) => {
+      requests++;
+      assert.ok(url.endsWith("/admissions"));
+      assert.equal(await bearerOf(options.credential), otherAccount);
+      throw new Error("403 owner mismatch");
+    },
+  })), /owner mismatch/);
+  assert.equal(requests, 1, "cached agent/API/key match must not bypass the current account check");
+});
+
+test("cancellation of an admission wait stops before any further account poll or claim", async () => {
+  const dirs = await scratch();
+  const api = fakeApi();
+  const controller = new AbortController();
+  const reason = new Error("owner stopped the watcher");
+  await assert.rejects(runAdmissionJoin(SID, base(api, dirs, {
+    signal: controller.signal,
+    sleep: async (_ms, _value, options) => { assert.equal(options.signal, controller.signal); controller.abort(reason); },
+  })), (error) => error === reason);
+  assert.equal(api.calls.filter((call) => call.method === "GET").length, 1);
+  assert.equal(api.calls.filter((call) => call.url.endsWith("/claim")).length, 0);
+});
+
+test("cancellation after approval is returned prevents its own-key claim", async () => {
+  const dirs = await scratch();
+  const controller = new AbortController();
+  const api = fakeApi({ onPoll: (adm) => { adm.status = "approved"; controller.abort(); } });
+  await assert.rejects(runAdmissionJoin(SID, base(api, dirs, { signal: controller.signal })), { name: "AbortError" });
+  assert.equal(api.calls.filter((call) => call.url.endsWith("/claim")).length, 0);
+});
+
 test("approved admission waits for verified AIdenID identity evidence before claiming", async () => {
   const dirs = await scratch();
   let polls = 0;
