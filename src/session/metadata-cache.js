@@ -95,6 +95,12 @@ export async function cacheRemoteSessionMetadata(sessions, {
 function mergeCachedMetadata(local, cached) {
   if (!cached) return local;
   const metadata = { ...local, ...cached.session, remoteMetadataFetchedAt: cached.fetchedAt };
+  // listAllSessions derives archiveStatus from the local lifecycle before this
+  // merge. A server status must replace that classification even on APIs that
+  // omit the separate archiveStatus field.
+  if (cached.session.status && !cached.session.archiveStatus) {
+    metadata.archiveStatus = cached.session.status;
+  }
   const localRenameAfterRead = local && (
     local.title !== cached.localTitleAtRead
     || Date.parse(local.remoteTitleSync?.lastAttemptAt || "") >= Date.parse(cached.requestedAt)

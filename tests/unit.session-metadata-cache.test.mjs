@@ -1,12 +1,14 @@
 import "./setup-env.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { createServer } from "node:http";
 import { Command } from "commander";
 
 import { registerSessionCommand } from "../src/commands/session.js";
+import { buildCliCommandMcpTools, createCliCommandMcpToolHandlers } from "../src/mcp/cli-command-tools.js";
 import {
   cacheRemoteSessionMetadata, listOfflineSessionMetadata,
   readOfflineSessionMetadata, resolveSessionMetadataContext,
@@ -208,6 +210,26 @@ test("cached server lifecycle controls the offline view without rewriting local 
   assert.equal(await readFile(local.metadataPath, "utf8"), before);
 });
 
+for (const localStatus of ["active", "expired", "archived"]) {
+  test(`server status without archiveStatus replaces the local ${localStatus} classification`, async (t) => {
+    const targetPath = await fixture(t);
+    const context = await contextFor(targetPath);
+    const local = await getSession(ROOM, { targetPath });
+    const raw = JSON.parse(await readFile(local.metadataPath, "utf8"));
+    await writeFile(local.metadataPath, JSON.stringify({ ...raw, status: localStatus }));
+    const remoteStatus = localStatus === "active" ? "archived" : "active";
+    await cacheRemoteSessionMetadata([{
+      sessionId: ROOM, title: "Current lifecycle", status: remoteStatus,
+      ...(remoteStatus === "active" ? { expiresAt: "2999-01-01T00:00:00.000Z" } : {}),
+    }], { targetPath, context });
+    const visible = await listOfflineSessionMetadata({ targetPath, context });
+    assert.equal(visible.length, remoteStatus === "active" ? 1 : 0);
+    const all = await listOfflineSessionMetadata({ targetPath, context, includeArchived: true });
+    assert.equal(all[0].archiveStatus, remoteStatus);
+    assert.equal((await getSession(ROOM, { targetPath })).status, localStatus);
+  });
+}
+
 test("cache refresh preserves concurrent local metadata and a newer local rename", async (t) => {
   const targetPath = await fixture(t);
   const context = await contextFor(targetPath);
@@ -230,4 +252,43 @@ test("cache refresh preserves concurrent local metadata and a newer local rename
   await updateSessionTitle(ROOM, { targetPath, title: "New local intent" });
   assert.equal((await readOfflineSessionMetadata(ROOM, { targetPath, context })).title, "New local intent");
   assert.equal((await readdir(context.cacheDir)).some((name) => name.endsWith(".tmp")), false);
+});
+
+test("registered MCP list/status paths read live titles and retain the approval boundary", async (t) => {
+  const targetPath = await fixture(t);
+  let title = "First server title";
+  let requests = 0;
+  const server = createServer((request, response) => {
+    requests += 1;
+    const pathname = new URL(request.url, "http://127.0.0.1").pathname;
+    const session = { sessionId: ROOM, title, status: "active" };
+    const body = pathname === "/api/v1/sessions" ? { sessions: [session] }
+      : pathname === `/api/v1/sessions/${ROOM}` ? session : {};
+    response.writeHead(Object.keys(body).length ? 200 : 403, { "Content-Type": "application/json" });
+    response.end(JSON.stringify(body));
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => { server.closeAllConnections(); server.close(resolve); }));
+  const env = { ...process.env, SENTINELAYER_API_URL: `http://127.0.0.1:${server.address().port}` };
+  const tools = (await buildCliCommandMcpTools()).filter((tool) => ["sl.session.list", "sl.session.status"].includes(tool.name));
+  assert.equal(tools.length, 2);
+  assert.ok(tools.every((tool) => tool.inputSchema.additionalProperties === false && tool.inputSchema.properties.offline.type === "boolean"));
+  const refused = createCliCommandMcpToolHandlers(tools, { targetPath, env });
+  assert.equal((await refused["sl.session.list"]({})).reason, "approval_required");
+  assert.equal(requests, 0);
+  // A test validator exercises execution after approval; production approval is unchanged.
+  const handlers = createCliCommandMcpToolHandlers(tools, { targetPath, env, approve: () => true });
+  const listed = await handlers["sl.session.list"]({});
+  assert.equal(listed.ok, true, listed.stderr);
+  assert.equal(listed.json.source, "remote");
+  assert.equal(listed.json.sessions[0].title, title);
+  title = "Latest server title";
+  const status = await handlers["sl.session.status"]({ sessionId: ROOM });
+  assert.equal(status.ok, true, status.stderr);
+  assert.equal(status.json.session.title, title);
+  const requestCount = requests;
+  const offline = await handlers["sl.session.status"]({ sessionId: ROOM, offline: true });
+  assert.equal(offline.ok, true, offline.stderr);
+  assert.equal(offline.json.session.title, title);
+  assert.equal(requests, requestCount);
 });
