@@ -1567,12 +1567,17 @@ export async function pollSessionEvents(
     limit = 200,
     listenerAgentId = "",
     timeoutMs = DEFAULT_SYNC_TIMEOUT_MS,
+    signal = undefined,
     forceCircuitProbe = false,
     resolveAuthSession = resolveActiveAuthSession,
     fetchImpl = fetchWithTimeout,
     nowMs = Date.now,
   } = {}
 ) {
+  const abortedResult = () => ({
+    ok: false, reason: "aborted", events: [], listenerControls: [], cursor: normalizeString(since) || null,
+  });
+  if (signal?.aborted) return abortedResult();
   const normalizedSessionId = normalizeString(sessionId);
   if (!normalizedSessionId) {
     return {
@@ -1643,11 +1648,14 @@ export async function pollSessionEvents(
       {
         method: "GET",
         credential: await credentialFor(session),
+        signal,
       },
       normalizePositiveInteger(timeoutMs, DEFAULT_SYNC_TIMEOUT_MS),
       fetchImpl,
       { readErrorBody: true },
     );
+    // A cancelled response must neither acknowledge events nor reset failure history.
+    if (signal?.aborted) return abortedResult();
     if (!response || !response.ok) {
       if (isRateLimitResponse(response, payload)) {
         return {
@@ -1712,6 +1720,7 @@ export async function pollSessionEvents(
     };
   } catch (error) {
     if (error?.code === "INVITATION_PENDING") throw error;
+    if (signal?.aborted) return abortedResult();
     recordCircuitFailure(inboundCircuit, normalizedNowMs);
     return {
       ok: false,
@@ -2164,6 +2173,8 @@ export async function updateSessionReadCursor(
     nowMs = Date.now,
   } = {},
 ) {
+  const abortedResult = () => ({ ok: false, reason: "aborted", updated: false });
+  if (signal?.aborted) return abortedResult();
   const normalizedSessionId = normalizeString(sessionId);
   const normalizedTargetSequence = Number(targetSequenceId);
   const normalizedTargetCursor = normalizeString(targetCursor);
@@ -2222,6 +2233,7 @@ export async function updateSessionReadCursor(
       normalizePositiveInteger(timeoutMs, DEFAULT_SYNC_TIMEOUT_MS),
       fetchImpl,
     );
+    if (signal?.aborted) return abortedResult();
     if (!response?.ok) {
       if (response?.status === 404) {
         return { ok: false, reason: "read_cursor_unsupported", updated: false };
@@ -2257,6 +2269,7 @@ export async function updateSessionReadCursor(
     };
   } catch (error) {
     if (error?.code === "INVITATION_PENDING") throw error;
+    if (signal?.aborted) return abortedResult();
     recordCircuitFailure(outboundCircuit, normalizedNowMs);
     return {
       ok: false,

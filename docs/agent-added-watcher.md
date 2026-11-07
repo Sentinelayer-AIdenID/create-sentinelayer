@@ -85,7 +85,8 @@ The cursor is in memory. Restarting re-reads the server's bounded 24-hour window
 room admission and message idempotence make that safe. `--max-polls` provides a
 bounded operator check, counts whole cycles and stops all listeners when it
 finishes. SIGINT/SIGTERM cancel the feed, settlement delay, pending admission
-HTTP requests and waits, and active listeners.
+HTTP requests and waits, and active listeners, including an active events read
+or read-cursor update and its response body.
 An account, token or API change stops the watcher. Restart it with the intended
 sign-in. Notices contain status, room and agent identifiers, never credentials
 or raw provider error bodies.
@@ -304,6 +305,58 @@ receipts and all twelve `a-cli-cycle-mutants/` result pairs, aggregate results
 and restoration hashes. These scoped checks do not replace the required hosted
 verification and review after an authorized integration/publication, or the
 earlier disclosed full-verification limitations.
+
+## Active-room cancellation review follow-up
+
+The review of `6e463638a78e4b65bbdd7d98c4367ac7975236cf` found that a joined
+listener dropped its worker signal before ongoing event reads and read-cursor
+updates. Startup cancellation was covered, but stopping an active room could
+still wait for the HTTP timeout. The correction forwards the existing worker
+signal through both calls and retains the existing request timeout, credential
+scope, admission lifetime and polling cadence.
+
+Caller cancellation is not a circuit failure or a circuit recovery: it neither
+increments failure counts nor clears earlier real failures. Late responses are
+discarded before delivering controls, events or cursor progress. Cancellation
+during a callback stops the remaining batch and prevents a new cursor write or
+heartbeat. A local write already started before cancellation may finish; it
+cannot start a later remote update. Aborting an HTTP request does not assert
+that a server operation already received was rolled back.
+
+`tests/unit.agent-added-active-cancellation.test.mjs` uses the real room worker,
+listener and HTTP helpers after `ready` resolves. Four loopback cases stall the
+events GET or read-cursor PUT, either before headers or during JSON consumption.
+They require socket closure and bounded cleanup, admission-bound room requests,
+no later callback/request/cursor write, and no failure notice, heartbeat or
+successful cursor acknowledgment. Admission establishment is injected into the
+real credential store; this is not a live room acceptance run.
+
+| Scoped check | Observed result |
+| --- | --- |
+| Original-source regression | 16 cases: 14 intended assertion failures and 2 genuine-timeout controls passing; exit 1; no errors or skips |
+| First after-run diagnostic | 13 passes and 4 fixture assertion failures: the new test expected `stop`, while the existing lifecycle is `stopped`; this is not a product failure or mutant kill |
+| Corrected new regression | 17 passes; exit 0; no failures, errors or skips; includes the added final-event cursor boundary |
+| Existing watcher, cycle, listener and sync scopes | 21 + 13 + 37 + 56 = 127 passes in four separate fresh Node processes; no failures, errors or skips |
+| Actual mutation proof | 17 of 17 killed by named `AssertionError` witnesses; no setup, TypeError, runner-timeout or skipped-test kills |
+| Source restoration | Both changed production files exactly match their recorded candidate SHA-256 values |
+| Clean restored new regression | 17 passes; exit 0; no failures, errors or skips |
+
+The 144 distinct focused cases comprise the 17 new cases and the 127 existing
+cases. Repeated 17-case and mutation runs overlap and are not added to that
+count. Mutants remove each HTTP signal, accept cancelled or late responses,
+alter circuit history on cancellation, continue a stopped batch, advance its
+cursor, or emit a heartbeat after the aborted read. Apply, direct single-process
+Node execution, and result/restoration collection run in separate commands; no
+Python mutation supervisor or inherited subprocess fixture runs beside Node.
+
+The retained receipts are `a-active-cancel-before`, `a-active-cancel-after`
+(the fixture diagnostic), `a-active-cancel-after-corrected`, four
+`a-active-cancel-regression-*` scopes, `a-active-cancel-restored`, and
+`a-active-cancel-mutants/` raw result pairs and restoration metadata. Quality,
+Omar and Build Attestation succeeded on attempt 1 for the earlier `6e463638`
+head, whose Codex review raised this finding. Those hosted results do not prove
+this correction; fresh exact-head gates and review remain required. This
+follow-up remains Class D and makes no prompt or model-routing change.
 
 ## Rollback
 
