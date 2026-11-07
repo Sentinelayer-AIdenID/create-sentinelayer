@@ -186,26 +186,48 @@ export async function withCacheWriteLock(context, operation, timeoutMs) {
     }
   }
   let identity;
+  let recordWritten = false;
+  let writeFailure;
   const text = JSON.stringify({ token: randomUUID(), pid: process.pid, host: os.hostname(), ...scope, createdAt: new Date().toISOString() });
+  const recordBytes = Buffer.from(text);
   try {
     identity = await handle.stat();
-    await handle.writeFile(text);
+    try {
+      await handle.writeFile(text);
+    } catch (error) {
+      writeFailure = { error };
+      throw error;
+    }
+    recordWritten = true;
     return await operation();
   } finally {
     try {
-      await retryRemoval(async () => {
-        try {
-          const current = await fsp.lstat(lockPath);
-          // Keep our handle open through ownership verification and removal:
-          // its inode cannot be reused for an empty successor after close.
-          if (!current.isFile() || !sameFile(identity, current)) return;
-          const content = await fsp.readFile(lockPath, "utf8");
-          if (content !== text) return;
-          await fsp.unlink(lockPath);
-        } catch (error) { if (error?.code !== "ENOENT") throw error; }
-      });
-    } finally {
-      await handle.close();
+      try {
+        await retryRemoval(async () => {
+          try {
+            const current = await fsp.lstat(lockPath);
+            // Keep our handle open through ownership verification and removal:
+            // its inode cannot be reused for an empty successor after close.
+            if (!current.isFile() || !sameFile(identity, current)) return;
+            const content = await fsp.readFile(lockPath);
+            // A failed write can leave our empty or partial bytes. Only that
+            // path accepts a prefix; successful writes still require the full
+            // record, even if another writer subsequently truncates the file.
+            const expected = recordWritten ? recordBytes : recordBytes.subarray(0, content.length);
+            if (!content.equals(expected)) return;
+            await fsp.unlink(lockPath);
+          } catch (error) { if (error?.code !== "ENOENT") throw error; }
+        });
+      } finally {
+        await handle.close();
+      }
+    } catch (cleanupError) {
+      if (!writeFailure) throw cleanupError;
+      // Preserve the original write exception, including its existing cause and
+      // JSON shape. Secondary diagnostics must not replace a frozen throwable.
+      try {
+        Object.defineProperty(writeFailure.error, "cacheCleanupError", { value: cleanupError, configurable: true });
+      } catch { /* Diagnostic attachment is best effort. */ }
     }
   }
 }
