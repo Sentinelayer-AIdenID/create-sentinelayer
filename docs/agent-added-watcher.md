@@ -9,9 +9,18 @@ sl agent watch-added --agent forge --model cli --provider unknown
 This command holds the configured **account credential**. It is an explicit owner
 control, outside any room admission. Its only account feed is
 `GET /api/v1/sessions/notifications?kind=agent_added&agentId=forge&limit=50`.
-It follows the server's account-and-agent-bound cursor and checks additions on
-each poll, without restarting existing chat listeners. The default poll interval
-is 60 seconds; `--interval` accepts 10–3600 seconds.
+It follows the server's opaque account-and-agent-bound cursor and checks additions
+on each polling cycle, without restarting existing chat listeners. The normal
+interval between cycles is 60 seconds; `--interval` accepts 10–3600 seconds.
+
+The filtered feed may return `retryAfterMs` when a matching committed notice is
+still inside its settlement window. The watcher handles already settled notices
+first, waits once for the indicated 1–10,000 milliseconds, checks the account
+again, and makes at most one delayed follow-up request in that same cycle. The
+follow-up uses the last confirmed cursor and the same exact agent filter. A
+repeated hint cannot cause a third settlement read; normal cadence resumes after
+the cycle. Each HTTP request retains its ten-second timeout and zero transport
+retries. Servers that omit this optional hint retain the normal polling behavior.
 
 It requires the contacts API follow-up and `CONTACTS_ENABLED` on the server. That
 API change has migration 183 and must follow the server's post-launch migration
@@ -56,21 +65,27 @@ that decision.
 ## Bounds and shutdown
 
 The watcher accepts up to 100 simultaneous rooms by default (`--max-rooms`,
-1–500), queues at most 500 additions, reads at most ten pages per poll, and starts
-at most five room workers per poll. Pending joins get at most five attempts with
+1–500), queues at most 500 additions, reads at most ten normal pages plus the one
+optional settlement follow-up per cycle, and starts at most five room workers
+across the entire cycle. The pending-capacity guard applies to the follow-up too.
+Pending joins get at most five attempts with
 bounded backoff before a `join_failed` notice; failed entries release queue
 capacity. Expired additions are dropped at their 24-hour server lifetime.
 
 If any notice in a page is invalid or names another agent, the watcher rejects
 the entire page and retains its previous cursor. It reports `feed_unavailable`
-and stops after five consecutive failed polls, closing its active listeners.
+and stops after five consecutive failed cycles, closing its active listeners.
+An invalid hint, including a non-integer, out-of-range value or hint on a full
+page, rejects that page before its rows or cursor are accepted. A failed
+follow-up counts as a failed cycle even if its first read succeeded.
 It does not skip the invalid notice or advance past unvalidated additions. The
 owner must address the feed problem before restarting.
 
 The cursor is in memory. Restarting re-reads the server's bounded 24-hour window;
 room admission and message idempotence make that safe. `--max-polls` provides a
-bounded operator check and stops all listeners when it finishes. SIGINT/SIGTERM
-cancel the feed, pending admission HTTP requests and waits, and active listeners.
+bounded operator check, counts whole cycles and stops all listeners when it
+finishes. SIGINT/SIGTERM cancel the feed, settlement delay, pending admission
+HTTP requests and waits, and active listeners.
 An account, token or API change stops the watcher. Restart it with the intended
 sign-in. Notices contain status, room and agent identifiers, never credentials
 or raw provider error bodies.
@@ -80,8 +95,8 @@ capability. That capability is not part of this change.
 
 ## Behavioral evidence
 
-`tests/unit.agent-added-watcher.test.mjs` exercises one-poll delivery, joining
-new rooms without restart, deduplication, filtered-feed validation, account
+`tests/unit.agent-added-watcher.test.mjs` exercises delivery of an already-returned
+notice within one cycle, joining new rooms without restart, deduplication, filtered-feed validation, account
 change, bounded retry exhaustion, admission refusal, cancellation, bridge
 blocking, and a real loopback HTTP server. The loopback test rejects every room
 request carrying anything except the room admission and delivers a human reply
@@ -206,6 +221,89 @@ failure for every mutant, rejects setup failures and timeouts, and restores
 source in `finally`. The evidence directory contains the exact commands, TAP
 logs, `summary.json`, and `restoration.json`. No authentication is needed for
 these deterministic tests.
+
+### One-cycle settlement follow-up
+
+The isolated acceptance correction starts at published CLI head
+`3cf6d6ac6a52af447eb6f4b8ff7ff9cec39a3ba0` (local exact-source mapping
+`3f14ba78051d97e0870662536d71a0076e09584e`). It changes only the watcher loop,
+adds `tests/unit.agent-added-cycle.test.mjs`, and updates this documentation.
+It remains a local review candidate under the author-push hold; current main and
+the existing PR were not changed by this verification.
+
+The accepted unit of delivery is **one polling cycle**, which can include one
+bounded delayed follow-up HTTP request. It is not a single-read guarantee. The
+API companion returns promptly with an optional hint only for committed,
+matching notices inside settlement. Its separate real-PostgreSQL proof creates
+the Add through the production writer, observes it one second after the writer's
+timestamp, receives the 9,000 ms hint, and retrieves it through the returned
+cursor in one subsequent account-authenticated request. The server does not
+hold the first request open.
+
+The CLI loopback proof observes two real HTTP requests separated by the actual
+nine-second advisory wait, then a single plain hello before normal cadence.
+It uses real watcher/listener orchestration with injected admission and room
+operations. This is complementary transport/control-flow evidence, not live
+end-to-end admission or a live user acceptance receipt. Actual launch acceptance
+remains pending the paired deployment and approved live check.
+
+The `aa1` position remains strict Base64 JSON validated for the account and
+agent. The client treats it as opaque. Its protocol and authorization rules
+are unchanged; no cursor-signature claim is made.
+
+| Acceptance-correction check | Recorded result |
+| --- | --- |
+| Original-source new-contract before run | 12 cases: 11 intended assertions and 1 existing-transport pass; no errors, cancellations or skips |
+| Initial new-design regression | 33 passed; no failures, cancellations or skips |
+| Independent-review failure-counter before proof | 13 cases: 1 intended assertion and 12 passes; no errors, cancellations or skips |
+| Corrected combined regression | 34 passed; no failures, cancellations or skips; exit 0 |
+| Final mutation baseline | 13 passed; no failures, cancellations or skips; exit 0 |
+| Actual one-cycle mutations | 12 of 12 killed at behavioral assertions; no setup failures, runner timeouts, cancellations or skips |
+| Source restoration | Watcher SHA256 `8831d6c41d9ec2a6822c598a614348da335084dcb1298cfedbaf6e570afe66e5` restored exactly after every mutation |
+| Final restored combined regression | 34 passed; no failures, cancellations or skips; exit 0 |
+
+The review-discovered failure counter mattered: resetting it after the first
+successful read could hide a consistently bad follow-up. The correction resets
+it only after a complete successful cycle. A real loopback test proves five
+poisoned follow-ups stop after ten reads, retain the last accepted cursor, emit
+five failures and close the already active room. An eleventh-request fixture
+refusal bounds the broken implementation and produces an explicit assertion
+instead of an infinite loop. Independent review checked this correction and
+every final mutation failure/restoration receipt.
+
+The mutations remove hint handling, allow a third request, accept malformed
+hints, skip the delay, discard the confirmed cursor, remove delay cancellation,
+skip the refreshed owner check, enable HTTP retries, reset the five-start
+budget, erase failed-cycle counts, remove HTTP cancellation, and withhold
+settled rows behind the delay. Their named behavioral witnesses are in the new
+test file. An independent fixture teardown abort keeps the missing-delay-signal
+mutation bounded without making owner cancellation pass. Every failure was
+checked for its actual `AssertionError` cause.
+
+The earlier held-response experiment used a twenty-second request timeout and
+had 26 passing tests. It was superseded when the launch contract changed to a
+prompt advisory response. Its two initial assertion failures and 26-pass result
+are retained as historical diagnostics only; the timeout change was restored,
+and no mutation of that superseded design was run. Those receipts do not prove
+the final contract.
+
+The focused final command deliberately runs one actual Node test process, with
+no inherited subprocess fixtures:
+
+```sh
+node --test --test-isolation=none --test-concurrency=1 \
+  tests/unit.agent-added-cycle.test.mjs \
+  tests/unit.agent-added-watcher.test.mjs
+```
+
+Mutation apply, Node execution and result/restoration inspection ran as separate
+commands, so a Python supervisor was never alive beside the Node runner. The
+handoff retains `a-cli-cycle-before`, `a-cli-cycle-failure-budget-before`,
+`a-cli-cycle-corrected`, `a-cli-cycle-baseline`, `a-cli-cycle-restored` XML/log
+receipts and all twelve `a-cli-cycle-mutants/` result pairs, aggregate results
+and restoration hashes. These scoped checks do not replace the required hosted
+verification and review after an authorized integration/publication, or the
+earlier disclosed full-verification limitations.
 
 ## Rollback
 
