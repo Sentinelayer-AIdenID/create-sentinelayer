@@ -44,6 +44,7 @@ test("listSessionsFromApi: forwards include_archived + limit", async () => {
   assert.equal(result.sessions[0].sessionId, "a");
   assert.equal(result.nextCursor, null);
   assert.equal(result.hasMore, false);
+  assert.equal(result.complete, true);
   assert.match(observedUrl, /\/api\/v1\/sessions\?/);
   assert.match(observedUrl, /include_archived=true/);
   assert.match(observedUrl, /limit=25/);
@@ -87,6 +88,7 @@ test("listSessionsFromApi: fetchAll walks cursor pages and dedupes overlaps", as
   assert.equal(result.count, 3);
   assert.equal(result.nextCursor, null);
   assert.equal(result.hasMore, false);
+  assert.equal(result.complete, true);
   assert.equal(observedUrls.length, 2);
   assert.doesNotMatch(observedUrls[0], /cursor=/);
   assert.match(observedUrls[1], /cursor=cursor-2/);
@@ -122,11 +124,39 @@ test("listSessionsFromApi: fetchAll reports truncation when maxPages is exhauste
   assert.equal(result.hasMore, true);
   assert.equal(result.nextCursor, "cursor-2");
   assert.equal(result.truncated, true);
+  assert.equal(result.complete, false);
   assert.equal(result.warnings.length, 1);
   assert.equal(result.warnings[0].code, "SESSION_LIST_MAX_PAGES_REACHED");
   assert.equal(result.warnings[0].maxPages, 1);
   assert.equal(result.warnings[0].nextCursor, "cursor-2");
   assert.equal(observedUrls.length, 1);
+});
+
+test("listSessionsFromApi: ambiguous, partial, or resumed pages never prove a complete catalog", async () => {
+  const cases = [
+    { body: { sessions: [{ sessionId: "a" }] }, options: { limit: 1 } },
+    { body: { sessions: [], has_more: true }, options: { fetchAll: true } },
+    { body: { sessions: [], has_more: false, next_cursor: "contradiction" }, options: {} },
+    { body: { sessions: [], has_more: false }, options: { cursor: "resume" } },
+    { body: { sessions: [], has_more: "true" }, options: {} },
+    { body: { sessions: [], has_more: 1 }, options: {} },
+    { body: { sessions: [], has_more: false, hasMore: true }, options: {} },
+    { body: { sessions: [], next_cursor: null }, options: {} },
+  ];
+  for (const { body, options } of cases) {
+    let requests = 0;
+    const result = await listSessionsFromApi({
+      targetPath: "/tmp", resolveAuthSession: fakeSession(), ...options,
+      fetchImpl: fakeFetch(() => { requests += 1; return { ok: true, json: async () => body }; }),
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.complete, false);
+    assert.equal(requests, 1);
+    if (body.has_more === true && !body.next_cursor) {
+      assert.equal(result.truncated, true);
+      assert.equal(result.warnings[0].code, "SESSION_LIST_CURSOR_MISSING");
+    }
+  }
 });
 
 test("listSessionsFromApi: returns api_403 when forbidden", async () => {

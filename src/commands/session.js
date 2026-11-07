@@ -590,6 +590,13 @@ export function formatSessionListLine(item = {}) {
 const SESSION_CACHE_SCOPE_WARNING =
   "Remote-only rooms were not cached because this credential has no stable account ID. Use a stored login without a token override to cache them.";
 
+function warnSessionCacheRefresh(cache) {
+  if (cache?.ok === false) {
+    const codes = [...new Set(cache.errors.map((error) => error.code))].join(", ");
+    console.warn(pc.yellow(`Server read succeeded, but the local metadata cache could not be fully refreshed (${codes}). Offline results may be stale.`));
+  }
+}
+
 const SESSION_MESSAGE_ACTION_TYPES = new Set([
   "ack",
   "working_on",
@@ -8221,6 +8228,7 @@ Guide: https://sentinelayer.com/docs/senti/overview/
           throw new Error("Remote session metadata does not match the requested session; the cache was not refreshed.");
         }
         cache = await cacheRemoteSessionMetadata([remote.session], { targetPath, context, requestedAt });
+        warnSessionCacheRefresh(cache);
         sessionPayload = {
           ...await getSession(normalizedSessionId, { targetPath }),
           ...remote.session,
@@ -8913,8 +8921,11 @@ Guide: https://sentinelayer.com/docs/senti/overview/
           resolveAuthSession: async () => context.authSession,
         });
         const cache = remote.ok
-          ? await cacheRemoteSessionMetadata(remote.sessions, { targetPath, context, requestedAt })
+          ? await cacheRemoteSessionMetadata(remote.sessions, {
+            targetPath, context, requestedAt, completeList: remote.complete,
+          })
           : null;
+        warnSessionCacheRefresh(cache);
         if (!remote.ok) process.exitCode = 1;
         const trimmed = emitJson ? remote.sessions : remote.sessions.slice(0, limit);
         const payload = {
@@ -9006,7 +9017,7 @@ Guide: https://sentinelayer.com/docs/senti/overview/
       for (const item of trimmed) {
         const line = formatSessionListLine(item);
         const expires = item.expiresAt ? ` expires=${item.expiresAt}` : "";
-        console.log(`${line}${expires}`);
+        console.log(`${line}${expires} (cached)`);
       }
       if (sessions.length > trimmed.length) {
         console.log(
