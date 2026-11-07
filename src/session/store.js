@@ -110,9 +110,23 @@ async function readJsonFile(filePath, { allowMissing = true } = {}) {
 
 async function writeJsonFile(filePath, payload) {
   await fsp.mkdir(path.dirname(filePath), { recursive: true });
-  const tmpPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
-  await fsp.writeFile(tmpPath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
-  await fsp.rename(tmpPath, filePath);
+  const tmpPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await fsp.writeFile(tmpPath, `${JSON.stringify(payload, null, 2)}\n`, { encoding: "utf-8", flag: "wx" });
+    // Match auth/session-store.js: Windows readers can briefly hold the target
+    // open. Retry the same atomic replacement, without deleting the old file.
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        await fsp.rename(tmpPath, filePath);
+        break;
+      } catch (error) {
+        if (attempt >= 3 || !["EPERM", "EACCES", "EEXIST", "EBUSY"].includes(error?.code)) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 25 * attempt));
+      }
+    }
+  } finally {
+    await fsp.rm(tmpPath, { force: true }).catch(() => {});
+  }
 }
 
 function normalizeCodebaseContext(ingest = {}) {

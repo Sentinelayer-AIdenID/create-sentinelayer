@@ -601,10 +601,20 @@ test("cache refresh preserves concurrent local metadata and a newer local rename
     targetPath, title: "Local rename", pending: true, lastAttemptAt: "2026-01-02T00:00:00.000Z",
   });
   await updateSessionTitle(ROOM, { targetPath, title: "Local rename" });
+  const localPath = (await getSession(ROOM, { targetPath })).metadataPath;
+  const originalRename = fsp.rename;
+  let localRenameAttempts = 0;
+  t.mock.method(fsp, "rename", async (source, destination) => {
+    if (destination === localPath && ++localRenameAttempts === 1) {
+      throw Object.assign(new Error("fixture transient local metadata reader"), { code: "EPERM" });
+    }
+    return originalRename(source, destination);
+  });
   await Promise.all([
     recordSessionProvisionedIdentities(ROOM, { targetPath, identityIds: ["local-identity"] }),
     cacheRemoteSessionMetadata([{ sessionId: ROOM, title: "Older response" }], { targetPath, context, requestedAt }),
   ]);
+  assert.ok(localRenameAttempts >= 2, "the local metadata writer must retry its injected EPERM");
   const local = await getSession(ROOM, { targetPath });
   assert.deepEqual(local.sharedResources.provisionedIdentityIds, ["local-identity"]);
   assert.equal(local.remoteTitleSync.pending, true);
@@ -615,7 +625,31 @@ test("cache refresh preserves concurrent local metadata and a newer local rename
   await updateSessionTitle(ROOM, { targetPath, title: "New local intent" });
   assert.equal((await readOfflineSessionMetadata(ROOM, { targetPath, context })).title, "New local intent");
   assert.equal((await readdir(context.cacheDir)).some((name) => name.endsWith(".tmp")), false);
+  assert.equal((await readdir(path.dirname(localPath))).some((name) => name.endsWith(".tmp")), false);
 });
+
+for (const [code, attempts] of [["EPERM", 3], ["ENOSPC", 1]]) {
+  test(`local metadata ${code} rename failure is bounded and preserves the previous file`, async (t) => {
+    const targetPath = await fixture(t);
+    const local = await getSession(ROOM, { targetPath });
+    const before = await readFile(local.metadataPath, "utf8");
+    const originalRename = fsp.rename;
+    let calls = 0;
+    t.mock.method(fsp, "rename", async (source, destination) => {
+      if (destination === local.metadataPath) {
+        calls += 1;
+        throw Object.assign(new Error("fixture local metadata write refused"), { code });
+      }
+      return originalRename(source, destination);
+    });
+    await assert.rejects(recordSessionProvisionedIdentities(ROOM, {
+      targetPath, identityIds: ["not-published"],
+    }), { code });
+    assert.equal(calls, attempts);
+    assert.equal(await readFile(local.metadataPath, "utf8"), before);
+    assert.equal((await readdir(local.sessionDir)).some((name) => name.endsWith(".tmp")), false);
+  });
+}
 
 test("registered MCP list/status paths read live titles and retain the approval boundary", async (t) => {
   const targetPath = await fixture(t);
