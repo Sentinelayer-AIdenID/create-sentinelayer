@@ -989,6 +989,264 @@ test("EW03 R5 P1-2 namespace collision: tampered namespace.json is refused", asy
   }
 });
 
+test("EW03 namespace publication: a held first metadata write cannot reject a concurrent initializer", async () => {
+  await withStore(async (store) => {
+    const dir = store._graphNamespaceDir(ns);
+    const realOpen = fsp.open;
+    let signalWrite;
+    const writeStarted = new Promise((resolve) => { signalWrite = resolve; });
+    let releaseWrite;
+    const writeReleased = new Promise((resolve) => { releaseWrite = resolve; });
+    let held = false;
+    let first;
+    let second;
+    let timer;
+    const deadline = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error("namespace publication barrier timed out")), 5_000);
+    });
+    const settle = (operation) => operation.then(
+      (value) => ({ status: "fulfilled", value }),
+      (reason) => ({ status: "rejected", reason }),
+    );
+    fsp.open = async (file, flags, ...args) => {
+      const handle = await realOpen(file, flags, ...args);
+      const name = path.basename(String(file));
+      if (!held && path.dirname(String(file)) === dir && flags === "wx"
+        && (name === "namespace.json" || name.startsWith("namespace.json."))) {
+        held = true;
+        const realWrite = handle.writeFile.bind(handle);
+        handle.writeFile = async (...writeArgs) => {
+          signalWrite();
+          await writeReleased;
+          return realWrite(...writeArgs);
+        };
+      }
+      return handle;
+    };
+    try {
+      first = settle(store.publishGraph(CALLER, ns, makeGraph()));
+      await Promise.race([writeStarted, deadline]);
+      second = settle(store.publishGraph(CALLER, ns, makeGraph()));
+      const result = await Promise.race([second, deadline]);
+      assert.equal(result.status, "fulfilled",
+        `a concurrent initializer read incomplete namespace metadata: ${result.reason?.message}`);
+    } finally {
+      releaseWrite();
+      clearTimeout(timer);
+      // Join every publisher before withStore removes its directory, including
+      // the expected rejection when this regression runs against old code.
+      await Promise.allSettled([first, second].filter(Boolean));
+      fsp.open = realOpen;
+    }
+    const results = await Promise.all([first, second]);
+    assert.ok(results.every((result) => result.status === "fulfilled"));
+    assert.deepEqual(results.map((result) => result.value.version).sort(), [1, 2]);
+    assert.deepEqual(JSON.parse(await readFile(path.join(dir, "namespace.json"), "utf-8")), { raw: TENANT });
+    assert.deepEqual((await fsp.readdir(dir)).filter((name) => name.startsWith("namespace.json.")), []);
+  });
+});
+
+test("EW03 namespace publication: an existing readable marker requires no directory writes", async () => {
+  await withStore(async (store) => {
+    const dir = store._graphNamespaceDir(ns);
+    await mkdir(dir, { recursive: true });
+    const marker = JSON.stringify({ raw: TENANT }) + "\n";
+    await writeFile(path.join(dir, "namespace.json"), marker);
+    const originals = { open: fsp.open, mkdir: fsp.mkdir, link: fsp.link, writeFile: fsp.writeFile };
+    let writes = 0;
+    const refused = async () => {
+      writes++;
+      throw Object.assign(new Error("read-only store"), { code: "EROFS" });
+    };
+    Object.assign(fsp, { open: refused, mkdir: refused, link: refused, writeFile: refused });
+    try {
+      assert.deepEqual(await store.listSourceSnapshots(CALLER, ns), []);
+      assert.equal(writes, 0);
+      assert.equal(await readFile(path.join(dir, "namespace.json"), "utf-8"), marker);
+    } finally {
+      Object.assign(fsp, originals);
+    }
+  });
+});
+
+for (const [name, marker] of [
+  ["empty", ""], ["malformed", "{"], ["null", "null"],
+  ["foreign", JSON.stringify({ raw: "project:foreign" }) + "\n"],
+]) {
+  test(`EW03 namespace publication: an existing ${name} marker is refused without mutation`, async () => {
+    await withStore(async (store) => {
+      const dir = store._graphNamespaceDir(ns);
+      await mkdir(dir, { recursive: true });
+      const file = path.join(dir, "namespace.json");
+      await writeFile(file, marker);
+      await assert.rejects(() => store.listSourceSnapshots(CALLER, ns), AccessDeniedError);
+      assert.equal(await readFile(file, "utf-8"), marker);
+      assert.deepEqual(await fsp.readdir(dir), ["namespace.json"]);
+    });
+  });
+}
+
+for (const [code, partial] of [["ENOSPC", false], ["EIO", true]]) {
+  test(`EW03 namespace publication: ${code} ${partial ? "partial" : "empty"} write cleans only its unpublished temporary`, async () => {
+    await withStore(async (store) => {
+      const dir = store._graphNamespaceDir(ns);
+      const realOpen = fsp.open;
+      const realLink = fsp.link;
+      const failure = Object.assign(new Error("metadata write failed"), { code });
+      let closed = false;
+      let links = 0;
+      fsp.link = async (...args) => { links++; return realLink(...args); };
+      fsp.open = async (file, ...args) => {
+        const handle = await realOpen(file, ...args);
+        if (path.dirname(String(file)) === dir && path.basename(String(file)).startsWith("namespace.json.")) {
+          const write = handle.writeFile.bind(handle);
+          const close = handle.close.bind(handle);
+          handle.writeFile = async (bytes) => {
+            if (partial) await write(bytes.subarray(0, 7));
+            throw failure;
+          };
+          handle.close = async () => { await close(); closed = true; };
+        }
+        return handle;
+      };
+      try {
+        await assert.rejects(() => store.listSourceSnapshots(CALLER, ns), (error) => error === failure);
+        assert.equal(links, 0);
+        assert.equal(closed, true);
+        assert.deepEqual(await fsp.readdir(dir), []);
+      } finally {
+        fsp.open = realOpen;
+        fsp.link = realLink;
+      }
+    });
+  });
+}
+
+test("EW03 namespace publication: a link failure is not retried and removes its completed temporary", async () => {
+  await withStore(async (store) => {
+    const dir = store._graphNamespaceDir(ns);
+    const realLink = fsp.link;
+    const failure = Object.assign(new Error("link unavailable"), { code: "EPERM" });
+    let links = 0;
+    fsp.link = async () => { links++; throw failure; };
+    try {
+      await assert.rejects(() => store.listSourceSnapshots(CALLER, ns), (error) => error === failure);
+      assert.equal(links, 1);
+      assert.deepEqual(await fsp.readdir(dir), []);
+    } finally { fsp.link = realLink; }
+  });
+});
+
+test("EW03 namespace publication: exclusive temporary collision preserves the foreign file and original EEXIST", async () => {
+  await withStore(async (store) => {
+    const dir = store._graphNamespaceDir(ns);
+    const realOpen = fsp.open;
+    let foreign;
+    fsp.open = async (file, flags, ...args) => {
+      if (flags === "wx" && path.dirname(String(file)) === dir) {
+        foreign = String(file);
+        await writeFile(foreign, "foreign temporary", { flag: "wx" });
+      }
+      return realOpen(file, flags, ...args);
+    };
+    try {
+      await assert.rejects(() => store.listSourceSnapshots(CALLER, ns), (error) => error.code === "EEXIST");
+      assert.equal(await readFile(foreign, "utf-8"), "foreign temporary");
+      assert.deepEqual(await fsp.readdir(dir), [path.basename(foreign)]);
+    } finally { fsp.open = realOpen; }
+  });
+});
+
+for (const replacement of ["new inode", "foreign same-inode bytes"]) {
+  test(`EW03 namespace publication: failed link cleanup preserves ${replacement}`, async () => {
+    await withStore(async (store) => {
+      const realLink = fsp.link;
+      const failure = Object.assign(new Error("failed publication"), { code: "EIO" });
+      let temporary;
+      fsp.link = async (source) => {
+        temporary = source;
+        if (replacement === "new inode") await fsp.unlink(source);
+        await writeFile(source, "foreign replacement");
+        throw failure;
+      };
+      try {
+        await assert.rejects(() => store.listSourceSnapshots(CALLER, ns), (error) => error === failure);
+        assert.equal(await readFile(temporary, "utf-8"), "foreign replacement");
+        assert.deepEqual(await fsp.readdir(store._graphNamespaceDir(ns)), [path.basename(temporary)]);
+      } finally { fsp.link = realLink; }
+    });
+  });
+}
+
+for (const marker of ["{", JSON.stringify({ raw: "project:other-winner" })]) {
+  test(`EW03 namespace publication: an invalid concurrent winner is refused (${marker})`, async () => {
+    await withStore(async (store) => {
+      const dir = store._graphNamespaceDir(ns);
+      const final = path.join(dir, "namespace.json");
+      const realLink = fsp.link;
+      fsp.link = async (source, target) => {
+        await writeFile(final, marker, { flag: "wx" });
+        return realLink(source, target);
+      };
+      try {
+        await assert.rejects(() => store.listSourceSnapshots(CALLER, ns), AccessDeniedError);
+        assert.equal(await readFile(final, "utf-8"), marker);
+        assert.deepEqual(await fsp.readdir(dir), ["namespace.json"]);
+      } finally { fsp.link = realLink; }
+    });
+  });
+}
+
+for (const cleanup of ["read", "unlink", "close"]) {
+  test(`EW03 namespace publication: ${cleanup} cleanup error cannot replace the original storage error`, async () => {
+    await withStore(async (store) => {
+      const dir = store._graphNamespaceDir(ns);
+      const originals = { open: fsp.open, link: fsp.link, readFile: fsp.readFile, unlink: fsp.unlink };
+      const failure = Object.assign(new Error("primary link failure", { cause: "retained cause" }), { code: "EIO" });
+      const secondary = Object.assign(new Error("secondary cleanup failure"), { code: "EACCES" });
+      const originalJson = JSON.stringify(failure);
+      let linkFailed = false;
+      let closed = false;
+      fsp.link = async () => { linkFailed = true; throw failure; };
+      fsp.open = async (...args) => {
+        const handle = await originals.open(...args);
+        const close = handle.close.bind(handle);
+        handle.close = async () => {
+          await close(); closed = true;
+          if (cleanup === "close") throw secondary;
+        };
+        return handle;
+      };
+      for (const [method, kind] of [["readFile", "read"], ["unlink", "unlink"]]) {
+        fsp[method] = async (file, ...args) => {
+          if (linkFailed && cleanup === kind && path.dirname(String(file)) === dir) throw secondary;
+          return originals[method](file, ...args);
+        };
+      }
+      try {
+        await assert.rejects(() => store.listSourceSnapshots(CALLER, ns), (error) => error === failure);
+        assert.equal(closed, true);
+        assert.equal(failure.namespaceCleanupError, secondary);
+        assert.equal(failure.cause, "retained cause");
+        assert.equal(JSON.stringify(failure), originalJson);
+      } finally { Object.assign(fsp, originals); }
+    });
+  });
+}
+
+test("EW03 namespace publication: cleanup failure after successful publication remains observable", async () => {
+  await withStore(async (store) => {
+    const realUnlink = fsp.unlink;
+    const failure = Object.assign(new Error("temporary cleanup failed"), { code: "EACCES" });
+    fsp.unlink = async () => { throw failure; };
+    try {
+      await assert.rejects(() => store.listSourceSnapshots(CALLER, ns), (error) => error === failure);
+      const final = path.join(store._graphNamespaceDir(ns), "namespace.json");
+      assert.deepEqual(JSON.parse(await readFile(final, "utf-8")), { raw: TENANT });
+    } finally { fsp.unlink = realUnlink; }
+  });
+});
+
 test("EW03 R5 P1-2 isolation: B cannot read A's data even with sha256 dir knowledge", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "engram-r5-"));
   try {

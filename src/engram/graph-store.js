@@ -64,30 +64,72 @@ function graphNamespaceDir(root, namespace) {
 async function ensureNamespaceDir(root, namespace) {
   const dir = graphNamespaceDir(root, namespace);
   const nsFile = path.join(dir, "namespace.json");
-
-  try {
-    await fsp.mkdir(dir, { recursive: true });
-    // Try to create namespace.json with wx (exclusive write-once)
-    const fd = await fsp.open(nsFile, "wx");
-    try {
-      await fd.writeFile(JSON.stringify({ raw: namespace.raw }) + "\n", "utf-8");
-    } finally {
-      await fd.close();
+  const verify = (bytes) => {
+    let stored;
+    try { stored = JSON.parse(bytes?.toString("utf-8")); } catch { /* Refused below. */ }
+    if (!stored || stored.raw !== namespace.raw) {
+      throw new AccessDeniedError(
+        `Namespace directory collision: expected raw "${namespace.raw}" but found "${stored?.raw || "corrupt"}"`,
+      );
     }
-  } catch (err) {
-    if (err && err.code === "EEXIST") {
-      // File already exists — verify it matches
-      const stored = await readJSON(nsFile);
-      if (!stored || stored.raw !== namespace.raw) {
-        throw new AccessDeniedError(
-          `Namespace directory collision: expected raw "${namespace.raw}" but found "${stored?.raw || "corrupt"}"`,
-        );
-      }
-      return dir;
-    }
-    throw err;
+  };
+  // Reads of an existing store must not acquire a directory-write requirement.
+  // Only a genuinely absent marker enters initialization; corrupt bytes refuse.
+  const existing = await readRaw(nsFile);
+  if (existing !== null) {
+    verify(existing);
+    return dir;
   }
-
+  await fsp.mkdir(dir, { recursive: true });
+  const temporary = `${nsFile}.${process.pid}.${randomUUID()}.tmp`;
+  const bytes = Buffer.from(JSON.stringify({ raw: namespace.raw }) + "\n");
+  // This exclusive open belongs only to our unique temporary path. Its EEXIST
+  // must not be mistaken for another initializer publishing the final marker.
+  const handle = await fsp.open(temporary, "wx");
+  let identity;
+  let written = false;
+  let failure;
+  try {
+    identity = await handle.stat({ bigint: true });
+    await handle.writeFile(bytes);
+    written = true;
+    try {
+      // Publish complete bytes atomically without replacing an existing owner.
+      await fsp.link(temporary, nsFile);
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+      verify(await readRaw(nsFile));
+    }
+  } catch (error) {
+    failure = { error };
+    throw error;
+  } finally {
+    let cleanupFailure;
+    try {
+      const current = await fsp.lstat(temporary, { bigint: true });
+      // Keep the original handle open through removal, preventing inode reuse.
+      // A replacement or foreign same-inode content is not ours to delete.
+      if (current.isFile() && current.dev === identity?.dev && current.ino === identity?.ino) {
+        const content = await fsp.readFile(temporary);
+        const expected = written ? bytes : bytes.subarray(0, content.length);
+        const latest = await fsp.lstat(temporary, { bigint: true });
+        if (content.equals(expected) && latest.isFile()
+          && latest.dev === identity.dev && latest.ino === identity.ino) {
+          await fsp.unlink(temporary);
+        }
+      }
+    } catch (error) {
+      if (error?.code !== "ENOENT") cleanupFailure = { error };
+    }
+    try { await handle.close(); } catch (error) { cleanupFailure ??= { error }; }
+    if (cleanupFailure) {
+      if (!failure) throw cleanupFailure.error;
+      // Preserve the original storage failure and any existing cause/JSON shape.
+      try {
+        Object.defineProperty(failure.error, "namespaceCleanupError", { value: cleanupFailure.error, configurable: true });
+      } catch { /* A frozen or primitive original error still propagates. */ }
+    }
+  }
   return dir;
 }
 
