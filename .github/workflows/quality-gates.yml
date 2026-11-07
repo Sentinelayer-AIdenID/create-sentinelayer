@@ -386,7 +386,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node --import ./tests/setup-env.mjs --test --test-concurrency=2 --test-reporter=tap tests/unit.session-metadata-cache.test.mjs tests/unit.session-metadata-cache-concurrency.test.mjs | tee windows-session-metadata-cache.tap
+          node --import ./tests/setup-env.mjs --test --test-concurrency=2 --test-reporter=tap tests/unit.session-cache-lock.test.mjs tests/unit.session-metadata-cache.test.mjs tests/unit.session-metadata-cache-concurrency.test.mjs | tee windows-session-metadata-cache.tap
           grep -qx '# skipped 0' windows-session-metadata-cache.tap
 
       # These assert Windows program lookup and child-process isolation; they skip on other

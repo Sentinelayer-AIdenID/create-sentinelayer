@@ -399,6 +399,40 @@ test("a held cache lock times out without stealing ownership or failing the serv
 });
 
 for (const code of ["EPERM", "EACCES"]) {
+  test(`successful list and status preserve an immediate ${code} lock error on stderr`, async (t) => {
+    const targetPath = await fixture(t);
+    const context = await resolveSessionMetadataContext({ targetPath });
+    const lockPath = path.join(context.cacheDir, ".refresh.lock");
+    const originalOpen = fsp.open;
+    let attempts = 0;
+    t.mock.method(fsp, "open", async (filePath, ...args) => {
+      if (filePath === lockPath) {
+        attempts += 1;
+        throw Object.assign(new Error("fixture private path"), { code });
+      }
+      return originalOpen(filePath, ...args);
+    });
+    globalThis.fetch = async (url) => {
+      const session = { sessionId: ROOM, title: "Fresh despite cache permissions" };
+      return new URL(url).pathname === "/api/v1/sessions"
+        ? json({ sessions: [session], has_more: false }) : json({ session });
+    };
+    for (const args of [["list"], ["status", ROOM]]) {
+      const started = performance.now();
+      const result = await cli(targetPath, [...args, "--json"]);
+      assert.ok(performance.now() - started < 750, "permission failures must not wait for lock contention");
+      assert.equal(result.code, 0);
+      const payload = JSON.parse(result.output);
+      assert.equal(payload.ok, true);
+      assert.equal(payload.cache.ok, false);
+      assert.deepEqual(payload.cache.errors, [{ sessionId: null, code }]);
+      assert.match(result.output, /Fresh despite cache permissions/);
+      assert.match(result.stderr, new RegExp(`Server read succeeded.*${code}`));
+      assert.doesNotMatch(result.output + result.stderr, /CACHE_LOCK_TIMEOUT|fixture private path/);
+    }
+    assert.equal(attempts, 2, "each command should attempt its unwritable lock only once");
+  });
+
   test(`successful server reads survive ${code} cache failures and warn only on stderr`, async (t) => {
     const targetPath = await fixture(t);
     const context = await resolveSessionMetadataContext({ targetPath });
@@ -548,12 +582,17 @@ test("list and status preserve admission-only credentials and never retry with t
     assert.equal(JSON.parse(result.output).ok, false);
   }
   assert.deepEqual(requests, [`Bearer ${token}`, `Bearer ${token}`]);
-  globalThis.fetch = () => assert.fail("expired admission must not send any request or use the human credential");
+  requests = [];
+  globalThis.fetch = async (url, init) => {
+    requests.push({ url, authorization: new Headers(init.headers).get("authorization") });
+    return json({}, 403);
+  };
   for (const args of [["list"], ["status", ROOM]]) {
     const result = await admittedAgentScope.run({ ...admission, expiresAt: 0 }, () => cli(targetPath, [...args, "--json"]));
     assert.equal(result.code, 1);
     assert.equal(JSON.parse(result.output).ok, false);
   }
+  assert.deepEqual(requests, [], "expired admission must not send any request or use the human credential");
 });
 
 test("cached server lifecycle controls the offline view without rewriting local TTL", async (t) => {
