@@ -246,6 +246,139 @@ test("owner cleanup requires the full record even if the path still has the same
   assert.equal(await fsp.readFile(lock, "utf8"), "", "an empty record is not evidence of our token");
 });
 
+for (const code of ["ENOSPC", "EIO"]) {
+  for (const partial of [false, true]) {
+    test(`failed ${code} owner-record write releases ${partial ? "partial" : "empty"} bytes and permits the next acquisition`, async (t) => {
+      const { context, lock } = await fixture(t);
+      if (partial) t.mock.method(os, "hostname", () => "cache-host-\u2603");
+      const open = fsp.open;
+      const unlink = fsp.unlink;
+      const failure = Object.assign(new Error("owner record could not be written"), { code });
+      let failedHandle;
+      let failedBytes;
+      let cleaned = false;
+      let operations = 0;
+      t.mock.method(fsp, "open", async (filePath, ...args) => {
+        const handle = await open(filePath, ...args);
+        if (filePath === lock && args[0] === "wx" && !failedHandle) {
+          failedHandle = handle;
+          const writeFile = handle.writeFile.bind(handle);
+          t.mock.method(handle, "writeFile", async (text) => {
+            const bytes = Buffer.from(text);
+            // Include an incomplete UTF-8 code point: ownership compares bytes,
+            // not a lossy decoded prefix of a partially written hostname.
+            const prefixLength = partial ? bytes.indexOf(Buffer.from("\u2603")) + 1 : 0;
+            if (partial) assert.ok(prefixLength > 0);
+            failedBytes = bytes.subarray(0, prefixLength);
+            if (partial) await writeFile(failedBytes);
+            throw failure;
+          });
+        }
+        return handle;
+      });
+      t.mock.method(fsp, "unlink", async (filePath, ...args) => {
+        if (filePath === lock && !cleaned) {
+          assert.ok(failedHandle.fd >= 0, "failed-write cleanup must retain its original handle");
+          assert.deepEqual(await fsp.readFile(lock), failedBytes);
+          cleaned = true;
+        }
+        return unlink(filePath, ...args);
+      });
+      await assert.rejects(withCacheWriteLock(context, async () => { operations += 1; }, 100), (error) => error === failure);
+      assert.equal(operations, 0);
+      assert.equal(cleaned, true);
+      assert.equal(failedHandle.fd, -1);
+      assert.deepEqual(await fsp.readdir(context.cacheDir), []);
+      assert.equal(await withCacheWriteLock(context, async () => "next owner", 100), "next owner");
+      assert.deepEqual(await fsp.readdir(context.cacheDir), []);
+    });
+  }
+}
+
+for (const replacement of [false, true]) {
+  test(`failed owner-record write preserves ${replacement ? "an empty replacement inode" : "non-prefix bytes in its inode"}`, async (t) => {
+    const { context, lock } = await fixture(t);
+    const open = fsp.open;
+    const failure = Object.assign(new Error("owner record write failed"), { code: "EIO" });
+    const remaining = replacement ? "" : "another record";
+    t.mock.method(fsp, "open", async (filePath, ...args) => {
+      const handle = await open(filePath, ...args);
+      if (filePath === lock && args[0] === "wx") {
+        const writeFile = handle.writeFile.bind(handle);
+        t.mock.method(handle, "writeFile", async () => {
+          if (replacement) {
+            await fsp.unlink(lock);
+            await fsp.writeFile(lock, remaining, { flag: "wx", mode: 0o600 });
+          } else {
+            await writeFile(remaining);
+          }
+          throw failure;
+        });
+      }
+      return handle;
+    });
+    await assert.rejects(withCacheWriteLock(context, async () => assert.fail("owner record write failed"), 100), (error) => error === failure);
+    assert.equal(await fsp.readFile(lock, "utf8"), remaining);
+  });
+}
+
+for (const [stage, writeFails, frozen] of [
+  ...["read", "unlink", "close"].flatMap((stage) => [[stage, false, false], [stage, true, false]]),
+  ["unlink", true, true],
+]) {
+  test(`${stage} cleanup failure ${writeFails ? "preserves the original write error" : "propagates after a completed write"}${frozen ? " when frozen" : ""}`, async (t) => {
+    const { context, lock } = await fixture(t);
+    const cause = new Error("original storage cause");
+    const failure = Object.assign(new Error("owner record write failed"), { code: stage === "unlink" ? "ENOSPC" : "EIO", cause });
+    if (frozen) Object.freeze(failure);
+    const originalJson = JSON.stringify(failure);
+    const cleanupFailure = Object.assign(new Error("cleanup failed"), { code: stage === "unlink" ? "EACCES" : "EIO" });
+    const open = fsp.open;
+    const readFile = fsp.readFile;
+    const unlink = fsp.unlink;
+    let handle;
+    let closeAttempts = 0;
+    let cleanupAttempts = 0;
+    let operations = 0;
+    t.mock.method(fsp, "open", async (filePath, ...args) => {
+      const opened = await open(filePath, ...args);
+      if (filePath === lock && args[0] === "wx") {
+        handle = opened;
+        if (writeFails) t.mock.method(handle, "writeFile", async () => { throw failure; });
+        const close = handle.close.bind(handle);
+        t.mock.method(handle, "close", async () => {
+          closeAttempts += 1;
+          await close();
+          if (stage === "close") { cleanupAttempts += 1; throw cleanupFailure; }
+        });
+      }
+      return opened;
+    });
+    t.mock.method(fsp, "readFile", async (filePath, ...args) => {
+      if (filePath === lock && stage === "read") { cleanupAttempts += 1; throw cleanupFailure; }
+      return readFile(filePath, ...args);
+    });
+    t.mock.method(fsp, "unlink", async (filePath, ...args) => {
+      if (filePath === lock && stage === "unlink") { cleanupAttempts += 1; throw cleanupFailure; }
+      return unlink(filePath, ...args);
+    });
+    await assert.rejects(withCacheWriteLock(context, async () => { operations += 1; }, 100),
+      (error) => error === (writeFails ? failure : cleanupFailure));
+    assert.equal(operations, writeFails ? 0 : 1);
+    assert.equal(closeAttempts, 1);
+    assert.equal(handle.fd, -1);
+    assert.equal(cleanupAttempts, stage === "unlink" ? 3 : 1);
+    assert.equal(failure.cause, cause);
+    assert.equal(JSON.stringify(failure), originalJson);
+    if (writeFails && !frozen) {
+      assert.equal(failure.cacheCleanupError, cleanupFailure);
+      assert.equal(Object.getOwnPropertyDescriptor(failure, "cacheCleanupError").enumerable, false);
+    } else {
+      assert.equal(Object.hasOwn(failure, "cacheCleanupError"), false);
+    }
+  });
+}
+
 test("a recovery guard with a different token in its valid UUID filename is not reaped", async (t) => {
   const { context, lock, guard } = await fixture(t);
   mockDeadPid(t);
@@ -281,34 +414,36 @@ for (const [name, fields] of [
 }
 
 for (const unavailable of ["boot read denied", "namespace read denied", "malformed boot", "unsupported platform"]) {
-  test(`${unavailable} still permits ordinary locking but never stale-owner recovery`, async (t) => {
-    const { context, lock } = await fixture(t);
-    const readFile = fsp.readFile;
-    const stat = fsp.stat;
-    if (unavailable === "unsupported platform") t.mock.method(os, "platform", () => "win32");
-    if (unavailable === "boot read denied" || unavailable === "malformed boot") {
-      t.mock.method(fsp, "readFile", (filePath, ...args) => {
-        if (filePath !== "/proc/sys/kernel/random/boot_id") return readFile(filePath, ...args);
-        return unavailable === "malformed boot" ? Promise.resolve("not-a-boot-id")
-          : Promise.reject(Object.assign(new Error("identity denied"), { code: "EACCES" }));
-      });
-    }
-    if (unavailable === "namespace read denied") t.mock.method(fsp, "stat", (filePath, ...args) => filePath === "/proc/self/ns/pid"
-      ? Promise.reject(Object.assign(new Error("identity denied"), { code: "EACCES" })) : stat(filePath, ...args));
-    await withCacheWriteLock(context, async () => {
-      const record = JSON.parse(await fsp.readFile(lock, "utf8"));
-      assert.equal(record.bootId, null);
-      assert.equal(record.pidNamespaceId, null);
-    }, 100);
-    assert.deepEqual(await fsp.readdir(context.cacheDir), []);
-    const text = JSON.stringify(owner());
-    await fsp.writeFile(lock, text);
-    let probes = 0;
-    t.mock.method(process, "kill", () => { probes += 1; throw Object.assign(new Error("not visible here"), { code: "ESRCH" }); });
-    await assert.rejects(withCacheWriteLock(context, async () => assert.fail("local identity is unavailable"), 75), { code: "CACHE_LOCK_TIMEOUT" });
-    assert.equal(probes, 0);
-    assert.equal(await fsp.readFile(lock, "utf8"), text);
-  });
+  for (const [identityName, identity] of [["known", SCOPE], ["null", { bootId: null, pidNamespaceId: null }]]) {
+    test(`${unavailable} still permits ordinary locking but never recovery of a ${identityName}-identity owner`, async (t) => {
+      const { context, lock } = await fixture(t);
+      const readFile = fsp.readFile;
+      const stat = fsp.stat;
+      if (unavailable === "unsupported platform") t.mock.method(os, "platform", () => "win32");
+      if (unavailable === "boot read denied" || unavailable === "malformed boot") {
+        t.mock.method(fsp, "readFile", (filePath, ...args) => {
+          if (filePath !== "/proc/sys/kernel/random/boot_id") return readFile(filePath, ...args);
+          return unavailable === "malformed boot" ? Promise.resolve("not-a-boot-id")
+            : Promise.reject(Object.assign(new Error("identity denied"), { code: "EACCES" }));
+        });
+      }
+      if (unavailable === "namespace read denied") t.mock.method(fsp, "stat", (filePath, ...args) => filePath === "/proc/self/ns/pid"
+        ? Promise.reject(Object.assign(new Error("identity denied"), { code: "EACCES" })) : stat(filePath, ...args));
+      await withCacheWriteLock(context, async () => {
+        const record = JSON.parse(await fsp.readFile(lock, "utf8"));
+        assert.equal(record.bootId, null);
+        assert.equal(record.pidNamespaceId, null);
+      }, 100);
+      assert.deepEqual(await fsp.readdir(context.cacheDir), []);
+      const text = JSON.stringify({ ...owner(), ...identity });
+      await fsp.writeFile(lock, text);
+      let probes = 0;
+      t.mock.method(process, "kill", () => { probes += 1; throw Object.assign(new Error("not visible here"), { code: "ESRCH" }); });
+      await assert.rejects(withCacheWriteLock(context, async () => assert.fail("local identity is unavailable"), 75), { code: "CACHE_LOCK_TIMEOUT" });
+      assert.equal(probes, 0);
+      assert.equal(await fsp.readFile(lock, "utf8"), text);
+    });
+  }
 }
 
 test("an invalid negative process-group PID is rejected before probing on every platform", async (t) => {
